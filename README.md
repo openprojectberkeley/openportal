@@ -9,11 +9,9 @@
 
 <p align="center">
   <a href="#features"><strong>Features</strong></a> ·
-  <a href="#demo"><strong>Demo</strong></a> ·
-  <a href="#deploy-to-vercel"><strong>Deploy to Vercel</strong></a> ·
-  <a href="#clone-and-run-locally"><strong>Clone and run locally</strong></a> ·
+  <a href="#deploy"><strong>Deploy</strong></a> ·
+  <a href="#clone-and-run-locally"><strong>Run locally</strong></a> ·
   <a href="#feedback-and-issues"><strong>Feedback and issues</strong></a>
-  <a href="#more-supabase-examples"><strong>More Examples</strong></a>
 </p>
 <br/>
 
@@ -32,73 +30,75 @@
 - Password-based authentication block installed via the [Supabase UI Library](https://supabase.com/ui/docs/nextjs/password-based-auth)
 - Styling with [Tailwind CSS](https://tailwindcss.com)
 - Components with [shadcn/ui](https://ui.shadcn.com/)
-- Optional deployment with [Supabase Vercel Integration and Vercel deploy](#deploy-your-own)
-  - Environment variables automatically assigned to Vercel project
+- Deploys to GitHub Pages at [portal.openprojectberkeley.com](https://portal.openprojectberkeley.com)
 
-## Demo
+## Deploy
 
-You can view a fully working demo at [demo-nextjs-with-supabase.vercel.app](https://demo-nextjs-with-supabase.vercel.app/).
+The site deploys automatically via GitHub Actions when you push to `main`.
 
-## Deploy to Vercel
+**Live site:** [portal.openprojectberkeley.com](https://portal.openprojectberkeley.com)
 
-Vercel deployment will guide you through creating a Supabase account and project.
+### One-time setup
 
-After installation of the Supabase integration, all relevant environment variables will be assigned to the project so the deployment is fully functioning.
+1. **Enable GitHub Pages** — in the repo go to **Settings → Pages** and set **Source** to **GitHub Actions**.
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fvercel%2Fnext.js%2Ftree%2Fcanary%2Fexamples%2Fwith-supabase&project-name=nextjs-with-supabase&repository-name=nextjs-with-supabase&demo-title=nextjs-with-supabase&demo-description=This+starter+configures+Supabase+Auth+to+use+cookies%2C+making+the+user%27s+session+available+throughout+the+entire+Next.js+app+-+Client+Components%2C+Server+Components%2C+Route+Handlers%2C+Server+Actions+and+Middleware.&demo-url=https%3A%2F%2Fdemo-nextjs-with-supabase.vercel.app%2F&external-id=https%3A%2F%2Fgithub.com%2Fvercel%2Fnext.js%2Ftree%2Fcanary%2Fexamples%2Fwith-supabase&demo-image=https%3A%2F%2Fdemo-nextjs-with-supabase.vercel.app%2Fopengraph-image.png)
+2. **Add secrets** — go to **Settings → Secrets and variables → Actions** and add:
+   - `NEXT_PUBLIC_SUPABASE_URL`
+   - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
 
-The above will also clone the Starter kit to your GitHub, you can clone that locally and develop locally.
+   Use the same values as your local `.env` file.
 
-If you wish to just develop locally and not deploy to Vercel, [follow the steps below](#clone-and-run-locally).
+3. **Configure the custom domain** — in **Settings → Pages → Custom domain**, enter:
+
+   ```
+   portal.openprojectberkeley.com
+   ```
+
+   DNS should have a CNAME record pointing `portal` to `openprojectberkeley.github.io`. The domain is also saved in `public/CNAME` so it persists across deploys. Enable **Enforce HTTPS** once GitHub offers it.
+
+4. **Configure Supabase** — in your [Supabase project](https://supabase.com/dashboard) go to **Authentication → URL configuration** and set:
+   - **Site URL:** `https://portal.openprojectberkeley.com`
+   - **Redirect URL:** `https://portal.openprojectberkeley.com/auth/confirm`
+
+### Deploy a new version
+
+Commit your changes and push to `main`:
+
+```bash
+git push origin main
+```
+
+GitHub Actions will build the static site and publish it. You can also trigger a deploy manually from the **Actions** tab → **Deploy to GitHub Pages** → **Run workflow**.
+
+### Test the production build locally
+
+```bash
+npm run build:pages
+```
+
+This writes a static site to the `out/` folder using the same settings as the GitHub Pages deploy.
 
 ## Clone and run locally
 
-1. You'll first need a Supabase project which can be made [via the Supabase dashboard](https://database.new)
+1. Create a [Supabase project](https://database.new) if you don't have one.
 
-2. Create a Next.js app using the Supabase Starter template npx command
+2. Copy `.env.example` to `.env` and fill in your Supabase credentials:
 
-   ```bash
-   npx create-next-app --example with-supabase with-supabase-app
+   ```env
+   NEXT_PUBLIC_SUPABASE_URL=your-project-url
+   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your-publishable-or-anon-key
    ```
 
-   ```bash
-   yarn create next-app --example with-supabase with-supabase-app
-   ```
+   Both values are in [your project's API settings](https://supabase.com/dashboard/project/_?showConnect=true).
+
+3. Install dependencies and start the dev server:
 
    ```bash
-   pnpm create next-app --example with-supabase with-supabase-app
-   ```
-
-3. Use `cd` to change into the app's directory
-
-   ```bash
-   cd with-supabase-app
-   ```
-
-4. Rename `.env.example` to `.env.local` and update the following:
-
-  ```env
-  NEXT_PUBLIC_SUPABASE_URL=[INSERT SUPABASE PROJECT URL]
-  NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=[INSERT SUPABASE PROJECT API PUBLISHABLE OR ANON KEY]
-  ```
-  > [!NOTE]
-  > This example uses `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, which refers to Supabase's new **publishable** key format.
-  > Both legacy **anon** keys and new **publishable** keys can be used with this variable name during the transition period. Supabase's dashboard may show `NEXT_PUBLIC_SUPABASE_ANON_KEY`; its value can be used in this example.
-  > See the [full announcement](https://github.com/orgs/supabase/discussions/29260) for more information.
-
-  Both `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` can be found in [your Supabase project's API settings](https://supabase.com/dashboard/project/_?showConnect=true)
-
-5. You can now run the Next.js local development server:
-
-   ```bash
+   npm install
    npm run dev
    ```
 
-   The starter kit should now be running on [localhost:3000](http://localhost:3000/).
-
-6. This template comes with the default shadcn/ui style initialized. If you instead want other ui.shadcn styles, delete `components.json` and [re-install shadcn/ui](https://ui.shadcn.com/docs/installation/next)
-
-> Check out [the docs for Local Development](https://supabase.com/docs/guides/getting-started/local-development) to also run Supabase locally.
+   The app runs at [localhost:3000](http://localhost:3000/).
 
 ## Feedback and issues
 
