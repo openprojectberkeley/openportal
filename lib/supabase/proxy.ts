@@ -1,20 +1,24 @@
+import {
+  BERKELEY_EMAIL_REQUIRED_MESSAGE,
+  isBerkeleyEmail,
+} from "@/lib/berkeley-email";
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { hasEnvVars } from "../utils";
+
+function isAuthCallbackPath(pathname: string) {
+  return pathname === "/auth/callback" || pathname === "/auth/callback/";
+}
 
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
     request,
   });
 
-  // If the env vars are not set, skip proxy check. You can remove this
-  // once you setup the project.
   if (!hasEnvVars) {
     return supabaseResponse;
   }
 
-  // With Fluid compute, don't put this client in a global environment
-  // variable. Always create a new one on each request.
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
@@ -38,6 +42,36 @@ export async function updateSession(request: NextRequest) {
     },
   );
 
+  // OAuth callback: exchange the code on the server so the PKCE verifier
+  // cookie (set when sign-in started) is read from the request cookies.
+  if (isAuthCallbackPath(request.nextUrl.pathname)) {
+    const code = request.nextUrl.searchParams.get("code");
+    if (code) {
+      const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+      const redirectUrl = request.nextUrl.clone();
+      redirectUrl.search = "";
+
+      if (error) {
+        redirectUrl.pathname = "/auth/error";
+        redirectUrl.searchParams.set("error", error.message);
+      } else if (!isBerkeleyEmail(data.session?.user.email)) {
+        await supabase.auth.signOut();
+        redirectUrl.pathname = "/auth/error";
+        redirectUrl.searchParams.set("error", BERKELEY_EMAIL_REQUIRED_MESSAGE);
+      } else {
+        redirectUrl.pathname = "/protected";
+      }
+
+      const redirectResponse = NextResponse.redirect(redirectUrl);
+      supabaseResponse.cookies.getAll().forEach((cookie) => {
+        redirectResponse.cookies.set(cookie);
+      });
+      return redirectResponse;
+    }
+
+    return supabaseResponse;
+  }
+
   // Do not run code between createServerClient and
   // supabase.auth.getClaims(). A simple mistake could make it very hard to debug
   // issues with users being randomly logged out.
@@ -53,24 +87,10 @@ export async function updateSession(request: NextRequest) {
     !request.nextUrl.pathname.startsWith("/login") &&
     !request.nextUrl.pathname.startsWith("/auth")
   ) {
-    // no user, potentially respond by redirecting the user to the login page
     const url = request.nextUrl.clone();
     url.pathname = "/auth/login";
     return NextResponse.redirect(url);
   }
-
-  // IMPORTANT: You *must* return the supabaseResponse object as it is.
-  // If you're creating a new response object with NextResponse.next() make sure to:
-  // 1. Pass the request in it, like so:
-  //    const myNewResponse = NextResponse.next({ request })
-  // 2. Copy over the cookies, like so:
-  //    myNewResponse.cookies.setAll(supabaseResponse.cookies.getAll())
-  // 3. Change the myNewResponse object to fit your needs, but avoid changing
-  //    the cookies!
-  // 4. Finally:
-  //    return myNewResponse
-  // If this is not done, you may be causing the browser and server to go out
-  // of sync and terminate the user's session prematurely!
 
   return supabaseResponse;
 }
