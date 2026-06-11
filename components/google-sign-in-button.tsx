@@ -20,6 +20,7 @@ export function GoogleSignInButton({ disabled }: { disabled?: boolean }) {
         redirectTo: getAuthCallbackUrl(),
         queryParams: {
           hd: "berkeley.edu",
+          prompt: "select_account",
         },
       },
     });

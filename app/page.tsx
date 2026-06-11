@@ -1,12 +1,44 @@
+"use client";
+
 import { EnvVarWarning } from "@/components/env-var-warning";
 import { AuthButton } from "@/components/auth-button";
 import { Hero } from "@/components/hero";
 import { ThemeSwitcher } from "@/components/theme-switcher";
+import { createClient } from "@/lib/supabase/client";
 import { hasEnvVars } from "@/lib/utils";
 import Link from "next/link";
-import { Suspense } from "react";
+import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
 
 export default function Home() {
+  const router = useRouter();
+  const [isCheckingAuth, setIsCheckingAuth] = useState(Boolean(hasEnvVars));
+
+  useEffect(() => {
+    if (!hasEnvVars) {
+      return;
+    }
+
+    const supabase = createClient();
+
+    supabase.auth.getClaims().then(({ data }) => {
+      if (!data?.claims) {
+        router.replace("/auth/login");
+        return;
+      }
+
+      setIsCheckingAuth(false);
+    });
+  }, [router]);
+
+  if (isCheckingAuth) {
+    return (
+      <main className="min-h-screen flex items-center justify-center">
+        <p className="text-sm text-muted-foreground">Loading...</p>
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen flex flex-col items-center">
       <div className="flex-1 w-full flex flex-col gap-20 items-center">
