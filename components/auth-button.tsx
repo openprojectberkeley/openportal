@@ -4,34 +4,24 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Button } from "./ui/button";
 import { createClient } from "@/lib/supabase/client";
+import {
+  type AccountInfo,
+  subscribeToAccountInfo,
+} from "@/lib/supabase/account";
 import { LogoutButton } from "./logout-button";
 
-type UserClaims = {
-  email?: string;
-};
-
 export function AuthButton() {
-  const [user, setUser] = useState<UserClaims | null>(null);
+  const [user, setUser] = useState<AccountInfo | null>(null);
+  const firstName = user?.name?.split(" ")[0];
 
   useEffect(() => {
     const supabase = createClient();
-
-    supabase.auth.getClaims().then(({ data }) => {
-      setUser(data?.claims ?? null);
-    });
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ? { email: session.user.email } : null);
-    });
-
-    return () => subscription.unsubscribe();
+    return subscribeToAccountInfo(supabase, setUser);
   }, []);
 
   return user ? (
     <div className="flex items-center gap-4">
-      Hey, {user.email}!
+      Hey, {firstName}!
       <LogoutButton />
     </div>
   ) : (

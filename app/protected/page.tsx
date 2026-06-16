@@ -1,5 +1,6 @@
 "use client";
 
+import { getAuthClaims } from "@/lib/supabase/account";
 import { createClient } from "@/lib/supabase/client";
 import { InfoIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -12,13 +13,13 @@ export default function ProtectedPage() {
   useEffect(() => {
     const supabase = createClient();
 
-    supabase.auth.getClaims().then(({ data, error }) => {
-      if (error || !data?.claims) {
+    getAuthClaims(supabase).then((claims) => {
+      if (!claims) {
         router.replace("/auth/login");
         return;
       }
 
-      setClaims(JSON.stringify(data.claims, null, 2));
+      setClaims(JSON.stringify(claims, null, 2));
     });
   }, [router]);
 

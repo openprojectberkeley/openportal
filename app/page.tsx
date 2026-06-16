@@ -4,6 +4,7 @@ import { EnvVarWarning } from "@/components/env-var-warning";
 import { AuthButton } from "@/components/auth-button";
 import { Hero } from "@/components/hero";
 import { ThemeSwitcher } from "@/components/theme-switcher";
+import { getAuthClaims } from "@/lib/supabase/account";
 import { createClient } from "@/lib/supabase/client";
 import { hasEnvVars } from "@/lib/utils";
 import Link from "next/link";
@@ -21,8 +22,8 @@ export default function Home() {
 
     const supabase = createClient();
 
-    supabase.auth.getClaims().then(({ data }) => {
-      if (!data?.claims) {
+    getAuthClaims(supabase).then((claims) => {
+      if (!claims) {
         router.replace("/auth/login");
         return;
       }

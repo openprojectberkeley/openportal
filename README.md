@@ -15,7 +15,7 @@
 </p>
 <br/>
 
-# someone better close this portal or things might get messy
+# someone better close this portal
 
 ## Features
 
