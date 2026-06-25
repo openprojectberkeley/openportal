@@ -9,15 +9,15 @@ export function PortalButton() {
 
   useEffect(() => {
     const supabase = createClient();
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (!session) {
+    supabase.auth.getUser().then(async ({ data: { user } }) => {
+      if (!user) {
         setDestination("/apply");
         return;
       }
       const { data: member } = await supabase
         .from("members")
         .select("active")
-        .eq("user_id", session.user.id)
+        .eq("user_id", user.id)
         .maybeSingle();
       setDestination(member?.active ? "/protected" : "/apply");
     });

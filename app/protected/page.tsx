@@ -12,8 +12,8 @@ export default function ProtectedPage() {
     const supabase = createClient();
 
     const load = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
         router.replace("/auth/login");
         return;
       }
@@ -21,7 +21,7 @@ export default function ProtectedPage() {
       const { data: member } = await supabase
         .from("members")
         .select("preferred_firstname, active")
-        .eq("user_id", session.user.id)
+        .eq("user_id", user.id)
         .maybeSingle();
 
       if (!member) {

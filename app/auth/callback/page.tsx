@@ -16,11 +16,10 @@ export default function AuthCallbackPage() {
     const supabase = createClient();
 
     const finishSignIn = async () => {
-      // detectSessionInUrl exchanges the OAuth code automatically when present.
       const {
-        data: { session },
+        data: { user },
         error,
-      } = await supabase.auth.getSession();
+      } = await supabase.auth.getUser();
 
       if (error) {
         router.replace(
@@ -29,8 +28,8 @@ export default function AuthCallbackPage() {
         return;
       }
 
-      if (session) {
-        if (!isBerkeleyEmail(session.user.email)) {
+      if (user) {
+        if (!isBerkeleyEmail(user.email)) {
           await supabase.auth.signOut();
           router.replace(
             `/auth/error?error=${encodeURIComponent(BERKELEY_EMAIL_REQUIRED_MESSAGE)}`,
@@ -41,7 +40,7 @@ export default function AuthCallbackPage() {
         const { data: member } = await supabase
           .from("members")
           .select("active")
-          .eq("user_id", session.user.id)
+          .eq("user_id", user.id)
           .maybeSingle();
 
         if (!member) {

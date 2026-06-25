@@ -16,6 +16,7 @@ type MemberInfo = {
   userId: string;
   preferredFirstname: string;
   lastname: string;
+  isExec: boolean;
 };
 
 export function AppNavbar() {
@@ -25,18 +26,30 @@ export function AppNavbar() {
 
   useEffect(() => {
     const supabase = createClient();
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (!session) return;
-      const { data } = await supabase
-        .from("members")
-        .select("preferred_firstname, lastname")
-        .eq("user_id", session.user.id)
-        .maybeSingle();
-      if (data) {
+    supabase.auth.getUser().then(async ({ data: { user } }) => {
+      if (!user) return;
+
+      const [{ data: memberData }, { data: roleData }] = await Promise.all([
+        supabase
+          .from("members")
+          .select("preferred_firstname, lastname")
+          .eq("user_id", user.id)
+          .maybeSingle(),
+        supabase
+          .from("members_roles")
+          .select("roles(access_level)")
+          .eq("user_id", user.id),
+      ]);
+
+      if (memberData) {
+        const isExec = (roleData ?? []).some(
+          (r: any) => r.roles?.access_level === "exec",
+        );
         setMember({
-          userId: session.user.id,
-          preferredFirstname: data.preferred_firstname ?? "",
-          lastname: data.lastname ?? "",
+          userId: user.id,
+          preferredFirstname: memberData.preferred_firstname ?? "",
+          lastname: memberData.lastname ?? "",
+          isExec,
         });
       }
     });
@@ -67,6 +80,11 @@ export function AppNavbar() {
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
+                {member.isExec && (
+                  <DropdownMenuItem onSelect={() => router.push("/admin")}>
+                    Admin
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuItem onSelect={() => setProfileOpen(true)}>
                   Profile
                 </DropdownMenuItem>

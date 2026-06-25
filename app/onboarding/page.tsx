@@ -14,12 +14,12 @@ export default function OnboardingPage() {
 
   useEffect(() => {
     const supabase = createClient();
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!session) {
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user) {
         router.replace("/auth/login");
         return;
       }
-      setUserId(session.user.id);
+      setUserId(user.id);
     });
   }, [router]);
 
