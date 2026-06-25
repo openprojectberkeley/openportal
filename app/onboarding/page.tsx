@@ -45,7 +45,7 @@ export default function OnboardingPage() {
       return;
     }
 
-    router.replace("/protected");
+    router.replace("/apply");
   };
 
   return (

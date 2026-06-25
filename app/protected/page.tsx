@@ -20,12 +20,17 @@ export default function ProtectedPage() {
 
       const { data: member } = await supabase
         .from("members")
-        .select("preferred_firstname")
+        .select("preferred_firstname, active")
         .eq("user_id", session.user.id)
         .maybeSingle();
 
       if (!member) {
         router.replace("/onboarding");
+        return;
+      }
+
+      if (!member.active) {
+        router.replace("/apply");
         return;
       }
 

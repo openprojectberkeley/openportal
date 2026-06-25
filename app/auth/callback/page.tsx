@@ -40,11 +40,17 @@ export default function AuthCallbackPage() {
 
         const { data: member } = await supabase
           .from("members")
-          .select("user_id")
+          .select("active")
           .eq("user_id", session.user.id)
           .maybeSingle();
 
-        router.replace(member ? "/protected" : "/onboarding");
+        if (!member) {
+          router.replace("/onboarding");
+        } else if (member.active) {
+          router.replace("/protected");
+        } else {
+          router.replace("/apply");
+        }
         return;
       }
 
