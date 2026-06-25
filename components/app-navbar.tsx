@@ -17,6 +17,7 @@ type MemberInfo = {
   preferredFirstname: string;
   lastname: string;
   isExec: boolean;
+  isMember: boolean;
 };
 
 export function AppNavbar() {
@@ -32,7 +33,7 @@ export function AppNavbar() {
       const [{ data: memberData }, { data: roleData }] = await Promise.all([
         supabase
           .from("members")
-          .select("preferred_firstname, lastname")
+          .select("preferred_firstname, lastname, active")
           .eq("user_id", user.id)
           .maybeSingle(),
         supabase
@@ -50,6 +51,7 @@ export function AppNavbar() {
           preferredFirstname: memberData.preferred_firstname ?? "",
           lastname: memberData.lastname ?? "",
           isExec,
+          isMember: !!memberData.active,
         });
       }
     });
@@ -83,6 +85,11 @@ export function AppNavbar() {
                 {member.isExec && (
                   <DropdownMenuItem onSelect={() => router.push("/admin")}>
                     Admin
+                  </DropdownMenuItem>
+                )}
+                {member.isMember && (
+                  <DropdownMenuItem onSelect={() => router.push("/protected")}>
+                    Dashboard
                   </DropdownMenuItem>
                 )}
                 <DropdownMenuItem onSelect={() => setProfileOpen(true)}>
