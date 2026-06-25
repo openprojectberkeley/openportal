@@ -1,43 +1,45 @@
 "use client";
 
-import { getAuthClaims } from "@/lib/supabase/account";
 import { createClient } from "@/lib/supabase/client";
-import { InfoIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 export default function ProtectedPage() {
   const router = useRouter();
-  const [claims, setClaims] = useState<string | null>(null);
+  const [firstName, setFirstName] = useState<string | null>(null);
 
   useEffect(() => {
     const supabase = createClient();
 
-    getAuthClaims(supabase).then((claims) => {
-      if (!claims) {
+    const load = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
         router.replace("/auth/login");
         return;
       }
 
-      setClaims(JSON.stringify(claims, null, 2));
-    });
+      const { data: member } = await supabase
+        .from("members")
+        .select("preferred_firstname")
+        .eq("user_id", session.user.id)
+        .maybeSingle();
+
+      if (!member) {
+        router.replace("/onboarding");
+        return;
+      }
+
+      setFirstName(member.preferred_firstname);
+    };
+
+    load();
   }, [router]);
 
   return (
     <div className="flex-1 w-full flex flex-col gap-12">
-      <div className="w-full">
-        <div className="bg-accent text-sm p-3 px-5 rounded-md text-foreground flex gap-3 items-center">
-          <InfoIcon size="16" strokeWidth={2} />
-          This is a protected page that you can only see as an authenticated
-          user
-        </div>
-      </div>
-      <div className="flex flex-col gap-2 items-start w-full">
-        <h2 className="font-bold text-2xl mb-4">Your user details</h2>
-        <pre className="text-xs font-mono p-3 rounded border w-full overflow-auto">
-          {claims ?? "Loading..."}
-        </pre>
-      </div>
+      <h1 className="text-3xl font-bold">
+        {firstName ? `Hi ${firstName}` : "Loading..."}
+      </h1>
     </div>
   );
 }

@@ -38,7 +38,13 @@ export default function AuthCallbackPage() {
           return;
         }
 
-        router.replace("/protected");
+        const { data: member } = await supabase
+          .from("members")
+          .select("user_id")
+          .eq("user_id", session.user.id)
+          .maybeSingle();
+
+        router.replace(member ? "/protected" : "/onboarding");
         return;
       }
 
