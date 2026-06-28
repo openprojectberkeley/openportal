@@ -95,6 +95,9 @@ export function AppNavbar() {
                 <DropdownMenuItem onSelect={() => setProfileOpen(true)}>
                   Profile
                 </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => router.push("/apply")}>
+                  Application
+                </DropdownMenuItem>
                 <DropdownMenuItem onSelect={logout} className="text-red-500 focus:text-red-500">
                   Logout
                 </DropdownMenuItem>

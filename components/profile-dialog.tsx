@@ -16,6 +16,7 @@ type ProfileFields = {
   phone: string;
   linkedin: string;
   github: string;
+  interests: string;
 };
 
 const EMPTY: ProfileFields = {
@@ -26,6 +27,7 @@ const EMPTY: ProfileFields = {
   phone: "",
   linkedin: "",
   github: "",
+  interests: "",
 };
 
 const LABELS: Record<keyof ProfileFields, string> = {
@@ -36,6 +38,7 @@ const LABELS: Record<keyof ProfileFields, string> = {
   phone: "Phone",
   linkedin: "LinkedIn",
   github: "GitHub",
+  interests: "Interests",
 };
 
 type Props = {
@@ -59,7 +62,7 @@ export function ProfileDialog({ open, onOpenChange, userId, onSave }: Props) {
     const supabase = createClient();
     supabase
       .from("members")
-      .select("preferred_firstname, lastname, major, grad_year, phone, linkedin, github")
+      .select("preferred_firstname, lastname, major, grad_year, phone, linkedin, github, interests")
       .eq("user_id", userId)
       .maybeSingle()
       .then(({ data }) => {
@@ -72,6 +75,7 @@ export function ProfileDialog({ open, onOpenChange, userId, onSave }: Props) {
             phone: data.phone ?? "",
             linkedin: data.linkedin ?? "",
             github: data.github ?? "",
+            interests: data.interests ?? "",
           });
         }
       });
@@ -114,25 +118,37 @@ export function ProfileDialog({ open, onOpenChange, userId, onSave }: Props) {
       />
       <div
         ref={panelRef}
-        className="relative z-10 w-full max-w-lg rounded-lg border bg-background p-6 shadow-lg"
+        className="relative z-10 w-full max-w-lg rounded-lg border bg-background shadow-lg flex flex-col max-h-[90vh]"
       >
-        <button
-          onClick={() => onOpenChange(false)}
-          className="absolute right-4 top-4 opacity-70 hover:opacity-100 transition-opacity"
-        >
-          <X className="h-4 w-4" />
-          <span className="sr-only">Close</span>
-        </button>
-        <h2 className="text-lg font-semibold mb-4">Edit profile</h2>
-        <div className="flex flex-col gap-4">
+        <div className="flex items-center justify-between px-6 pt-6 pb-4 flex-shrink-0">
+          <h2 className="text-lg font-semibold">Edit profile</h2>
+          <button
+            onClick={() => onOpenChange(false)}
+            className="opacity-70 hover:opacity-100 transition-opacity"
+          >
+            <X className="h-4 w-4" />
+            <span className="sr-only">Close</span>
+          </button>
+        </div>
+        <div className="overflow-y-auto px-6 pb-6 flex flex-col gap-4">
           {(Object.keys(EMPTY) as (keyof ProfileFields)[]).map((key) => (
             <div key={key} className="flex flex-col gap-1">
               <Label htmlFor={key}>{LABELS[key]}</Label>
-              <Input
-                id={key}
-                value={fields[key]}
-                onChange={(e) => setFields((f) => ({ ...f, [key]: e.target.value }))}
-              />
+              {key === "interests" ? (
+                <textarea
+                  id={key}
+                  value={fields[key]}
+                  onChange={(e) => setFields((f) => ({ ...f, [key]: e.target.value }))}
+                  rows={2}
+                  className="border rounded-md px-3 py-2 text-sm w-full resize-none bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+              ) : (
+                <Input
+                  id={key}
+                  value={fields[key]}
+                  onChange={(e) => setFields((f) => ({ ...f, [key]: e.target.value }))}
+                />
+              )}
             </div>
           ))}
           {error && <p className="text-sm text-red-500">{error}</p>}

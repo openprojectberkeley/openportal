@@ -29,7 +29,7 @@ export default function ApplyPage() {
         { data: infosession },
         { data: application },
       ] = await Promise.all([
-        supabase.from("coffee_chats").select("applicant_id").eq("applicant_id", user.id).maybeSingle(),
+        supabase.from("coffee_chats").select("applicant_id").eq("applicant_id", user.id).eq("complete", true).maybeSingle(),
         supabase.from("infosesh_attendance").select("applicant_id").eq("applicant_id", user.id).maybeSingle(),
         supabase.from("applications").select("applicant_id").eq("applicant_id", user.id).maybeSingle(),
       ]);
