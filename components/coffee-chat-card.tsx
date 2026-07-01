@@ -3,6 +3,7 @@
 type Role = { id: string; role_name: string };
 
 export type CoffeeChatCardProps = {
+  id: string;
   name: string;
   roles: Role[];
   avatarUrl?: string | null;
