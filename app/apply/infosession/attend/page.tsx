@@ -17,6 +17,10 @@ export default function AttendPage() {
     setLoading(true);
     setError(null);
 
+    // Codes are stored uppercase, so normalize input to make claiming
+    // case-insensitive.
+    const normalizedCode = code.trim().toUpperCase();
+
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
@@ -32,7 +36,7 @@ export default function AttendPage() {
     const { data: claimed, error: updateError } = await supabase
       .from("infosesh_attendance")
       .update({ applicant_id: user.id })
-      .eq("code", code.trim())
+      .eq("code", normalizedCode)
       .is("applicant_id", null)
       .select();
 
@@ -52,7 +56,7 @@ export default function AttendPage() {
     const { data: existing } = await supabase
       .from("infosesh_attendance")
       .select("applicant_id")
-      .eq("code", code.trim())
+      .eq("code", normalizedCode)
       .maybeSingle();
 
     if (!existing) {
@@ -101,10 +105,10 @@ export default function AttendPage() {
             id="code"
             type="text"
             value={code}
-            onChange={(e) => setCode(e.target.value)}
+            onChange={(e) => setCode(e.target.value.toUpperCase())}
             placeholder="Enter the code from your PM"
             required
-            className="border rounded-md px-3 py-2 text-sm w-full bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+            className="border rounded-md px-3 py-2 text-sm w-full bg-background uppercase tracking-wider focus:outline-none focus:ring-1 focus:ring-ring"
           />
         </div>
         {error && <p className="text-sm text-red-500">{error}</p>}
