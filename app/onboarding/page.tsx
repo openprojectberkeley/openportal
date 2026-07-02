@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 export default function OnboardingPage() {
   const router = useRouter();
   const [userId, setUserId] = useState<string | null>(null);
+  const [email, setEmail] = useState<string | null>(null);
   const [preferredFirstname, setPreferredFirstname] = useState("");
   const [lastname, setLastname] = useState("");
   const [loading, setLoading] = useState(false);
@@ -20,6 +21,7 @@ export default function OnboardingPage() {
         return;
       }
       setUserId(user.id);
+      setEmail(user.email ?? null);
     });
   }, [router]);
 
@@ -37,6 +39,7 @@ export default function OnboardingPage() {
         user_id: userId,
         preferred_firstname: preferredFirstname.trim(),
         lastname: lastname.trim(),
+        email,
       });
 
     if (insertError) {

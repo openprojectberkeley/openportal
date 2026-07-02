@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/supabase/client";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
 const HOURS = Array.from({ length: 13 }, (_, i) => i + 8); // 8am–8pm
@@ -34,7 +34,7 @@ type UpcomingSlot = {
   meeting_time: string;
   capacity: number;
   filled: number;
-  attendees: { name: string; user_id: string }[];
+  attendees: { name: string; user_id: string; email: string | null }[];
 };
 
 export default function ManagerCoffeeChatsPage() {
@@ -47,74 +47,99 @@ export default function ManagerCoffeeChatsPage() {
   const [bookedTimes, setBookedTimes] = useState<Set<string>>(new Set());
   const [slotCapacity, setSlotCapacity] = useState(3);
   const [saving, setSaving] = useState(false);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  const copyEmail = async (key: string, email: string | null) => {
+    if (!email) return;
+    try {
+      await navigator.clipboard.writeText(email);
+      setCopiedKey(key);
+      setTimeout(() => setCopiedKey((k) => (k === key ? null : k)), 1500);
+    } catch {
+      // Clipboard unavailable (e.g. non-secure context) — nothing to do.
+    }
+  };
+
+  const load = useCallback(async () => {
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const [{ data: rows }, { data: roleData }] = await Promise.all([
+      supabase
+        .from("coffee_chats")
+        .select("meeting_time, applicant_id")
+        .eq("member_id", user.id)
+        .gte("meeting_time", new Date().toISOString())
+        .order("meeting_time", { ascending: true }),
+      supabase
+        .from("members_roles")
+        .select("roles(access_level)")
+        .eq("user_id", user.id),
+    ]);
+
+    const accessLevels = (roleData ?? []).map((r: any) => r.roles?.access_level);
+    const isExec = accessLevels.includes("exec");
+    const isBoard = accessLevels.includes("board");
+    setSlotCapacity(isExec ? 5 : isBoard ? 3 : 3);
+
+    if (!rows?.length) {
+      setUpcomingSlots([]);
+      setDbTimes(new Set());
+      setBookedTimes(new Set());
+      setSelected(new Set());
+      setLoading(false);
+      return;
+    }
+
+    // Build upcoming slots grouped by meeting_time
+    const grouped = new Map<string, (string | null)[]>();
+    for (const row of rows) {
+      if (!grouped.has(row.meeting_time)) grouped.set(row.meeting_time, []);
+      grouped.get(row.meeting_time)!.push(row.applicant_id);
+    }
+
+    const applicantIds = [...new Set(rows.map((r) => r.applicant_id).filter((id): id is string => id !== null))];
+    const nameMap = new Map<string, string>();
+    const emailMap = new Map<string, string | null>();
+    if (applicantIds.length > 0) {
+      const { data: members } = await supabase
+        .from("members")
+        .select("user_id, preferred_firstname, lastname, email")
+        .in("user_id", applicantIds);
+      for (const m of members ?? []) {
+        nameMap.set(m.user_id, [m.preferred_firstname, m.lastname].filter(Boolean).join(" ") || "Unknown");
+        emailMap.set(m.user_id, m.email ?? null);
+      }
+    }
+
+    const upcoming: UpcomingSlot[] = [];
+    for (const [meeting_time, ids] of grouped) {
+      const filled = ids.filter((id): id is string => id !== null);
+      upcoming.push({
+        meeting_time,
+        capacity: ids.length,
+        filled: filled.length,
+        attendees: filled.map((id) => ({ user_id: id, name: nameMap.get(id) ?? "Unknown", email: emailMap.get(id) ?? null })),
+      });
+    }
+    setUpcomingSlots(upcoming);
+
+    // Pre-populate availability grid — normalize timestamps so they match
+    // the ISO keys the grid generates via slotKey().
+    const dbSet = new Set(rows.map((r) => new Date(r.meeting_time).toISOString()));
+    const bookedSet = new Set(
+      rows.filter((r) => r.applicant_id !== null).map((r) => new Date(r.meeting_time).toISOString())
+    );
+    setDbTimes(dbSet);
+    setBookedTimes(bookedSet);
+    setSelected(new Set(dbSet));
+    setLoading(false);
+  }, []);
 
   useEffect(() => {
-    const supabase = createClient();
-    const load = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      const [{ data: rows }, { data: roleData }] = await Promise.all([
-        supabase
-          .from("coffee_chats")
-          .select("meeting_time, applicant_id")
-          .eq("member_id", user.id)
-          .gte("meeting_time", new Date().toISOString())
-          .order("meeting_time", { ascending: true }),
-        supabase
-          .from("members_roles")
-          .select("roles(access_level)")
-          .eq("user_id", user.id),
-      ]);
-
-      const accessLevels = (roleData ?? []).map((r: any) => r.roles?.access_level);
-      const isExec = accessLevels.includes("exec");
-      const isBoard = accessLevels.includes("board");
-      setSlotCapacity(isExec ? 5 : isBoard ? 3 : 3);
-
-      if (!rows?.length) { setLoading(false); return; }
-
-      // Build upcoming slots grouped by meeting_time
-      const grouped = new Map<string, (string | null)[]>();
-      for (const row of rows) {
-        if (!grouped.has(row.meeting_time)) grouped.set(row.meeting_time, []);
-        grouped.get(row.meeting_time)!.push(row.applicant_id);
-      }
-
-      const applicantIds = [...new Set(rows.map((r) => r.applicant_id).filter((id): id is string => id !== null))];
-      const nameMap = new Map<string, string>();
-      if (applicantIds.length > 0) {
-        const { data: members } = await supabase
-          .from("members")
-          .select("user_id, preferred_firstname, lastname")
-          .in("user_id", applicantIds);
-        for (const m of members ?? []) {
-          nameMap.set(m.user_id, [m.preferred_firstname, m.lastname].filter(Boolean).join(" ") || "Unknown");
-        }
-      }
-
-      const upcoming: UpcomingSlot[] = [];
-      for (const [meeting_time, ids] of grouped) {
-        const filled = ids.filter((id): id is string => id !== null);
-        upcoming.push({
-          meeting_time,
-          capacity: ids.length,
-          filled: filled.length,
-          attendees: filled.map((id) => ({ user_id: id, name: nameMap.get(id) ?? "Unknown" })),
-        });
-      }
-      setUpcomingSlots(upcoming);
-
-      // Pre-populate availability grid
-      const dbSet = new Set(rows.map((r) => r.meeting_time));
-      const bookedSet = new Set(rows.filter((r) => r.applicant_id !== null).map((r) => r.meeting_time));
-      setDbTimes(dbSet);
-      setBookedTimes(bookedSet);
-      setSelected(new Set(dbSet));
-      setLoading(false);
-    };
     load();
-  }, []);
+  }, [load]);
 
   // Week grid helpers
   const weekStart = getMondayOfWeek(weekOffset);
@@ -139,6 +164,9 @@ export default function ManagerCoffeeChatsPage() {
       return next;
     });
   };
+
+  const slotInfo = new Map<string, UpcomingSlot>();
+  for (const s of upcomingSlots) slotInfo.set(new Date(s.meeting_time).toISOString(), s);
 
   const weekSelectedCount = weekDates.reduce(
     (count, date) => count + HOURS.filter((h) => selected.has(slotKey(date, h))).length,
@@ -182,8 +210,8 @@ export default function ManagerCoffeeChatsPage() {
         .is("applicant_id", null);
     }
 
-    const newDb = new Set([...selected, ...bookedTimes]);
-    setDbTimes(newDb);
+    // Re-fetch so the grid and upcoming list reflect the saved state.
+    await load();
     setSaving(false);
   };
 
@@ -263,22 +291,38 @@ export default function ManagerCoffeeChatsPage() {
                     const past = isPast(date, hour);
                     const booked = bookedTimes.has(key);
                     const sel = selected.has(key);
+                    const info = slotInfo.get(key);
 
                     return (
-                      <button
-                        key={di}
-                        disabled={past}
-                        onClick={() => toggleSlot(key, date, hour)}
-                        className={`h-7 rounded-sm border text-xs transition-colors ${
-                          past
-                            ? "opacity-20 cursor-not-allowed bg-foreground/5 border-transparent"
-                            : booked
-                            ? "bg-blue-500 border-blue-600 cursor-not-allowed"
-                            : sel
-                            ? "bg-foreground border-foreground"
-                            : "border-border hover:bg-accent"
-                        }`}
-                      />
+                      <div key={di} className="relative group">
+                        <button
+                          disabled={past}
+                          onClick={() => toggleSlot(key, date, hour)}
+                          className={`h-7 w-full rounded-sm border text-xs transition-colors ${
+                            past
+                              ? "opacity-20 cursor-not-allowed bg-foreground/5 border-transparent"
+                              : booked
+                              ? "bg-blue-500 border-blue-600 cursor-not-allowed"
+                              : sel
+                              ? "bg-white border-foreground"
+                              : "border-border hover:bg-accent"
+                          }`}
+                        />
+                        {info && (
+                          <div className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1.5 hidden w-max max-w-[12rem] -translate-x-1/2 flex-col gap-1 rounded-md bg-foreground px-2.5 py-1.5 text-background shadow-lg group-hover:flex">
+                            <span className="text-xs font-semibold tabular-nums">
+                              {info.filled}/{info.capacity} booked
+                            </span>
+                            {info.attendees.length > 0 ? (
+                              <span className="text-[11px] leading-snug">
+                                {info.attendees.map((a) => a.name).join(", ")}
+                              </span>
+                            ) : (
+                              <span className="text-[11px] italic opacity-70">No attendees yet</span>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     );
                   })}
                 </div>
@@ -289,7 +333,7 @@ export default function ManagerCoffeeChatsPage() {
 
         <div className="flex gap-4 text-xs text-muted-foreground">
           <span className="flex items-center gap-1.5">
-            <span className="inline-block w-3 h-3 rounded-sm bg-foreground" /> Available
+            <span className="inline-block w-3 h-3 rounded-sm bg-white border border-foreground" /> Available
           </span>
           <span className="flex items-center gap-1.5">
             <span className="inline-block w-3 h-3 rounded-sm bg-blue-500" /> Booked
@@ -322,11 +366,28 @@ export default function ManagerCoffeeChatsPage() {
                 </div>
                 {slot.attendees.length > 0 ? (
                   <div className="flex flex-wrap gap-1.5 pt-1">
-                    {slot.attendees.map((a) => (
-                      <span key={a.user_id} className="px-2 py-0.5 rounded-full bg-foreground/10 text-xs font-medium">
-                        {a.name}
-                      </span>
-                    ))}
+                    {slot.attendees.map((a) => {
+                      const copyKey = `${slot.meeting_time}-${a.user_id}`;
+                      const copied = copiedKey === copyKey;
+                      return (
+                        <button
+                          key={a.user_id}
+                          type="button"
+                          onClick={() => copyEmail(copyKey, a.email)}
+                          title={a.email ? "Click to copy email" : undefined}
+                          className="group relative px-2 py-0.5 rounded-full bg-foreground/10 text-xs font-medium hover:bg-foreground/20 transition-colors"
+                        >
+                          {a.name}
+                          <span
+                            className={`pointer-events-none absolute bottom-full left-1/2 z-10 mb-1.5 w-max max-w-[16rem] -translate-x-1/2 rounded-md bg-foreground px-2.5 py-1.5 text-[11px] text-background shadow-lg ${
+                              copied ? "block" : "hidden group-hover:block"
+                            }`}
+                          >
+                            {copied ? "Email copied!" : a.email ?? "No email on file"}
+                          </span>
+                        </button>
+                      );
+                    })}
                   </div>
                 ) : (
                   <p className="text-xs text-muted-foreground">No attendees yet.</p>

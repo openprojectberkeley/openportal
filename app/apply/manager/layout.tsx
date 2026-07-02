@@ -1,8 +1,17 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
+import { Suspense } from "react";
 
-export default async function ManagerLayout({ children }: { children: React.ReactNode }) {
+export default function ManagerLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <Suspense>
+      <ManagerGuard>{children}</ManagerGuard>
+    </Suspense>
+  );
+}
+
+async function ManagerGuard({ children }: { children: React.ReactNode }) {
   await connection();
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();

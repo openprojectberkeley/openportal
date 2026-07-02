@@ -20,13 +20,24 @@ export default function ProtectedPage() {
 
       const { data: member } = await supabase
         .from("members")
-        .select("preferred_firstname, active")
+        .select("preferred_firstname, active, email")
         .eq("user_id", user.id)
         .maybeSingle();
 
       if (!member) {
         router.replace("/onboarding");
         return;
+      }
+
+      // Backfill the sign-in email onto the member row only when it's missing
+      // (rows created before we stored it). Every OAuth sign-in lands here, so
+      // this self-heals on next login. We never overwrite an existing value —
+      // the email they signed up with is kept as-is.
+      if (!member.email && user.email) {
+        await supabase
+          .from("members")
+          .update({ email: user.email })
+          .eq("user_id", user.id);
       }
 
       if (!member.active) {

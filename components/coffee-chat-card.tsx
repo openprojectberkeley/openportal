@@ -9,9 +9,10 @@ export type CoffeeChatCardProps = {
   avatarUrl?: string | null;
   interests?: string | null;
   onBook?: () => void;
+  disabled?: boolean;
 };
 
-export function CoffeeChatCard({ name, roles, avatarUrl, interests, onBook }: CoffeeChatCardProps) {
+export function CoffeeChatCard({ name, roles, avatarUrl, interests, onBook, disabled }: CoffeeChatCardProps) {
   const initials = name
     .split(" ")
     .map((w) => w[0])
@@ -54,9 +55,10 @@ export function CoffeeChatCard({ name, roles, avatarUrl, interests, onBook }: Co
       )}
       <button
         onClick={onBook}
-        className="mt-auto w-full rounded-md bg-foreground text-background px-4 py-2 text-sm font-medium hover:opacity-80 transition-opacity"
+        disabled={disabled}
+        className="mt-auto w-full rounded-md bg-foreground text-background px-4 py-2 text-sm font-medium hover:opacity-80 transition-opacity disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:opacity-30"
       >
-        Book Meeting
+        {disabled ? "No times available" : "Book Meeting"}
       </button>
     </div>
   );
