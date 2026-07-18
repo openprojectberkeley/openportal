@@ -12,6 +12,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { useRoleSim } from "@/components/role-simulation-provider";
+import { ProjectsPanel } from "@/components/projects-panel";
+
+type Tab = "members" | "projects";
 
 type Role = { id: string; role_name: string };
 
@@ -38,6 +41,7 @@ const DETAIL_LABELS: { key: keyof Member; label: string }[] = [
 export default function AdminPage() {
   const router = useRouter();
   const { ready, isExec } = useRoleSim();
+  const [tab, setTab] = useState<Tab>("members");
   const [members, setMembers] = useState<Member[]>([]);
   const [allRoles, setAllRoles] = useState<Role[]>([]);
   const [loading, setLoading] = useState(true);
@@ -120,13 +124,38 @@ export default function AdminPage() {
     return true;
   });
 
+  const memberOptions = members.map((m) => ({
+    user_id: m.user_id,
+    name: [m.preferred_firstname, m.lastname].filter(Boolean).join(" ") || "—",
+  }));
+
   if (loading) return <div className="p-8 text-sm text-muted-foreground">Loading...</div>;
   if (error) return <div className="p-8 text-sm text-red-500">{error}</div>;
 
   return (
     <div className="p-8 w-full max-w-5xl mx-auto">
-      <h1 className="text-2xl font-bold mb-6">Members</h1>
+      <h1 className="text-2xl font-bold mb-6">Admin</h1>
 
+      <div className="flex gap-1 mb-6 border-b">
+        {(["members", "projects"] as Tab[]).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={`px-3 py-2 text-sm font-medium capitalize border-b-2 -mb-px transition-colors ${
+              tab === t
+                ? "border-foreground text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {t}
+          </button>
+        ))}
+      </div>
+
+      {tab === "projects" ? (
+        <ProjectsPanel members={memberOptions} />
+      ) : (
+      <>
       <div className="flex gap-3 mb-4">
         <Input
           placeholder="Search by name..."
@@ -235,6 +264,8 @@ export default function AdminPage() {
           </div>
         )}
       </div>
+      </>
+      )}
     </div>
   );
 }
