@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 
 export default function ProtectedPage() {
@@ -56,6 +57,12 @@ export default function ProtectedPage() {
       <h1 className="text-3xl font-bold">
         {firstName ? `Hi ${firstName}` : "Loading..."}
       </h1>
+      <Link
+        href="/protected/portals"
+        className="text-sm font-medium text-foreground underline underline-offset-4 hover:no-underline w-fit"
+      >
+        View your portals
+      </Link>
     </div>
   );
 }

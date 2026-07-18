@@ -15,6 +15,7 @@ them in order in the Supabase SQL editor.
 | `0003_coffee_chats_one_per_person.sql` | Optional unique index: one chat per applicant per member. |
 | `0004_app_settings_coffee_chat_window.sql` | `app_settings` table + `is_vp_tech()` + RLS for the coffee-chat window. |
 | `0005_projects.sql` | `projects` + `project_members` tables, `is_exec()`, RLS (read: all signed-in, write: exec). |
+| `0006_portals.sql` | Generalized `portals` model (`portals`, `portal_members`, `portal_tasks`, `portal_documents`, `portal_updates`), `is_portal_lead()`, RLS (read: all signed-in; write: exec, or a portal lead for that portal's content), backfills `projects`/`project_members` as `type = 'project'` portals. |
 
 > Note: the Supabase CLI expects a `supabase/` directory at the repo root. These
 > live under `src/supabase/` for co-location; if you later adopt the CLI, move

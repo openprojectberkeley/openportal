@@ -12,9 +12,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { useRoleSim } from "@/components/role-simulation-provider";
-import { ProjectsPanel } from "@/components/projects-panel";
+import { PortalsPanel } from "@/components/portals-panel";
 
-type Tab = "members" | "projects";
+type Tab = "members" | "portals";
 
 type Role = { id: string; role_name: string };
 
@@ -137,7 +137,7 @@ export default function AdminPage() {
       <h1 className="text-2xl font-bold mb-6">Admin</h1>
 
       <div className="flex gap-1 mb-6 border-b">
-        {(["members", "projects"] as Tab[]).map((t) => (
+        {(["members", "portals"] as Tab[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -152,8 +152,8 @@ export default function AdminPage() {
         ))}
       </div>
 
-      {tab === "projects" ? (
-        <ProjectsPanel members={memberOptions} />
+      {tab === "portals" ? (
+        <PortalsPanel members={memberOptions} />
       ) : (
       <>
       <div className="flex gap-3 mb-4">

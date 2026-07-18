@@ -14,41 +14,52 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 
-type ProjectMember = { user_id: string; name: string; is_pm: boolean };
+export const PORTAL_TYPES = [
+  { value: "project", label: "Projects" },
+  { value: "committee", label: "Committees" },
+  { value: "chapter", label: "Chapters" },
+  { value: "cohort", label: "Cohorts" },
+] as const;
 
-type Project = {
+export type PortalType = (typeof PORTAL_TYPES)[number]["value"];
+
+type PortalMember = { user_id: string; name: string; role: "member" | "lead" };
+
+type Portal = {
   id: string;
+  type: PortalType;
   name: string;
-  client: string | null;
   description: string | null;
-  members: ProjectMember[];
+  metadata: { client?: string };
+  members: PortalMember[];
 };
 
 export type MemberOption = { user_id: string; name: string };
 
-type ProjectFields = { name: string; client: string; description: string };
-const EMPTY_FIELDS: ProjectFields = { name: "", client: "", description: "" };
+type PortalFields = { type: PortalType; name: string; client: string; description: string };
+const emptyFields = (type: PortalType): PortalFields => ({ type, name: "", client: "", description: "" });
 
 type Props = { members: MemberOption[] };
 
-export function ProjectsPanel({ members }: Props) {
-  const [projects, setProjects] = useState<Project[]>([]);
+export function PortalsPanel({ members }: Props) {
+  const [portals, setPortals] = useState<Portal[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [typeFilter, setTypeFilter] = useState<PortalType | "all">("all");
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [fields, setFields] = useState<ProjectFields>(EMPTY_FIELDS);
+  const [fields, setFields] = useState<PortalFields>(emptyFields("project"));
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/admin/projects")
+    fetch("/api/admin/portals")
       .then((r) => r.json())
       .then((data) => {
         if (data.error) setError(data.error);
-        else setProjects(data);
+        else setPortals(data);
         setLoading(false);
       })
       .catch(() => { setError("Failed to load."); setLoading(false); });
@@ -57,112 +68,115 @@ export function ProjectsPanel({ members }: Props) {
   const toggle = (id: string) =>
     setExpanded((prev) => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
 
   const openCreate = () => {
     setEditingId(null);
-    setFields(EMPTY_FIELDS);
+    setFields(emptyFields(typeFilter === "all" ? "project" : typeFilter));
     setFormError(null);
     setDialogOpen(true);
   };
 
-  const openEdit = (p: Project) => {
+  const openEdit = (p: Portal) => {
     setEditingId(p.id);
-    setFields({ name: p.name, client: p.client ?? "", description: p.description ?? "" });
+    setFields({ type: p.type, name: p.name, client: p.metadata.client ?? "", description: p.description ?? "" });
     setFormError(null);
     setDialogOpen(true);
   };
 
-  const saveProject = async () => {
+  const savePortal = async () => {
     const name = fields.name.trim();
     if (!name) { setFormError("Name is required."); return; }
 
     setSaving(true);
     setFormError(null);
     const supabase = createClient();
+    const client = fields.client.trim();
     const payload = {
+      type: fields.type,
       name,
-      client: fields.client.trim() || null,
       description: fields.description.trim() || null,
+      metadata: client ? { client } : {},
     };
 
     if (editingId) {
       const { error: updateError } = await supabase
-        .from("projects")
+        .from("portals")
         .update({ ...payload, updated_at: new Date().toISOString() })
         .eq("id", editingId);
 
       if (updateError) { setFormError(updateError.message); setSaving(false); return; }
-      setProjects((prev) => prev.map((p) => (p.id === editingId ? { ...p, ...payload } : p)));
+      setPortals((prev) => prev.map((p) => (p.id === editingId ? { ...p, ...payload } : p)));
     } else {
       const { data, error: insertError } = await supabase
-        .from("projects")
+        .from("portals")
         .insert(payload)
-        .select("id, name, client, description")
+        .select("id, type, name, description, metadata")
         .single();
 
       if (insertError) { setFormError(insertError.message); setSaving(false); return; }
-      setProjects((prev) => [...prev, { ...data, members: [] }]);
+      setPortals((prev) => [...prev, { ...data, members: [] }]);
     }
 
     setSaving(false);
     setDialogOpen(false);
   };
 
-  const deleteProject = async (id: string) => {
-    if (!confirm("Delete this project? This also removes its member roster.")) return;
+  const deletePortal = async (id: string) => {
+    if (!confirm("Delete this portal? This also removes its member roster.")) return;
     const supabase = createClient();
-    const { error: deleteError } = await supabase.from("projects").delete().eq("id", id);
+    const { error: deleteError } = await supabase.from("portals").delete().eq("id", id);
     if (deleteError) return;
-    setProjects((prev) => prev.filter((p) => p.id !== id));
+    setPortals((prev) => prev.filter((p) => p.id !== id));
   };
 
-  const addMember = async (project: Project, member: MemberOption) => {
+  const addMember = async (portal: Portal, member: MemberOption) => {
     const supabase = createClient();
     const { error: insertError } = await supabase
-      .from("project_members")
-      .insert({ project_id: project.id, user_id: member.user_id, is_pm: false });
+      .from("portal_members")
+      .insert({ portal_id: portal.id, user_id: member.user_id, role: "member" });
 
     if (insertError) return;
-    setProjects((prev) =>
+    setPortals((prev) =>
       prev.map((p) =>
-        p.id === project.id ? { ...p, members: [...p.members, { ...member, is_pm: false }] } : p,
+        p.id === portal.id ? { ...p, members: [...p.members, { ...member, role: "member" }] } : p,
       ),
     );
   };
 
-  const removeMember = async (project: Project, member: ProjectMember) => {
+  const removeMember = async (portal: Portal, member: PortalMember) => {
     const supabase = createClient();
     const { error: deleteError } = await supabase
-      .from("project_members")
+      .from("portal_members")
       .delete()
-      .eq("project_id", project.id)
+      .eq("portal_id", portal.id)
       .eq("user_id", member.user_id);
 
     if (deleteError) return;
-    setProjects((prev) =>
+    setPortals((prev) =>
       prev.map((p) =>
-        p.id === project.id ? { ...p, members: p.members.filter((m) => m.user_id !== member.user_id) } : p,
+        p.id === portal.id ? { ...p, members: p.members.filter((m) => m.user_id !== member.user_id) } : p,
       ),
     );
   };
 
-  const togglePm = async (project: Project, member: ProjectMember) => {
-    const nextIsPm = !member.is_pm;
+  const toggleLead = async (portal: Portal, member: PortalMember) => {
+    const nextRole = member.role === "lead" ? "member" : "lead";
     const supabase = createClient();
     const { error: updateError } = await supabase
-      .from("project_members")
-      .update({ is_pm: nextIsPm })
-      .eq("project_id", project.id)
+      .from("portal_members")
+      .update({ role: nextRole })
+      .eq("portal_id", portal.id)
       .eq("user_id", member.user_id);
 
     if (updateError) return;
-    setProjects((prev) =>
+    setPortals((prev) =>
       prev.map((p) =>
-        p.id === project.id
-          ? { ...p, members: p.members.map((m) => (m.user_id === member.user_id ? { ...m, is_pm: nextIsPm } : m)) }
+        p.id === portal.id
+          ? { ...p, members: p.members.map((m) => (m.user_id === member.user_id ? { ...m, role: nextRole } : m)) }
           : p,
       ),
     );
@@ -171,16 +185,33 @@ export function ProjectsPanel({ members }: Props) {
   if (loading) return <div className="py-8 text-sm text-muted-foreground">Loading...</div>;
   if (error) return <div className="py-8 text-sm text-red-500">{error}</div>;
 
+  const filtered = typeFilter === "all" ? portals : portals.filter((p) => p.type === typeFilter);
+
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex justify-end">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex gap-1">
+          {(["all", ...PORTAL_TYPES.map((t) => t.value)] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => setTypeFilter(t)}
+              className={`px-3 py-1.5 rounded-full text-xs font-medium capitalize transition-colors ${
+                typeFilter === t
+                  ? "bg-foreground text-background"
+                  : "bg-foreground/10 text-foreground hover:bg-foreground/20"
+              }`}
+            >
+              {t === "all" ? "All" : PORTAL_TYPES.find((pt) => pt.value === t)?.label}
+            </button>
+          ))}
+        </div>
         <Button size="sm" onClick={openCreate}>
-          <PlusCircle size={15} /> New project
+          <PlusCircle size={15} /> New portal
         </Button>
       </div>
 
       <div className="border rounded-lg overflow-hidden">
-        {projects.map((p, i) => {
+        {filtered.map((p, i) => {
           const isOpen = expanded.has(p.id);
           const available = members.filter((m) => !p.members.some((pm) => pm.user_id === m.user_id));
           return (
@@ -194,9 +225,12 @@ export function ProjectsPanel({ members }: Props) {
                 </span>
                 <div className="flex items-center gap-2 flex-1 min-w-0 flex-wrap">
                   <span className="font-medium text-sm">{p.name}</span>
-                  {p.client && (
+                  <span className="px-2 py-0.5 rounded-full bg-foreground/10 text-foreground text-xs font-medium capitalize">
+                    {p.type}
+                  </span>
+                  {p.metadata.client && (
                     <span className="px-2 py-0.5 rounded-full bg-foreground/10 text-foreground text-xs font-medium">
-                      {p.client}
+                      {p.metadata.client}
                     </span>
                   )}
                   <span className="text-xs text-muted-foreground">
@@ -210,7 +244,7 @@ export function ProjectsPanel({ members }: Props) {
                   <Pencil size={14} />
                 </button>
                 <button
-                  onClick={(e) => { e.stopPropagation(); deleteProject(p.id); }}
+                  onClick={(e) => { e.stopPropagation(); deletePortal(p.id); }}
                   className="text-muted-foreground hover:text-red-500 transition-colors flex-shrink-0"
                 >
                   <X size={15} />
@@ -253,14 +287,14 @@ export function ProjectsPanel({ members }: Props) {
                           <div key={m.user_id} className="flex items-center gap-2 text-sm">
                             <span className="flex-1">{m.name}</span>
                             <button
-                              onClick={() => togglePm(p, m)}
+                              onClick={() => toggleLead(p, m)}
                               className={`px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${
-                                m.is_pm
+                                m.role === "lead"
                                   ? "bg-foreground text-background"
                                   : "bg-foreground/10 text-foreground hover:bg-foreground/20"
                               }`}
                             >
-                              PM
+                              Lead
                             </button>
                             <button
                               onClick={() => removeMember(p, m)}
@@ -278,38 +312,53 @@ export function ProjectsPanel({ members }: Props) {
             </div>
           );
         })}
-        {projects.length === 0 && (
-          <div className="px-4 py-8 text-center text-sm text-muted-foreground">No projects yet.</div>
+        {filtered.length === 0 && (
+          <div className="px-4 py-8 text-center text-sm text-muted-foreground">No portals yet.</div>
         )}
       </div>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{editingId ? "Edit project" : "New project"}</DialogTitle>
+            <DialogTitle>{editingId ? "Edit portal" : "New portal"}</DialogTitle>
           </DialogHeader>
           <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-1">
-              <Label htmlFor="project-name">Name</Label>
+              <Label htmlFor="portal-type">Type</Label>
+              <select
+                id="portal-type"
+                value={fields.type}
+                onChange={(e) => setFields((f) => ({ ...f, type: e.target.value as PortalType }))}
+                className="border rounded-md px-3 py-2 text-sm w-full bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+              >
+                {PORTAL_TYPES.map((t) => (
+                  <option key={t.value} value={t.value}>{t.label.replace(/s$/, "")}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="portal-name">Name</Label>
               <Input
-                id="project-name"
+                id="portal-name"
                 value={fields.name}
                 onChange={(e) => setFields((f) => ({ ...f, name: e.target.value }))}
               />
             </div>
+            {fields.type === "project" && (
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="portal-client">Client</Label>
+                <Input
+                  id="portal-client"
+                  value={fields.client}
+                  onChange={(e) => setFields((f) => ({ ...f, client: e.target.value }))}
+                  placeholder="Optional"
+                />
+              </div>
+            )}
             <div className="flex flex-col gap-1">
-              <Label htmlFor="project-client">Client</Label>
-              <Input
-                id="project-client"
-                value={fields.client}
-                onChange={(e) => setFields((f) => ({ ...f, client: e.target.value }))}
-                placeholder="Optional"
-              />
-            </div>
-            <div className="flex flex-col gap-1">
-              <Label htmlFor="project-description">Description</Label>
+              <Label htmlFor="portal-description">Description</Label>
               <textarea
-                id="project-description"
+                id="portal-description"
                 value={fields.description}
                 onChange={(e) => setFields((f) => ({ ...f, description: e.target.value }))}
                 rows={3}
@@ -321,7 +370,7 @@ export function ProjectsPanel({ members }: Props) {
               <Button variant="outline" onClick={() => setDialogOpen(false)}>
                 Cancel
               </Button>
-              <Button onClick={saveProject} disabled={saving}>
+              <Button onClick={savePortal} disabled={saving}>
                 {saving ? "Saving..." : "Save"}
               </Button>
             </div>
