@@ -11,6 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { useRoleSim } from "@/components/role-simulation-provider";
 
 type Role = { id: string; role_name: string };
 
@@ -36,6 +37,7 @@ const DETAIL_LABELS: { key: keyof Member; label: string }[] = [
 
 export default function AdminPage() {
   const router = useRouter();
+  const { ready, isExec } = useRoleSim();
   const [members, setMembers] = useState<Member[]>([]);
   const [allRoles, setAllRoles] = useState<Role[]>([]);
   const [loading, setLoading] = useState(true);
@@ -44,20 +46,15 @@ export default function AdminPage() {
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState<Set<string>>(new Set());
 
+  // Guard: redirect out once we know the effective role isn't exec (honors the
+  // "view as" simulation).
   useEffect(() => {
+    if (ready && !isExec) router.replace("/");
+  }, [ready, isExec, router]);
+
+  useEffect(() => {
+    if (!ready || !isExec) return;
     const supabase = createClient();
-
-    supabase.auth.getUser().then(async ({ data: { user } }) => {
-      if (!user) { router.replace("/"); return; }
-
-      const { data: roleData } = await supabase
-        .from("members_roles")
-        .select("roles(access_level)")
-        .eq("user_id", user.id);
-
-      const isExec = (roleData ?? []).some((r: any) => r.roles?.access_level === "exec");
-      if (!isExec) { router.replace("/"); return; }
-    });
 
     Promise.all([
       fetch("/api/admin/members").then((r) => r.json()),
@@ -68,7 +65,7 @@ export default function AdminPage() {
       setAllRoles(rolesData ?? []);
       setLoading(false);
     }).catch(() => { setError("Failed to load."); setLoading(false); });
-  }, []);
+  }, [ready, isExec]);
 
   const toggle = (id: string) =>
     setExpanded((prev) => {

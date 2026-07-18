@@ -4,13 +4,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Check } from "lucide-react";
-
-// Set to true to restrict "Get Involved" to non-board/exec members only.
-// VP Tech can still see it (with a debug notice). Set to false to bypass.
-const RESTRICT_TO_APPLICANTS = true;
-
-// Must match the role_name value in the roles table exactly.
-const VP_TECH_ROLE_NAME = "VP Tech";
+import { useRoleSim } from "@/components/role-simulation-provider";
 
 type CompletionState = {
   coffeeChat: boolean;
@@ -20,14 +14,12 @@ type CompletionState = {
 
 export default function ApplyPage() {
   const router = useRouter();
+  const { ready, isBoardOrExec, simulating, persona } = useRoleSim();
   const [completed, setCompleted] = useState<CompletionState>({
     coffeeChat: false,
     infosession: false,
     application: false,
   });
-  const [isBoardOrExec, setIsBoardOrExec] = useState(false);
-  const [isVpTech, setIsVpTech] = useState(false);
-  const [vpTechDebug, setVpTechDebug] = useState(true);
 
   useEffect(() => {
     const supabase = createClient();
@@ -38,12 +30,10 @@ export default function ApplyPage() {
         { data: coffeeChat },
         { data: infosession },
         { data: application },
-        { data: userRoles },
       ] = await Promise.all([
         supabase.from("coffee_chats").select("applicant_id").eq("applicant_id", user.id).eq("complete", true).maybeSingle(),
         supabase.from("infosesh_attendance").select("applicant_id").eq("applicant_id", user.id).maybeSingle(),
         supabase.from("applications").select("applicant_id").eq("applicant_id", user.id).maybeSingle(),
-        supabase.from("members_roles").select("roles(role_name, access_level)").eq("user_id", user.id),
       ]);
 
       setCompleted({
@@ -51,21 +41,12 @@ export default function ApplyPage() {
         infosession: !!infosession,
         application: !!application,
       });
-
-      const roles = (userRoles ?? []).flatMap((r: any) =>
-        r.roles ? [r.roles] : []
-      );
-      const boardExec = roles.some(
-        (r: any) => r.access_level === "board" || r.access_level === "exec"
-      );
-      const vpTech = roles.some((r: any) => r.role_name === VP_TECH_ROLE_NAME);
-      setIsBoardOrExec(boardExec);
-      setIsVpTech(vpTech);
     });
   }, []);
 
-  const showApplicantFlow = !RESTRICT_TO_APPLICANTS || !isBoardOrExec || (isVpTech && vpTechDebug);
-  const showApplicationManager = isBoardOrExec;
+  // Members see the applicant flow; board/exec see the manager entry instead.
+  const showApplicantFlow = ready && !isBoardOrExec;
+  const showApplicationManager = ready && isBoardOrExec;
 
   const items = [
     { label: "Coffee Chat", href: "/apply/coffee-chat", done: completed.coffeeChat },
@@ -93,9 +74,9 @@ export default function ApplyPage() {
                     </button>
                   ))}
                 </div>
-                {isVpTech && (
+                {simulating && persona === "member" && (
                   <p className="text-xs text-muted-foreground italic">
-                    Available for debugging (VP Tech access).
+                    Simulating member view.
                   </p>
                 )}
               </div>
@@ -117,24 +98,6 @@ export default function ApplyPage() {
           )}
         </div>
       </div>
-
-      {isVpTech && (
-        <div className="fixed bottom-4 right-4 flex items-center gap-2">
-          <span className="text-xs text-muted-foreground">applicant view</span>
-          <button
-            onClick={() => setVpTechDebug((v) => !v)}
-            className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors ${
-              vpTechDebug ? "bg-foreground" : "bg-foreground/20"
-            }`}
-          >
-            <span
-              className={`inline-block h-3.5 w-3.5 rounded-full bg-background shadow transition-transform ${
-                vpTechDebug ? "translate-x-4" : "translate-x-1"
-              }`}
-            />
-          </button>
-        </div>
-      )}
     </>
   );
 }

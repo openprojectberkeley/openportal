@@ -11,17 +11,18 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ProfileDialog } from "@/components/profile-dialog";
+import { useRoleSim } from "@/components/role-simulation-provider";
 
 type MemberInfo = {
   userId: string;
   preferredFirstname: string;
   lastname: string;
-  isExec: boolean;
   isMember: boolean;
 };
 
 export function AppNavbar() {
   const router = useRouter();
+  const { isExec } = useRoleSim();
   const [member, setMember] = useState<MemberInfo | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
 
@@ -30,27 +31,17 @@ export function AppNavbar() {
     supabase.auth.getUser().then(async ({ data: { user } }) => {
       if (!user) return;
 
-      const [{ data: memberData }, { data: roleData }] = await Promise.all([
-        supabase
-          .from("members")
-          .select("preferred_firstname, lastname, active")
-          .eq("user_id", user.id)
-          .maybeSingle(),
-        supabase
-          .from("members_roles")
-          .select("roles(access_level)")
-          .eq("user_id", user.id),
-      ]);
+      const { data: memberData } = await supabase
+        .from("members")
+        .select("preferred_firstname, lastname, active")
+        .eq("user_id", user.id)
+        .maybeSingle();
 
       if (memberData) {
-        const isExec = (roleData ?? []).some(
-          (r: any) => r.roles?.access_level === "exec",
-        );
         setMember({
           userId: user.id,
           preferredFirstname: memberData.preferred_firstname ?? "",
           lastname: memberData.lastname ?? "",
-          isExec,
           isMember: !!memberData.active,
         });
       }
@@ -82,7 +73,7 @@ export function AppNavbar() {
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                {member.isExec && (
+                {isExec && (
                   <DropdownMenuItem onSelect={() => router.push("/admin")}>
                     Admin
                   </DropdownMenuItem>

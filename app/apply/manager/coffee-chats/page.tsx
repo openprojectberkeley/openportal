@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/client";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import { useRoleSim } from "@/components/role-simulation-provider";
 
 const HOURS = Array.from({ length: 13 }, (_, i) => i + 8); // 8am–8pm
 const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -72,6 +73,10 @@ type UpcomingSlot = {
 };
 
 export default function ManagerCoffeeChatsPage() {
+  // Exec availability holds more attendees per slot than board (PM).
+  const { isExec } = useRoleSim();
+  const slotCapacity = isExec ? 5 : 3;
+
   const [upcomingSlots, setUpcomingSlots] = useState<UpcomingSlot[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -79,7 +84,6 @@ export default function ManagerCoffeeChatsPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [dbTimes, setDbTimes] = useState<Set<string>>(new Set());
   const [bookedTimes, setBookedTimes] = useState<Set<string>>(new Set());
-  const [slotCapacity, setSlotCapacity] = useState(3);
   const [saving, setSaving] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
@@ -99,24 +103,13 @@ export default function ManagerCoffeeChatsPage() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    const [{ data: rows }, { data: roleData }] = await Promise.all([
-      supabase
-        .from("coffee_chats")
-        .select("meeting_time, applicant_id")
-        .eq("member_id", user.id)
-        .gte("meeting_time", RANGE_START.toISOString())
-        .lt("meeting_time", RANGE_END_EXCLUSIVE.toISOString())
-        .order("meeting_time", { ascending: true }),
-      supabase
-        .from("members_roles")
-        .select("roles(access_level)")
-        .eq("user_id", user.id),
-    ]);
-
-    const accessLevels = (roleData ?? []).map((r: any) => r.roles?.access_level);
-    const isExec = accessLevels.includes("exec");
-    const isBoard = accessLevels.includes("board");
-    setSlotCapacity(isExec ? 5 : isBoard ? 3 : 3);
+    const { data: rows } = await supabase
+      .from("coffee_chats")
+      .select("meeting_time, applicant_id")
+      .eq("member_id", user.id)
+      .gte("meeting_time", RANGE_START.toISOString())
+      .lt("meeting_time", RANGE_END_EXCLUSIVE.toISOString())
+      .order("meeting_time", { ascending: true });
 
     if (!rows?.length) {
       setUpcomingSlots([]);

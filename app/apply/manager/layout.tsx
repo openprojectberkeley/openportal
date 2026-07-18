@@ -1,4 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
+import { getEffectiveAccessLevels } from "@/lib/roles-server";
+import { accessIsBoardOrExec } from "@/lib/roles";
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import { Suspense } from "react";
@@ -18,16 +20,11 @@ async function ManagerGuard({ children }: { children: React.ReactNode }) {
 
   if (!user) redirect("/");
 
-  const { data: roleData } = await supabase
-    .from("members_roles")
-    .select("roles(access_level)")
-    .eq("user_id", user.id);
+  // Honors the VP Tech "view as" simulation cookie, so simulating a plain
+  // member is actually blocked here (not just hidden in the UI).
+  const accessLevels = await getEffectiveAccessLevels(supabase);
 
-  const isBoardOrExec = (roleData ?? []).some(
-    (r: any) => r.roles?.access_level === "board" || r.roles?.access_level === "exec"
-  );
-
-  if (!isBoardOrExec) redirect("/apply");
+  if (!accessIsBoardOrExec(accessLevels)) redirect("/apply");
 
   return <>{children}</>;
 }

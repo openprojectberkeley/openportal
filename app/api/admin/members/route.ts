@@ -1,4 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
+import { getEffectiveAccessLevels } from "@/lib/roles-server";
+import { accessIsExec } from "@/lib/roles";
 import { NextResponse } from "next/server";
 
 export async function GET() {
@@ -7,13 +9,9 @@ export async function GET() {
   const { data: { user }, error } = await supabase.auth.getUser();
   if (error || !user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { data: roleData } = await supabase
-    .from("members_roles")
-    .select("roles(access_level)")
-    .eq("user_id", user.id);
-
-  const isExec = (roleData ?? []).some((r: any) => r.roles?.access_level === "exec");
-  if (!isExec) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  // Honors the VP Tech "view as" simulation cookie.
+  const accessLevels = await getEffectiveAccessLevels(supabase);
+  if (!accessIsExec(accessLevels)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const [{ data: members }, { data: memberRoles }] = await Promise.all([
     supabase
