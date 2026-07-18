@@ -1,5 +1,7 @@
 "use client";
 
+import { Check } from "lucide-react";
+
 type Role = { id: string; role_name: string };
 
 export type CoffeeChatCardProps = {
@@ -10,9 +12,10 @@ export type CoffeeChatCardProps = {
   interests?: string | null;
   onBook?: () => void;
   disabled?: boolean;
+  booked?: boolean;
 };
 
-export function CoffeeChatCard({ name, roles, avatarUrl, interests, onBook, disabled }: CoffeeChatCardProps) {
+export function CoffeeChatCard({ name, roles, avatarUrl, interests, onBook, disabled, booked }: CoffeeChatCardProps) {
   const initials = name
     .split(" ")
     .map((w) => w[0])
@@ -53,13 +56,20 @@ export function CoffeeChatCard({ name, roles, avatarUrl, interests, onBook, disa
           <span className="font-medium text-foreground">Interests: </span>{interests}
         </p>
       )}
-      <button
-        onClick={onBook}
-        disabled={disabled}
-        className="mt-auto w-full rounded-md bg-foreground text-background px-4 py-2 text-sm font-medium hover:opacity-80 transition-opacity disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:opacity-30"
-      >
-        {disabled ? "No times available" : "Book Meeting"}
-      </button>
+      {booked ? (
+        <div className="mt-auto w-full rounded-md border border-green-600/40 bg-green-600/10 px-4 py-2 text-sm font-medium text-green-700 dark:text-green-400 flex items-center justify-center gap-1.5">
+          <Check size={16} strokeWidth={2.5} />
+          Booked
+        </div>
+      ) : (
+        <button
+          onClick={onBook}
+          disabled={disabled}
+          className="mt-auto w-full rounded-md bg-foreground text-background px-4 py-2 text-sm font-medium hover:opacity-80 transition-opacity disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:opacity-30"
+        >
+          {disabled ? "No times available" : "Book Meeting"}
+        </button>
+      )}
     </div>
   );
 }

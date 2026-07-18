@@ -9,19 +9,53 @@ const HOURS = Array.from({ length: 13 }, (_, i) => i + 8); // 8am–8pm
 const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const REQUIRED_PER_WEEK = 5;
 
+// ── Bookable availability window. Change these two dates per cycle. ───────────
+// Months are 0-indexed, so (2026, 7, 1) = Aug 1, 2026.
+const RANGE_START = new Date(2026, 7, 1);
+const RANGE_END = new Date(2026, 7, 31);
+// Exclusive upper bound: start of the day after RANGE_END (so RANGE_END's whole
+// day is included in date/time comparisons).
+const RANGE_END_EXCLUSIVE = new Date(RANGE_END.getFullYear(), RANGE_END.getMonth(), RANGE_END.getDate() + 1);
+
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
 function formatHour(h: number): string {
   if (h === 12) return "12pm";
   return h < 12 ? `${h}am` : `${h - 12}pm`;
 }
 
-function getMondayOfWeek(weekOffset: number): Date {
-  const today = new Date();
-  const day = today.getDay();
+// Monday (local midnight) of the week containing `date`.
+function mondayOf(date: Date): Date {
+  const d = new Date(date);
+  const day = d.getDay();
   const diff = day === 0 ? -6 : 1 - day;
-  const mon = new Date(today);
-  mon.setDate(today.getDate() + diff + weekOffset * 7);
-  mon.setHours(0, 0, 0, 0);
-  return mon;
+  d.setDate(d.getDate() + diff);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+// Weeks are indexed from the week containing RANGE_START through the week
+// containing RANGE_END, so the whole window is reachable via the nav arrows.
+const FIRST_MONDAY = mondayOf(RANGE_START);
+const WEEK_COUNT = Math.round((mondayOf(RANGE_END).getTime() - FIRST_MONDAY.getTime()) / WEEK_MS) + 1;
+
+function weekStartOf(weekOffset: number): Date {
+  const d = new Date(FIRST_MONDAY);
+  d.setDate(d.getDate() + weekOffset * 7);
+  return d;
+}
+
+// Open on the week containing today, clamped into the window.
+const INITIAL_WEEK_OFFSET = Math.min(
+  WEEK_COUNT - 1,
+  Math.max(0, Math.round((mondayOf(new Date()).getTime() - FIRST_MONDAY.getTime()) / WEEK_MS)),
+);
+
+// Whether a calendar day falls inside the bookable window.
+function inRange(date: Date): boolean {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  return d >= RANGE_START && d < RANGE_END_EXCLUSIVE;
 }
 
 function slotKey(date: Date, hour: number): string {
@@ -41,7 +75,7 @@ export default function ManagerCoffeeChatsPage() {
   const [upcomingSlots, setUpcomingSlots] = useState<UpcomingSlot[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const [weekOffset, setWeekOffset] = useState(0);
+  const [weekOffset, setWeekOffset] = useState(INITIAL_WEEK_OFFSET);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [dbTimes, setDbTimes] = useState<Set<string>>(new Set());
   const [bookedTimes, setBookedTimes] = useState<Set<string>>(new Set());
@@ -70,7 +104,8 @@ export default function ManagerCoffeeChatsPage() {
         .from("coffee_chats")
         .select("meeting_time, applicant_id")
         .eq("member_id", user.id)
-        .gte("meeting_time", new Date().toISOString())
+        .gte("meeting_time", RANGE_START.toISOString())
+        .lt("meeting_time", RANGE_END_EXCLUSIVE.toISOString())
         .order("meeting_time", { ascending: true }),
       supabase
         .from("members_roles")
@@ -113,8 +148,11 @@ export default function ManagerCoffeeChatsPage() {
       }
     }
 
+    const nowMs = Date.now();
     const upcoming: UpcomingSlot[] = [];
     for (const [meeting_time, ids] of grouped) {
+      // Past meetings stay visible in the grid but drop off the "Upcoming" list.
+      if (new Date(meeting_time).getTime() < nowMs) continue;
       const filled = ids.filter((id): id is string => id !== null);
       upcoming.push({
         meeting_time,
@@ -142,7 +180,7 @@ export default function ManagerCoffeeChatsPage() {
   }, [load]);
 
   // Week grid helpers
-  const weekStart = getMondayOfWeek(weekOffset);
+  const weekStart = weekStartOf(weekOffset);
   const weekDates = Array.from({ length: 7 }, (_, i) => {
     const d = new Date(weekStart);
     d.setDate(weekStart.getDate() + i);
@@ -157,7 +195,7 @@ export default function ManagerCoffeeChatsPage() {
   };
 
   const toggleSlot = (key: string, date: Date, hour: number) => {
-    if (isPast(date, hour) || bookedTimes.has(key)) return;
+    if (!inRange(date) || isPast(date, hour) || bookedTimes.has(key)) return;
     setSelected((prev) => {
       const next = new Set(prev);
       next.has(key) ? next.delete(key) : next.add(key);
@@ -255,8 +293,8 @@ export default function ManagerCoffeeChatsPage() {
             {weekDates[6].toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
           </span>
           <button
-            onClick={() => setWeekOffset((w) => Math.min(1, w + 1))}
-            disabled={weekOffset === 1}
+            onClick={() => setWeekOffset((w) => Math.min(WEEK_COUNT - 1, w + 1))}
+            disabled={weekOffset >= WEEK_COUNT - 1}
             className="p-1 rounded hover:bg-accent disabled:opacity-30 transition-colors"
           >
             <ChevronRight size={16} />
@@ -288,6 +326,7 @@ export default function ManagerCoffeeChatsPage() {
                   </div>
                   {weekDates.map((date, di) => {
                     const key = slotKey(date, hour);
+                    const outOfRange = !inRange(date);
                     const past = isPast(date, hour);
                     const booked = bookedTimes.has(key);
                     const sel = selected.has(key);
@@ -296,13 +335,17 @@ export default function ManagerCoffeeChatsPage() {
                     return (
                       <div key={di} className="relative group">
                         <button
-                          disabled={past}
+                          disabled={outOfRange || past}
                           onClick={() => toggleSlot(key, date, hour)}
                           className={`h-7 w-full rounded-sm border text-xs transition-colors ${
-                            past
-                              ? "opacity-20 cursor-not-allowed bg-foreground/5 border-transparent"
-                              : booked
+                            booked
                               ? "bg-blue-500 border-blue-600 cursor-not-allowed"
+                              : outOfRange
+                              ? "opacity-10 cursor-not-allowed bg-foreground/5 border-transparent"
+                              : past
+                              ? sel
+                                ? "bg-white/70 border-foreground/60 cursor-not-allowed"
+                                : "opacity-20 cursor-not-allowed bg-foreground/5 border-transparent"
                               : sel
                               ? "bg-white border-foreground"
                               : "border-border hover:bg-accent"

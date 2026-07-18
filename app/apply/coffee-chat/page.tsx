@@ -8,9 +8,7 @@ import { CoffeeChatCard, type CoffeeChatCardProps } from "@/components/coffee-ch
 import { gcalUrl } from "@/lib/gcal";
 import { useRefreshOnReturn } from "@/lib/use-refresh-on-return";
 
-const REQUIRED_HOURS = 5;
-
-type MemberCard = CoffeeChatCardProps & { user_id: string; bookable: boolean };
+type MemberCard = CoffeeChatCardProps & { user_id: string; bookable: boolean; booked: boolean };
 
 type Booking = {
   id: string;
@@ -67,33 +65,31 @@ export default function CoffeeChatPage() {
       nameMap.set(p.user_id, [p.preferred_firstname, p.lastname].filter(Boolean).join(" ") || "Unknown");
     }
 
-    // Count distinct hours each member has set up, and distinct hours still open.
-    const setHours = new Map<string, Set<string>>();
+    // Track distinct hours each member still has open — a member is bookable as
+    // long as they have any open slot.
     const openHours = new Map<string, Set<string>>();
     for (const c of chats ?? []) {
-      const key = new Date(c.meeting_time).toISOString();
-      if (!setHours.has(c.member_id)) setHours.set(c.member_id, new Set());
-      setHours.get(c.member_id)!.add(key);
       if (c.applicant_id === null) {
+        const key = new Date(c.meeting_time).toISOString();
         if (!openHours.has(c.member_id)) openHours.set(c.member_id, new Set());
         openHours.get(c.member_id)!.add(key);
       }
     }
 
+    // Members the current user has already booked — one chat per person max.
+    const bookedMemberIds = new Set((myChats ?? []).map((c) => c.member_id));
+
     setMembers(
-      (profiles ?? []).map((p) => {
-        const totalHours = setHours.get(p.user_id)?.size ?? 0;
-        const stillOpen = openHours.get(p.user_id)?.size ?? 0;
-        return {
-          id: p.user_id,
-          user_id: p.user_id,
-          name: nameMap.get(p.user_id) ?? "Unknown",
-          roles: rolesMap.get(p.user_id) ?? [],
-          avatarUrl: null,
-          interests: p.interests ?? null,
-          bookable: totalHours >= REQUIRED_HOURS && stillOpen > 0,
-        };
-      }),
+      (profiles ?? []).map((p) => ({
+        id: p.user_id,
+        user_id: p.user_id,
+        name: nameMap.get(p.user_id) ?? "Unknown",
+        roles: rolesMap.get(p.user_id) ?? [],
+        avatarUrl: null,
+        interests: p.interests ?? null,
+        bookable: (openHours.get(p.user_id)?.size ?? 0) > 0,
+        booked: bookedMemberIds.has(p.user_id),
+      })),
     );
 
     setBookings(
@@ -131,12 +127,11 @@ export default function CoffeeChatPage() {
       .select();
 
     if (cleared && cleared.length > 0) {
-      // Drop it from local state so it disappears immediately...
-      setBookings((prev) => prev.filter((b) => b.id !== bookingId));
-      // ...and invalidate the Router Cache so the booking page remounts on the
-      // next visit — refetching the freed slot and clearing any leftover
-      // "Booking…" state — instead of reusing its cached client instance.
-      router.refresh();
+      // Reload so everything re-derives from the DB: the booking disappears,
+      // the member's card flips from "Booked" back to bookable, and their freed
+      // slot becomes available again.
+      window.location.reload();
+      return;
     }
     setCancelling(null);
   };
@@ -208,6 +203,7 @@ export default function CoffeeChatPage() {
                 avatarUrl={m.avatarUrl}
                 interests={m.interests}
                 disabled={!m.bookable}
+                booked={m.booked}
                 onBook={() => router.push(`/apply/coffee-chat/book/${m.user_id}`)}
               />
             ))}

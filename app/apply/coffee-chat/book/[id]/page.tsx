@@ -116,6 +116,23 @@ export default function BookingPage() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setError("You must be signed in to book."); setBooking(false); return; }
 
+    // One chat per person: bail if the user already has an upcoming booking
+    // with this member (guards against a stale card or direct navigation).
+    const { data: existing } = await supabase
+      .from("coffee_chats")
+      .select("id")
+      .eq("member_id", id)
+      .eq("applicant_id", user.id)
+      .gte("meeting_time", new Date().toISOString())
+      .limit(1)
+      .maybeSingle();
+
+    if (existing) {
+      setError("You already have a coffee chat booked with this person.");
+      setBooking(false);
+      return;
+    }
+
     // Grab one still-open row for this slot
     const { data: openRow } = await supabase
       .from("coffee_chats")
