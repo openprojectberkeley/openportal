@@ -10,15 +10,12 @@ const HOURS = Array.from({ length: 13 }, (_, i) => i + 8); // 8am–8pm
 const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const REQUIRED_PER_WEEK = 5;
 
-// ── Bookable availability window. Change these two dates per cycle. ───────────
-// Months are 0-indexed, so (2026, 7, 1) = Aug 1, 2026.
-const RANGE_START = new Date(2026, 7, 1);
-const RANGE_END = new Date(2026, 7, 31);
-// Exclusive upper bound: start of the day after RANGE_END (so RANGE_END's whole
-// day is included in date/time comparisons).
-const RANGE_END_EXCLUSIVE = new Date(RANGE_END.getFullYear(), RANGE_END.getMonth(), RANGE_END.getDate() + 1);
-
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+// Fallback window used only until VP Tech configures one (or the app_settings
+// row is missing). Months are 0-indexed, so (2026, 7, 1) = Aug 1, 2026.
+const DEFAULT_RANGE_START = new Date(2026, 7, 1);
+const DEFAULT_RANGE_END = new Date(2026, 7, 31);
 
 function formatHour(h: number): string {
   if (h === 12) return "12pm";
@@ -35,28 +32,29 @@ function mondayOf(date: Date): Date {
   return d;
 }
 
-// Weeks are indexed from the week containing RANGE_START through the week
-// containing RANGE_END, so the whole window is reachable via the nav arrows.
-const FIRST_MONDAY = mondayOf(RANGE_START);
-const WEEK_COUNT = Math.round((mondayOf(RANGE_END).getTime() - FIRST_MONDAY.getTime()) / WEEK_MS) + 1;
-
-function weekStartOf(weekOffset: number): Date {
-  const d = new Date(FIRST_MONDAY);
-  d.setDate(d.getDate() + weekOffset * 7);
+function addDays(date: Date, n: number): Date {
+  const d = new Date(date);
+  d.setDate(d.getDate() + n);
   return d;
 }
 
-// Open on the week containing today, clamped into the window.
-const INITIAL_WEEK_OFFSET = Math.min(
-  WEEK_COUNT - 1,
-  Math.max(0, Math.round((mondayOf(new Date()).getTime() - FIRST_MONDAY.getTime()) / WEEK_MS)),
-);
+// Number of week columns (Mon–Sun) spanning [start, end] inclusive.
+function weekCountFor(start: Date, end: Date): number {
+  return Math.max(1, Math.round((mondayOf(end).getTime() - mondayOf(start).getTime()) / WEEK_MS) + 1);
+}
 
-// Whether a calendar day falls inside the bookable window.
-function inRange(date: Date): boolean {
-  const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
-  return d >= RANGE_START && d < RANGE_END_EXCLUSIVE;
+// 'YYYY-MM-DD' (local) <-> Date, matching a Postgres `date` column and the
+// value format of <input type="date">.
+function toDateInputValue(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function parseLocalDate(s: string): Date {
+  const [y, m, d] = s.split("-").map(Number);
+  return new Date(y, (m ?? 1) - 1, d ?? 1);
 }
 
 function slotKey(date: Date, hour: number): string {
@@ -73,19 +71,53 @@ type UpcomingSlot = {
 };
 
 export default function ManagerCoffeeChatsPage() {
-  // Exec availability holds more attendees per slot than board (PM).
-  const { isExec } = useRoleSim();
+  // Exec availability holds more attendees per slot than board (PM). Only real
+  // VP Tech (viewing as themselves) may edit the bookable window.
+  const { isExec, canSimulate, persona } = useRoleSim();
   const slotCapacity = isExec ? 5 : 3;
+  const canEditWindow = canSimulate && persona === "exec";
 
   const [upcomingSlots, setUpcomingSlots] = useState<UpcomingSlot[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const [weekOffset, setWeekOffset] = useState(INITIAL_WEEK_OFFSET);
+  // Bookable window (loaded from app_settings; falls back to the defaults).
+  const [rangeStart, setRangeStart] = useState<Date>(DEFAULT_RANGE_START);
+  const [rangeEnd, setRangeEnd] = useState<Date>(DEFAULT_RANGE_END);
+  const [settingsReady, setSettingsReady] = useState(false);
+  const [draftStart, setDraftStart] = useState(toDateInputValue(DEFAULT_RANGE_START));
+  const [draftEnd, setDraftEnd] = useState(toDateInputValue(DEFAULT_RANGE_END));
+  const [savingWindow, setSavingWindow] = useState(false);
+  const [windowError, setWindowError] = useState<string | null>(null);
+
+  const [weekOffset, setWeekOffset] = useState(0);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [dbTimes, setDbTimes] = useState<Set<string>>(new Set());
   const [bookedTimes, setBookedTimes] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  // Load the configured window once, then open on the week containing today.
+  useEffect(() => {
+    const supabase = createClient();
+    supabase
+      .from("app_settings")
+      .select("coffee_chat_start, coffee_chat_end")
+      .eq("id", 1)
+      .maybeSingle()
+      .then(({ data }) => {
+        const start = data?.coffee_chat_start ? parseLocalDate(data.coffee_chat_start) : DEFAULT_RANGE_START;
+        const end = data?.coffee_chat_end ? parseLocalDate(data.coffee_chat_end) : DEFAULT_RANGE_END;
+        setRangeStart(start);
+        setRangeEnd(end);
+        setDraftStart(toDateInputValue(start));
+        setDraftEnd(toDateInputValue(end));
+        const wc = weekCountFor(start, end);
+        setWeekOffset(
+          Math.min(wc - 1, Math.max(0, Math.round((mondayOf(new Date()).getTime() - mondayOf(start).getTime()) / WEEK_MS))),
+        );
+        setSettingsReady(true);
+      });
+  }, []);
 
   const copyEmail = async (key: string, email: string | null) => {
     if (!email) return;
@@ -107,8 +139,8 @@ export default function ManagerCoffeeChatsPage() {
       .from("coffee_chats")
       .select("meeting_time, applicant_id")
       .eq("member_id", user.id)
-      .gte("meeting_time", RANGE_START.toISOString())
-      .lt("meeting_time", RANGE_END_EXCLUSIVE.toISOString())
+      .gte("meeting_time", rangeStart.toISOString())
+      .lt("meeting_time", addDays(rangeEnd, 1).toISOString())
       .order("meeting_time", { ascending: true });
 
     if (!rows?.length) {
@@ -166,25 +198,53 @@ export default function ManagerCoffeeChatsPage() {
     setBookedTimes(bookedSet);
     setSelected(new Set(dbSet));
     setLoading(false);
-  }, []);
+  }, [rangeStart, rangeEnd]);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    if (settingsReady) load();
+  }, [load, settingsReady]);
 
-  // Week grid helpers
-  const weekStart = weekStartOf(weekOffset);
-  const weekDates = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(weekStart);
-    d.setDate(weekStart.getDate() + i);
-    return d;
-  });
+  // Window-derived grid geometry (recomputed when the range changes).
+  const rangeEndExclusive = addDays(rangeEnd, 1);
+  const firstMonday = mondayOf(rangeStart);
+  const weekCount = weekCountFor(rangeStart, rangeEnd);
+  const weekStart = addDays(firstMonday, weekOffset * 7);
+  const weekDates = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
   const now = new Date();
+
+  const inRange = (date: Date): boolean => {
+    const d = new Date(date);
+    d.setHours(0, 0, 0, 0);
+    return d >= rangeStart && d < rangeEndExclusive;
+  };
 
   const isPast = (date: Date, hour: number) => {
     const t = new Date(date);
     t.setHours(hour, 0, 0, 0);
     return t < now;
+  };
+
+  const windowDirty = draftStart !== toDateInputValue(rangeStart) || draftEnd !== toDateInputValue(rangeEnd);
+
+  const saveWindow = async () => {
+    setWindowError(null);
+    if (!draftStart || !draftEnd) { setWindowError("Pick both dates."); return; }
+    const start = parseLocalDate(draftStart);
+    const end = parseLocalDate(draftEnd);
+    if (start > end) { setWindowError("Start date must be on or before end date."); return; }
+
+    setSavingWindow(true);
+    const supabase = createClient();
+    const { error } = await supabase
+      .from("app_settings")
+      .upsert({ id: 1, coffee_chat_start: draftStart, coffee_chat_end: draftEnd, updated_at: new Date().toISOString() });
+
+    if (error) { setWindowError(error.message); setSavingWindow(false); return; }
+
+    setRangeStart(start);
+    setRangeEnd(end);
+    setWeekOffset((w) => Math.min(weekCountFor(start, end) - 1, Math.max(0, w)));
+    setSavingWindow(false);
   };
 
   const toggleSlot = (key: string, date: Date, hour: number) => {
@@ -253,6 +313,48 @@ export default function ManagerCoffeeChatsPage() {
         <h1 className="text-2xl font-bold">Coffee Chats</h1>
       </div>
 
+      {/* Bookable window — VP Tech only */}
+      {canEditWindow && (
+        <div className="flex flex-col gap-3 border rounded-xl p-4">
+          <div className="flex flex-col gap-0.5">
+            <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Coffee Chat Window</h2>
+            <p className="text-xs text-muted-foreground">
+              The date range everyone can set availability within. Applies to all managers.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="flex flex-col gap-1 text-xs font-medium">
+              Start
+              <input
+                type="date"
+                value={draftStart}
+                max={draftEnd || undefined}
+                onChange={(e) => setDraftStart(e.target.value)}
+                className="border rounded-md px-3 py-1.5 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-xs font-medium">
+              End
+              <input
+                type="date"
+                value={draftEnd}
+                min={draftStart || undefined}
+                onChange={(e) => setDraftEnd(e.target.value)}
+                className="border rounded-md px-3 py-1.5 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+              />
+            </label>
+            <button
+              onClick={saveWindow}
+              disabled={savingWindow || !windowDirty}
+              className="rounded-md bg-foreground text-background px-3 py-2 text-sm font-medium hover:opacity-80 transition-opacity disabled:opacity-30"
+            >
+              {savingWindow ? "Saving…" : "Save window"}
+            </button>
+          </div>
+          {windowError && <p className="text-sm text-red-500">{windowError}</p>}
+        </div>
+      )}
+
       {/* Availability grid */}
       <div className="flex flex-col gap-4">
         <div className="flex items-center justify-between flex-wrap gap-2">
@@ -286,8 +388,8 @@ export default function ManagerCoffeeChatsPage() {
             {weekDates[6].toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
           </span>
           <button
-            onClick={() => setWeekOffset((w) => Math.min(WEEK_COUNT - 1, w + 1))}
-            disabled={weekOffset >= WEEK_COUNT - 1}
+            onClick={() => setWeekOffset((w) => Math.min(weekCount - 1, w + 1))}
+            disabled={weekOffset >= weekCount - 1}
             className="p-1 rounded hover:bg-accent disabled:opacity-30 transition-colors"
           >
             <ChevronRight size={16} />
