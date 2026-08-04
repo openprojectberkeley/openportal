@@ -59,7 +59,7 @@ export async function updateSession(request: NextRequest) {
         redirectUrl.pathname = "/auth/error";
         redirectUrl.searchParams.set("error", BERKELEY_EMAIL_REQUIRED_MESSAGE);
       } else {
-        redirectUrl.pathname = "/protected";
+        redirectUrl.pathname = "/";
       }
 
       const redirectResponse = NextResponse.redirect(redirectUrl);

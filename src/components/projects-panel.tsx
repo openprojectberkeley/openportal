@@ -13,6 +13,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { PanelListSkeleton } from "@/components/skeletons";
+import { PersonName } from "@/components/person-profile-provider";
 
 type ProjectMember = { user_id: string; name: string; is_pm: boolean };
 
@@ -168,7 +170,7 @@ export function ProjectsPanel({ members }: Props) {
     );
   };
 
-  if (loading) return <div className="py-8 text-sm text-muted-foreground">Loading...</div>;
+  if (loading) return <PanelListSkeleton />;
   if (error) return <div className="py-8 text-sm text-red-500">{error}</div>;
 
   return (
@@ -251,7 +253,7 @@ export function ProjectsPanel({ members }: Props) {
                       <div className="flex flex-col gap-1">
                         {p.members.map((m) => (
                           <div key={m.user_id} className="flex items-center gap-2 text-sm">
-                            <span className="flex-1">{m.name}</span>
+                            <PersonName userId={m.user_id} name={m.name} className="flex-1" />
                             <button
                               onClick={() => togglePm(p, m)}
                               className={`px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${

@@ -78,16 +78,11 @@ export function AppNavbar() {
                     Admin
                   </DropdownMenuItem>
                 )}
-                {member.isMember && (
-                  <DropdownMenuItem onSelect={() => router.push("/protected")}>
-                    Dashboard
-                  </DropdownMenuItem>
-                )}
+                <DropdownMenuItem onSelect={() => router.push("/")}>
+                  Home
+                </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => setProfileOpen(true)}>
                   Profile
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => router.push("/apply")}>
-                  Application
                 </DropdownMenuItem>
                 <DropdownMenuItem onSelect={logout} className="text-red-500 focus:text-red-500">
                   Logout

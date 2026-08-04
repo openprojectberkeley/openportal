@@ -1,6 +1,7 @@
 "use client";
 
 import { Check } from "lucide-react";
+import { PersonName } from "@/components/person-profile-provider";
 
 type Role = { id: string; role_name: string };
 
@@ -15,7 +16,7 @@ export type CoffeeChatCardProps = {
   booked?: boolean;
 };
 
-export function CoffeeChatCard({ name, roles, avatarUrl, interests, onBook, disabled, booked }: CoffeeChatCardProps) {
+export function CoffeeChatCard({ id, name, roles, avatarUrl, interests, onBook, disabled, booked }: CoffeeChatCardProps) {
   const initials = name
     .split(" ")
     .map((w) => w[0])
@@ -38,7 +39,12 @@ export function CoffeeChatCard({ name, roles, avatarUrl, interests, onBook, disa
           </div>
         )}
         <div className="flex flex-col gap-1.5 min-w-0">
-          <span className="font-semibold text-sm">{name}</span>
+          <PersonName
+            userId={id}
+            name={name}
+            preloaded={{ roles, interests }}
+            className="font-semibold text-sm"
+          />
           <div className="flex flex-wrap gap-1">
             {roles.map((r) => (
               <span

@@ -48,7 +48,7 @@ export default function OnboardingPage() {
       return;
     }
 
-    router.replace("/apply");
+    router.replace("/");
   };
 
   return (

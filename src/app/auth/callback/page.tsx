@@ -46,9 +46,9 @@ export default function AuthCallbackPage() {
         if (!member) {
           router.replace("/onboarding");
         } else if (member.active) {
-          router.replace("/protected");
+          router.replace("/");
         } else {
-          router.replace("/apply");
+          router.replace("/");
         }
         return;
       }

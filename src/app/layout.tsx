@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist } from "next/font/google";
 import { ThemeProvider } from "next-themes";
 import { RoleSimulationProvider } from "@/components/role-simulation-provider";
+import { PersonProfileProvider } from "@/components/person-profile-provider";
 import "./globals.css";
 
 const defaultUrl = process.env.VERCEL_URL
@@ -37,7 +38,9 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          <RoleSimulationProvider>{children}</RoleSimulationProvider>
+          <RoleSimulationProvider>
+            <PersonProfileProvider>{children}</PersonProfileProvider>
+          </RoleSimulationProvider>
         </ThemeProvider>
       </body>
     </html>

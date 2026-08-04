@@ -13,8 +13,11 @@ import {
 import { Input } from "@/components/ui/input";
 import { useRoleSim } from "@/components/role-simulation-provider";
 import { ProjectsPanel } from "@/components/projects-panel";
+import { PortalsPanel } from "@/components/portals-panel";
+import { AdminPageSkeleton } from "@/components/skeletons";
+import { PersonName } from "@/components/person-profile-provider";
 
-type Tab = "members" | "projects";
+type Tab = "members" | "projects" | "portals";
 
 type Role = { id: string; role_name: string };
 
@@ -129,7 +132,7 @@ export default function AdminPage() {
     name: [m.preferred_firstname, m.lastname].filter(Boolean).join(" ") || "—",
   }));
 
-  if (loading) return <div className="p-8 text-sm text-muted-foreground">Loading...</div>;
+  if (loading) return <AdminPageSkeleton />;
   if (error) return <div className="p-8 text-sm text-red-500">{error}</div>;
 
   return (
@@ -137,7 +140,7 @@ export default function AdminPage() {
       <h1 className="text-2xl font-bold mb-6">Admin</h1>
 
       <div className="flex gap-1 mb-6 border-b">
-        {(["members", "projects"] as Tab[]).map((t) => (
+        {(["members", "projects", "portals"] as Tab[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -154,6 +157,8 @@ export default function AdminPage() {
 
       {tab === "projects" ? (
         <ProjectsPanel members={memberOptions} />
+      ) : tab === "portals" ? (
+        <PortalsPanel members={memberOptions} allRoles={allRoles} />
       ) : (
       <>
       <div className="flex gap-3 mb-4">
@@ -210,7 +215,9 @@ export default function AdminPage() {
                   {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                 </span>
                 <div className="flex items-center gap-2 flex-1 min-w-0 flex-wrap">
-                  <span className="font-medium text-sm">{name}</span>
+                  <span onClick={(e) => e.stopPropagation()}>
+                    <PersonName userId={m.user_id} name={name} preloaded={m} className="font-medium text-sm" />
+                  </span>
                   {m.roles.map((r) => (
                     <span
                       key={r.id}
