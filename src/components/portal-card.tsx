@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { Cog, Users } from "lucide-react";
-import { accentTint } from "@/lib/portal-color";
+import { readableTextColor } from "@/lib/portal-color";
 import { PortalSettingsModal } from "@/components/portal-settings-modal";
 import { PortalMembersModal } from "@/components/portal-members-modal";
 import { usePortalMeta } from "@/components/portal-meta-provider";
@@ -33,19 +33,20 @@ export function PortalCard({ portal }: { portal: PortalSummary }) {
   return (
     <>
       <div
-        className="group relative overflow-hidden border rounded-xl p-5 transition-shadow hover:shadow-sm"
-        style={{ backgroundColor: accentTint(color) }}
+        className="group relative overflow-hidden border rounded-xl bg-muted p-5 transition-shadow hover:shadow-sm"
+        style={{ "--hover-fg": readableTextColor(color) } as React.CSSProperties}
       >
         {/* Full-card click target (a button can't nest in an <a>, so the link is
             an overlay and the controls sit above it). */}
         <Link href={`/portals/${portal.id}`} aria-label={`Open ${name}`} className="absolute inset-0 z-0" />
-        {/* Invert-on-hover surface: the color swipes in from left to right. */}
+        {/* Accent swipe: the chosen color wipes in from left to right on hover. */}
         <div
-          className="absolute inset-0 z-0 bg-foreground origin-left scale-x-0 group-hover:scale-x-100 pointer-events-none transition-transform duration-300 ease-out"
+          className="absolute inset-0 z-0 origin-left scale-x-0 group-hover:scale-x-100 pointer-events-none transition-transform duration-300 ease-out"
+          style={{ backgroundColor: color || "hsl(var(--muted-foreground))" }}
           aria-hidden
         />
 
-        <div className="relative z-10 pointer-events-none flex flex-col gap-3 group-hover:text-background transition-colors">
+        <div className="relative z-10 pointer-events-none flex flex-col gap-3 group-hover:text-[var(--hover-fg)] transition-colors">
           <div className="flex items-center gap-3">
             <span
               className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg text-xl bg-foreground/5"
@@ -63,7 +64,7 @@ export function PortalCard({ portal }: { portal: PortalSummary }) {
             </div>
           </div>
           {description && (
-            <p className="text-sm text-muted-foreground group-hover:text-background/70 line-clamp-2 transition-colors">
+            <p className="text-sm text-muted-foreground group-hover:text-[var(--hover-fg)] group-hover:opacity-70 line-clamp-2 transition-colors">
               {description}
             </p>
           )}
@@ -73,7 +74,7 @@ export function PortalCard({ portal }: { portal: PortalSummary }) {
           <button
             onClick={() => setMembersOpen(true)}
             aria-label="View members"
-            className="text-muted-foreground hover:text-foreground group-hover:text-background/80 transition-colors"
+            className="text-muted-foreground group-hover:text-[var(--hover-fg)] opacity-70 hover:opacity-100 transition"
           >
             <Users size={16} />
           </button>
@@ -81,7 +82,7 @@ export function PortalCard({ portal }: { portal: PortalSummary }) {
             <button
               onClick={() => setSettingsOpen(true)}
               aria-label="Portal settings"
-              className="text-muted-foreground hover:text-foreground group-hover:text-background/80 transition-colors"
+              className="text-muted-foreground group-hover:text-[var(--hover-fg)] opacity-70 hover:opacity-100 transition"
             >
               <Cog size={16} />
             </button>

@@ -128,7 +128,7 @@ export default function HomePage() {
         {isBoardOrExec && (
           <Link
             href="/manager"
-            className="group flex items-center gap-3.5 rounded-xl border px-4 py-3.5 bg-foreground text-background hover:opacity-90 transition-opacity"
+            className="group self-center flex items-center gap-3.5 rounded-xl border px-4 py-3.5 bg-foreground text-background hover:opacity-90 transition-opacity"
           >
             <div className="h-10 w-10 rounded-full flex items-center justify-center flex-shrink-0 bg-background/10">
               <ShieldCheck size={18} />
