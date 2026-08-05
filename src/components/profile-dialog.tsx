@@ -6,6 +6,7 @@ import { createPortal } from "react-dom";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/overlay-scrollbar";
 import { X } from "lucide-react";
 
 type ProfileFields = {
@@ -130,7 +131,7 @@ export function ProfileDialog({ open, onOpenChange, userId, onSave }: Props) {
             <span className="sr-only">Close</span>
           </button>
         </div>
-        <div className="overflow-y-auto px-6 pb-6 flex flex-col gap-4">
+        <ScrollArea className="min-h-0" viewportClassName="px-6 pb-6 flex flex-col gap-4">
           {(Object.keys(EMPTY) as (keyof ProfileFields)[]).map((key) => (
             <div key={key} className="flex flex-col gap-1">
               <Label htmlFor={key}>{LABELS[key]}</Label>
@@ -160,7 +161,7 @@ export function ProfileDialog({ open, onOpenChange, userId, onSave }: Props) {
               {loading ? "Saving..." : "Save"}
             </Button>
           </div>
-        </div>
+        </ScrollArea>
       </div>
     </div>,
     document.body,

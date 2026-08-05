@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/client";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { CodesTableSkeleton } from "@/components/skeletons";
+import { ScrollArea } from "@/components/overlay-scrollbar";
 import { PersonName } from "@/components/person-profile-provider";
 
 const PAGE_SIZE = 20;
@@ -180,7 +181,7 @@ export default function ManagerInfosessionPage() {
   return (
     <div className="w-full max-w-3xl mx-auto p-6 flex flex-col gap-10">
       <div className="flex flex-col gap-1">
-        <Link href="/manager" className="text-sm text-muted-foreground hover:underline">← Back</Link>
+        <Link href="/manager" className="text-sm text-muted-foreground hover:text-foreground">← Back</Link>
         <h1 className="text-2xl font-bold">Infosession Attendance</h1>
         <p className="text-sm text-muted-foreground">
           Generate a code, then read it out to an applicant so they can record their attendance.
@@ -225,7 +226,7 @@ export default function ManagerInfosessionPage() {
           <p className="text-sm text-muted-foreground">No codes yet. Generate one above.</p>
         ) : (
           <>
-            <div className="overflow-x-auto border rounded-xl">
+            <ScrollArea orientation="horizontal" className="border rounded-xl overflow-hidden">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b text-left text-xs text-muted-foreground uppercase tracking-wide">
@@ -299,7 +300,7 @@ export default function ManagerInfosessionPage() {
                   ))}
                 </tbody>
               </table>
-            </div>
+            </ScrollArea>
 
             {totalPages > 1 && (
               <div className="flex items-center justify-between">

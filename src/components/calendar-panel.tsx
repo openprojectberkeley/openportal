@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/supabase/client";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight, Plus, Pencil, Trash2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, Pencil, Trash2, MapPin, CalendarPlus } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { EventListSkeleton } from "@/components/skeletons";
 import { accentTint } from "@/lib/portal-color";
+import { downloadEventIcs } from "@/lib/ics";
 import { cn } from "@/lib/utils";
 import { useRoleSim } from "@/components/role-simulation-provider";
 import { usePortalMeta } from "@/components/portal-meta-provider";
@@ -19,6 +20,7 @@ export type PortalEvent = {
   portal_id: string;
   title: string;
   description: string | null;
+  location: string | null;
   start_time: string;
   end_time: string | null;
   all_day: boolean;
@@ -60,7 +62,7 @@ function timeValue(iso: string): string {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
-const EVENT_SELECT = "id, portal_id, title, description, start_time, end_time, all_day, portals(name, color)";
+const EVENT_SELECT = "id, portal_id, title, description, location, start_time, end_time, all_day, portals(name, color)";
 
 type EventFields = {
   title: string;
@@ -69,6 +71,7 @@ type EventFields = {
   startTime: string;
   endTime: string;
   description: string;
+  location: string;
   portalId: string;
 };
 
@@ -79,6 +82,7 @@ const emptyFields = (date: string, portalId: string): EventFields => ({
   startTime: "18:00",
   endTime: "",
   description: "",
+  location: "",
   portalId,
 });
 
@@ -92,6 +96,7 @@ function EventCard({
   onDelete,
   deleting = false,
   onClick,
+  actions = true,
 }: {
   ev: PortalEvent;
   name: string | null;
@@ -101,36 +106,60 @@ function EventCard({
   onDelete?: () => void;
   deleting?: boolean;
   onClick?: () => void;
+  actions?: boolean;
 }) {
-  const canManage = Boolean(onEdit || onDelete);
+  // Opaque card color, reused for the hover overlay's gradient so it washes out
+  // the content beneath the buttons in the card's own colour.
+  const cardBg = color
+    ? accentTint(color, 18)!
+    : "color-mix(in srgb, hsl(var(--accent)) 40%, hsl(var(--background)))";
   return (
     <div
       className={cn(
-        "group/event rounded-md px-2.5 py-2 flex items-start gap-2",
-        !color && "bg-accent/40",
+        "group/event relative overflow-hidden rounded-md px-2.5 py-2 flex flex-col gap-1",
         onClick && "cursor-pointer",
       )}
-      style={{ backgroundColor: accentTint(color, 18) }}
+      style={{ backgroundColor: cardBg }}
       onClick={onClick}
     >
-      <div className="flex flex-col gap-0.5 min-w-0 flex-1">
-        <span className="text-sm font-medium">{ev.title}</span>
-        <span className="text-xs text-muted-foreground">
-          {showDate && `${formatDate(ev.start_time)} · `}
-          {ev.all_day
-            ? "All day"
-            : `${formatTime(ev.start_time)}${ev.end_time ? ` – ${formatTime(ev.end_time)}` : ""}`}
-        </span>
-        {ev.description && <span className="text-xs text-muted-foreground">{ev.description}</span>}
-      </div>
-      <div className="flex flex-col items-end gap-1 flex-shrink-0">
+      <div className="flex items-start gap-2">
+        <div className="flex flex-col gap-0.5 min-w-0 flex-1">
+          <span className="text-sm font-medium">{ev.title}</span>
+          <span className="text-xs text-muted-foreground">
+            {showDate && `${formatDate(ev.start_time)} · `}
+            {ev.all_day
+              ? "All day"
+              : `${formatTime(ev.start_time)}${ev.end_time ? ` – ${formatTime(ev.end_time)}` : ""}`}
+          </span>
+          {ev.location && (
+            <span className="flex items-center gap-0.5 text-xs text-muted-foreground min-w-0" title={ev.location}>
+              <MapPin size={11} className="flex-shrink-0" /> <span className="truncate">{ev.location}</span>
+            </span>
+          )}
+          {ev.description && <span className="text-xs text-muted-foreground">{ev.description}</span>}
+        </div>
         {name && (
-          <span className="text-[10px] text-muted-foreground whitespace-nowrap max-w-[8rem] truncate" title={name}>
+          <span className="text-[10px] text-muted-foreground whitespace-nowrap max-w-[8rem] truncate flex-shrink-0" title={name}>
             {name}
           </span>
         )}
-        {canManage && (
-          <div className="flex items-center gap-0.5 opacity-0 group-hover/event:opacity-100 focus-within:opacity-100 transition-opacity">
+      </div>
+
+      {/* Controls overlay the bottom-right on hover — no layout space taken. A
+          gradient in the card's own colour washes out the content beneath. */}
+      {actions && (
+        <div
+          className="absolute inset-0 flex items-end justify-end p-1.5 opacity-0 group-hover/event:opacity-100 focus-within:opacity-100 transition-opacity pointer-events-none"
+          style={{ background: `linear-gradient(to top left, ${cardBg} 0%, ${cardBg} 22%, transparent 60%)` }}
+        >
+          <div className="flex items-center gap-0.5 pointer-events-auto">
+            <button
+              onClick={(e) => { e.stopPropagation(); downloadEventIcs(ev); }}
+              className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded"
+              aria-label={`Add ${ev.title} to calendar`}
+            >
+              <CalendarPlus size={13} />
+            </button>
             {onEdit && (
               <button
                 onClick={(e) => { e.stopPropagation(); onEdit(); }}
@@ -151,8 +180,8 @@ function EventCard({
               </button>
             )}
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -249,19 +278,14 @@ export function CalendarPanel({ portalId }: Props) {
     return map;
   }, [events]);
 
-  const startOfToday = useMemo(() => {
-    const d = new Date(today);
-    d.setHours(0, 0, 0, 0);
-    return d.getTime();
-  }, [today]);
-
+  // "Upcoming" = the next 5 events from now forward (includes later-today events).
   const upcoming = useMemo(
     () =>
       events
-        .filter((e) => new Date(e.start_time).getTime() >= startOfToday)
+        .filter((e) => new Date(e.start_time).getTime() >= today.getTime())
         .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
         .slice(0, 5),
-    [events, startOfToday],
+    [events, today],
   );
 
   const firstOfMonth = new Date(viewYear, viewMonth, 1);
@@ -314,6 +338,7 @@ export function CalendarPanel({ portalId }: Props) {
       startTime: ev.all_day ? "18:00" : timeValue(ev.start_time),
       endTime: ev.end_time ? timeValue(ev.end_time) : "",
       description: ev.description ?? "",
+      location: ev.location ?? "",
       portalId: ev.portal_id,
     });
     setFormError(null);
@@ -344,6 +369,7 @@ export function CalendarPanel({ portalId }: Props) {
     const payload = {
       title,
       description: fields.description.trim() || null,
+      location: fields.location.trim() || null,
       start_time,
       end_time,
       all_day: fields.allDay,
@@ -444,7 +470,7 @@ export function CalendarPanel({ portalId }: Props) {
                     <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 z-30 w-52 pointer-events-none flex flex-col gap-1 rounded-lg border bg-popover p-2 shadow-lg text-left">
                       {dayEvents.map((ev) => {
                         const { name, color } = resolve(ev);
-                        return <EventCard key={ev.id} ev={ev} name={name} color={color} />;
+                        return <EventCard key={ev.id} ev={ev} name={name} color={color} actions={false} />;
                       })}
                     </div>
                   )}
@@ -561,6 +587,15 @@ export function CalendarPanel({ portalId }: Props) {
                 </div>
               </div>
             )}
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="event-location">Location</Label>
+              <Input
+                id="event-location"
+                value={fields.location}
+                onChange={(e) => setFields((f) => ({ ...f, location: e.target.value }))}
+                placeholder="Optional"
+              />
+            </div>
             <div className="flex flex-col gap-1">
               <Label htmlFor="event-description">Description</Label>
               <textarea

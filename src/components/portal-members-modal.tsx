@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useEffect, useState } from "react";
 import { PlusCircle, X } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ScrollArea } from "@/components/overlay-scrollbar";
 import { PersonName } from "@/components/person-profile-provider";
 import {
   DropdownMenu,
@@ -12,6 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
+import { MemberRosterSkeleton } from "@/components/skeletons";
 
 type MemberRow = { user_id: string; name: string; is_admin: boolean };
 type MemberOption = { user_id: string; name: string };
@@ -104,40 +106,21 @@ export function PortalMembersModal({ portalId, open, onOpenChange, canEdit }: Pr
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
+      {/* Locked dimensions: the modal keeps a fixed height and the roster scrolls
+          inside it rather than the whole modal growing with the member count. */}
+      <DialogContent className="flex flex-col h-[30rem] max-h-[85vh]">
+        <DialogHeader className="flex-shrink-0">
           <DialogTitle>Members</DialogTitle>
         </DialogHeader>
-        <div className="flex flex-col gap-3">
-          {canEdit && (
-            <div className="flex justify-end">
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button size="sm" variant="outline">
-                    <PlusCircle size={14} /> Add member
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="max-h-64 overflow-y-auto">
-                  {available.length === 0 ? (
-                    <div className="px-2 py-1.5 text-xs text-muted-foreground">No members left to add</div>
-                  ) : (
-                    available.map((m) => (
-                      <DropdownMenuItem key={m.user_id} onSelect={() => addMember(m)}>
-                        {m.name}
-                      </DropdownMenuItem>
-                    ))
-                  )}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          )}
 
+        {/* Scrollable roster fills the remaining height; overflow scrolls here. */}
+        <ScrollArea className="flex-1 min-h-0">
           {loading ? (
-            <p className="text-sm text-muted-foreground py-4 text-center">Loading...</p>
+            <MemberRosterSkeleton />
           ) : rows.length === 0 ? (
             <p className="text-sm text-muted-foreground py-4 text-center">No members yet.</p>
           ) : (
-            <div className="flex flex-col gap-1 max-h-80 overflow-y-auto">
+            <div className="flex flex-col gap-1">
               {rows.map((r) => (
                 <div key={r.user_id} className="flex items-center gap-2 text-sm py-1">
                   <PersonName userId={r.user_id} name={r.name} className="flex-1 min-w-0 truncate" />
@@ -168,7 +151,31 @@ export function PortalMembersModal({ portalId, open, onOpenChange, canEdit }: Pr
               ))}
             </div>
           )}
-        </div>
+        </ScrollArea>
+
+        {/* Add member stays locked to the bottom-left, below the roster. */}
+        {canEdit && (
+          <div className="flex-shrink-0 pt-3 mt-1 border-t">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button size="sm" variant="outline">
+                  <PlusCircle size={14} /> Add member
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" side="top" className="max-h-64 overflow-y-auto">
+                {available.length === 0 ? (
+                  <div className="px-2 py-1.5 text-xs text-muted-foreground">No members left to add</div>
+                ) : (
+                  available.map((m) => (
+                    <DropdownMenuItem key={m.user_id} onSelect={() => addMember(m)}>
+                      {m.name}
+                    </DropdownMenuItem>
+                  ))
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );

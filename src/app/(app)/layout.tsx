@@ -7,14 +7,15 @@ import { PortalMetaProvider } from "@/components/portal-meta-provider";
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <PortalMetaProvider>
-      <main className="min-h-screen flex flex-col items-center">
-        <div className="flex-1 w-full flex flex-col items-center">
-          <AppNavbar />
-          <div className="flex-1 w-full">{children}</div>
-          <footer className="w-full flex items-center justify-center border-t mx-auto text-center text-xs gap-8 py-16">
-            <ThemeSwitcher />
-          </footer>
-        </div>
+      <main className="flex min-h-svh flex-col">
+        <AppNavbar />
+        {/* Content region fills the space between the sticky header and the
+            footer. Fit pages use `flex-1` to fill/center it (no scroll); taller
+            pages grow it and the window scrolls. */}
+        <div className="flex w-full flex-1 flex-col">{children}</div>
+        <footer className="w-full flex items-center justify-center border-t text-center text-xs gap-8 py-16">
+          <ThemeSwitcher />
+        </footer>
       </main>
     </PortalMetaProvider>
   );

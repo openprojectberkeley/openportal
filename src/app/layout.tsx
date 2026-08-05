@@ -3,6 +3,7 @@ import { Geist } from "next/font/google";
 import { ThemeProvider } from "next-themes";
 import { RoleSimulationProvider } from "@/components/role-simulation-provider";
 import { PersonProfileProvider } from "@/components/person-profile-provider";
+import { WindowScrollbar } from "@/components/overlay-scrollbar";
 import "./globals.css";
 
 const defaultUrl = process.env.VERCEL_URL
@@ -41,6 +42,7 @@ export default function RootLayout({
           <RoleSimulationProvider>
             <PersonProfileProvider>{children}</PersonProfileProvider>
           </RoleSimulationProvider>
+          <WindowScrollbar />
         </ThemeProvider>
       </body>
     </html>

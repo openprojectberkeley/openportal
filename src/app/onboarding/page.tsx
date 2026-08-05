@@ -52,7 +52,7 @@ export default function OnboardingPage() {
   };
 
   return (
-    <div className="flex min-h-svh w-full items-center justify-center p-6">
+    <div className="flex flex-1 w-full items-center justify-center p-6">
       <div className="flex flex-col gap-6 w-full max-w-sm">
         <h1 className="text-2xl font-bold">Tell us your name</h1>
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">

@@ -8,6 +8,7 @@ import { useCallback, useEffect, useState } from "react";
 import { CalendarCheck, ChevronLeft, ChevronRight } from "lucide-react";
 import { useRoleSim } from "@/components/role-simulation-provider";
 import { usePersonProfile } from "@/components/person-profile-provider";
+import { ScrollArea } from "@/components/overlay-scrollbar";
 import { SlotCardsSkeleton } from "@/components/skeletons";
 
 const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
@@ -409,7 +410,7 @@ export default function ManagerCoffeeChatsPage() {
         <Script src="https://accounts.google.com/gsi/client" strategy="afterInteractive" />
       )}
       <div className="flex flex-col gap-1">
-        <Link href="/manager" className="text-sm text-muted-foreground hover:underline">← Back</Link>
+        <Link href="/manager" className="text-sm text-muted-foreground hover:text-foreground">← Back</Link>
         <h1 className="text-2xl font-bold">Coffee Chats</h1>
       </div>
 
@@ -509,7 +510,7 @@ export default function ManagerCoffeeChatsPage() {
         </div>
 
         {/* Grid */}
-        <div className="overflow-x-auto">
+        <ScrollArea orientation="horizontal">
           <div className="min-w-[560px] select-none">
             {/* Day headers */}
             <div className="grid grid-cols-[3.5rem_repeat(7,1fr)] gap-1 mb-1">
@@ -590,7 +591,7 @@ export default function ManagerCoffeeChatsPage() {
               ))}
             </div>
           </div>
-        </div>
+        </ScrollArea>
 
         <div className="flex gap-4 text-xs text-muted-foreground">
           <span className="flex items-center gap-1.5">

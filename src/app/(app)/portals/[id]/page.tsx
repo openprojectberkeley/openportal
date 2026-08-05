@@ -91,7 +91,7 @@ function PortalDetail() {
         <p className="text-sm text-muted-foreground">
           This portal doesn&apos;t exist or you don&apos;t have access to it.
         </p>
-        <Link href="/" className="text-sm font-medium underline">
+        <Link href="/" className="text-sm text-muted-foreground hover:text-foreground">
           Back to dashboard
         </Link>
       </div>

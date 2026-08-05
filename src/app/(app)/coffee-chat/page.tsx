@@ -143,7 +143,7 @@ export default function CoffeeChatPage() {
   return (
     <div className="w-full max-w-5xl mx-auto p-6 flex flex-col gap-8">
       <div className="flex flex-col gap-1">
-        <Link href="/" className="text-sm text-muted-foreground hover:underline">← Back</Link>
+        <Link href="/" className="text-sm text-muted-foreground hover:text-foreground">← Back</Link>
         <h1 className="text-2xl font-bold">Coffee Chat</h1>
         <p className="text-sm text-muted-foreground">Book a 1:1 with a member of our team.</p>
       </div>

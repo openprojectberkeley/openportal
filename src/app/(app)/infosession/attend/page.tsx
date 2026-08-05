@@ -70,12 +70,12 @@ export default function AttendPage() {
 
   if (submitted) {
     return (
-      <div className="flex min-h-svh w-full items-center justify-center p-6">
+      <div className="flex flex-1 w-full items-center justify-center p-6">
         <div className="flex flex-col gap-4 w-full max-w-sm text-center">
           <div className="text-4xl">✓</div>
           <h1 className="text-2xl font-bold">Attendance recorded!</h1>
           <p className="text-sm text-muted-foreground">Thanks for coming to the infosession.</p>
-          <Link href="/" className="text-sm text-muted-foreground hover:underline mt-2">
+          <Link href="/" className="text-sm text-muted-foreground hover:text-foreground mt-2">
             ← Back to apply
           </Link>
         </div>
@@ -86,7 +86,7 @@ export default function AttendPage() {
   return (
     <div className="w-full max-w-lg mx-auto p-6 flex flex-col gap-8">
       <div className="flex flex-col gap-1">
-        <Link href="/infosession" className="text-sm text-muted-foreground hover:underline">← Back</Link>
+        <Link href="/infosession" className="text-sm text-muted-foreground hover:text-foreground">← Back</Link>
         <h1 className="text-2xl font-bold">Submit Attendance</h1>
       </div>
 

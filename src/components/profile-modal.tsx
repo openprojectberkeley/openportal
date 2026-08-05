@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ScrollArea } from "@/components/overlay-scrollbar";
 import { initials, type OpenTarget, type PublicProfile } from "@/components/person-profile-provider";
 
 type Props = {
@@ -64,9 +65,28 @@ export function ProfileModal({ target, cached, onLoaded, onClose }: Props) {
   if (merged.major) academic.push({ label: "Major", value: merged.major });
   if (merged.grad_year) academic.push({ label: "Graduation year", value: String(merged.grad_year) });
 
+  // This modal is portaled at the app root, so it's a DOM *sibling* of any modal
+  // it was opened from (e.g. the portal-members modal) rather than a descendant.
+  // Radix decides a lower layer was "clicked outside" — and dismisses it — when an
+  // interaction bubbles all the way to `document`. Stopping our own interaction
+  // events here keeps clicks inside this modal (including the X button) from
+  // closing the modal underneath. The overlay is a separate element, so
+  // click-outside still closes this modal normally.
+  const stop = (e: React.SyntheticEvent) => e.stopPropagation();
+
   return (
     <Dialog open={!!userId} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto">
+      <DialogContent
+        className="p-0 overflow-hidden"
+        onPointerDown={stop}
+        onPointerUp={stop}
+        onMouseDown={stop}
+        onMouseUp={stop}
+        onClick={stop}
+        onTouchStart={stop}
+        onTouchEnd={stop}
+      >
+        <ScrollArea viewportClassName="max-h-[90vh] p-6">
         <DialogHeader>
           <div className="flex items-center gap-4">
             <div className="h-14 w-14 rounded-full bg-foreground/10 flex items-center justify-center text-sm font-semibold flex-shrink-0">
@@ -109,6 +129,7 @@ export function ProfileModal({ target, cached, onLoaded, onClose }: Props) {
             <p className="text-muted-foreground py-2">No additional details.</p>
           )}
         </div>
+        </ScrollArea>
       </DialogContent>
     </Dialog>
   );

@@ -6,13 +6,9 @@ export default function AdminLayout({
   children: React.ReactNode;
 }) {
   return (
-    <main className="min-h-screen flex flex-col items-center">
-      <div className="flex-1 w-full flex flex-col items-center">
-        <AppNavbar />
-        <div className="flex-1 w-full">
-          {children}
-        </div>
-      </div>
+    <main className="flex min-h-svh flex-col">
+      <AppNavbar />
+      <div className="flex w-full flex-1 flex-col">{children}</div>
     </main>
   );
 }

@@ -155,6 +155,22 @@ export function CodesTableSkeleton({ rows = 4 }: { rows?: number }) {
   );
 }
 
+// Mirrors the portal members roster rows: name bar + admin pill + remove icon.
+const MEMBER_NAME_WIDTHS = ["w-40", "w-32", "w-48", "w-36", "w-28", "w-44"];
+export function MemberRosterSkeleton({ rows = 7 }: { rows?: number }) {
+  return (
+    <div className="flex flex-col gap-1">
+      {Array.from({ length: rows }, (_, i) => (
+        <div key={i} className="flex items-center gap-2 py-1">
+          <Skeleton className={`h-4 ${MEMBER_NAME_WIDTHS[i % MEMBER_NAME_WIDTHS.length]}`} />
+          <Skeleton className="ml-auto h-5 w-12 rounded-full" />
+          <Skeleton className="h-4 w-4 rounded-sm" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // Mirrors the manager "Upcoming" coffee-chat slot cards.
 export function SlotCardsSkeleton({ count = 3 }: { count?: number }) {
   return (

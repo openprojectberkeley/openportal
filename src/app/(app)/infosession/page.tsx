@@ -68,7 +68,7 @@ export default function InfosessionPage() {
   return (
     <div className="w-full max-w-2xl mx-auto p-6 flex flex-col gap-8">
       <div className="flex flex-col gap-1">
-        <Link href="/" className="text-sm text-muted-foreground hover:underline">← Back</Link>
+        <Link href="/" className="text-sm text-muted-foreground hover:text-foreground">← Back</Link>
         <h1 className="text-2xl font-bold">Infosession</h1>
         <p className="text-sm text-muted-foreground">
           Attend either session below — both cover the same content.

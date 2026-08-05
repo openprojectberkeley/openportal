@@ -221,7 +221,7 @@ function ApplicantChecklist({
   const doneCount = items.filter((i) => i.done).length;
 
   return (
-    <div className="flex min-h-[calc(100svh-4rem)] w-full items-center justify-center p-6">
+    <div className="flex flex-1 w-full items-center justify-center p-6">
       <div className="flex flex-col gap-8 w-full max-w-md">
         <div className="flex flex-col gap-1.5 text-center">
           <h1 className="text-2xl font-bold tracking-tight">Get involved</h1>
