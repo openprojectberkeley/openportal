@@ -110,7 +110,12 @@ export function PortalMembersModal({ portalId, open, onOpenChange, canEdit }: Pr
           inside it rather than the whole modal growing with the member count. */}
       <DialogContent className="flex flex-col h-[30rem] max-h-[85vh]">
         <DialogHeader className="flex-shrink-0">
-          <DialogTitle>Members</DialogTitle>
+          <DialogTitle>
+            Members
+            {!loading && rows.length > 0 && (
+              <span className="ml-1.5 text-sm font-normal text-muted-foreground/60">({rows.length})</span>
+            )}
+          </DialogTitle>
         </DialogHeader>
 
         {/* Scrollable roster fills the remaining height; overflow scrolls here. */}

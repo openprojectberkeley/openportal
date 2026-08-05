@@ -13,8 +13,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             footer. Fit pages use `flex-1` to fill/center it (no scroll); taller
             pages grow it and the window scrolls. */}
         <div className="flex w-full flex-1 flex-col">{children}</div>
-        <footer className="w-full flex items-center justify-center border-t text-center text-xs gap-8 py-16">
-          <ThemeSwitcher />
+        <footer className="w-full border-t">
+          <div className="mx-auto flex w-full max-w-6xl flex-col items-center gap-3 px-5 py-8 text-xs text-muted-foreground sm:flex-row sm:justify-between">
+            <p>© 2026 Open Project at Berkeley. All rights reserved.</p>
+            <ThemeSwitcher />
+          </div>
         </footer>
       </main>
     </PortalMetaProvider>

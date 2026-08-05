@@ -226,6 +226,7 @@ export function ProjectsPanel({ members }: Props) {
                       <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
                         Members
                       </span>
+                      <span className="text-[10px] font-normal text-muted-foreground/60">({p.members.length})</span>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <button className="text-muted-foreground hover:text-foreground transition-colors">

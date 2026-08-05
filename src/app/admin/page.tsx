@@ -151,6 +151,9 @@ export default function AdminPage() {
             }`}
           >
             {t}
+            {t === "members" && members.length > 0 && (
+              <span className="ml-1 text-[10px] font-normal text-muted-foreground/60">({members.length})</span>
+            )}
           </button>
         ))}
       </div>

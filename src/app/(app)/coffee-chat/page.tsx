@@ -199,7 +199,9 @@ export default function CoffeeChatPage() {
         </section>
       ) : members.length > 0 ? (
         <section className="flex flex-col gap-3">
-          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Our Team</h2>
+          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+            Our Team <span className="text-xs font-normal text-muted-foreground/60">({members.length})</span>
+          </h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {members.map((m) => (
               <CoffeeChatCard

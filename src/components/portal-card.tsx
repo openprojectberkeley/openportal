@@ -39,9 +39,9 @@ export function PortalCard({ portal }: { portal: PortalSummary }) {
         {/* Full-card click target (a button can't nest in an <a>, so the link is
             an overlay and the controls sit above it). */}
         <Link href={`/portals/${portal.id}`} aria-label={`Open ${name}`} className="absolute inset-0 z-0" />
-        {/* Invert-on-hover surface. */}
+        {/* Invert-on-hover surface: the color swipes in from left to right. */}
         <div
-          className="absolute inset-0 z-0 bg-foreground opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity"
+          className="absolute inset-0 z-0 bg-foreground origin-left scale-x-0 group-hover:scale-x-100 pointer-events-none transition-transform duration-300 ease-out"
           aria-hidden
         />
 
