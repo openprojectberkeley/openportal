@@ -124,25 +124,24 @@ export default function HomePage() {
   if (view === "dashboard") {
     return (
       <div className="w-full max-w-6xl mx-auto p-5 flex flex-col gap-6">
-        {/* Board/exec get a shortcut into the application manager. */}
+        {/* Board/exec get a shortcut into the application manager. A dark-gray
+            pill; on hover white swipes in from the left (like the portal cards),
+            the text inverts, and it scales up a hair. */}
         {isBoardOrExec && (
           <Link
             href="/manager"
-            className="group self-center flex items-center gap-3.5 rounded-xl border px-4 py-3.5 bg-foreground text-background hover:opacity-90 transition-opacity"
+            aria-label="Application Manager"
+            className="group relative self-center inline-flex items-center gap-2 overflow-hidden rounded-full bg-neutral-700 px-4 py-2 text-sm font-medium text-white shadow-sm transition-transform duration-200 ease-out hover:scale-[1.03]"
           >
-            <div className="h-10 w-10 rounded-full flex items-center justify-center flex-shrink-0 bg-background/10">
-              <ShieldCheck size={18} />
-            </div>
-            <div className="flex flex-col gap-0.5 min-w-0 flex-1">
-              <span className="text-sm font-medium">Application Manager</span>
-              <span className="text-xs text-background/70">
-                Review and manage applicants — coffee chats, infosessions, and applications.
-              </span>
-            </div>
-            <ArrowRight
-              size={16}
-              className="text-background/60 flex-shrink-0 group-hover:translate-x-0.5 transition-transform"
+            {/* White accent wipes in from the left on hover. */}
+            <span
+              aria-hidden
+              className="absolute inset-0 z-0 origin-left scale-x-0 bg-white transition-transform duration-300 ease-out group-hover:scale-x-100"
             />
+            <span className="relative z-10 inline-flex items-center gap-2 whitespace-nowrap transition-colors duration-300 group-hover:text-neutral-900">
+              <ShieldCheck size={18} className="shrink-0" />
+              Application Manager
+            </span>
           </Link>
         )}
 

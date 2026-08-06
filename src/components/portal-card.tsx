@@ -33,7 +33,7 @@ export function PortalCard({ portal }: { portal: PortalSummary }) {
   return (
     <>
       <div
-        className="group relative overflow-hidden border rounded-xl bg-muted p-5 transition-shadow hover:shadow-sm"
+        className="group relative overflow-hidden border rounded-xl bg-muted p-5 transition-[transform,box-shadow] duration-200 ease-out hover:scale-[1.02] hover:shadow-sm"
         style={{ "--hover-fg": readableTextColor(color) } as React.CSSProperties}
       >
         {/* Full-card click target (a button can't nest in an <a>, so the link is

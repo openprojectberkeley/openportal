@@ -171,6 +171,50 @@ export function MemberRosterSkeleton({ rows = 7 }: { rows?: number }) {
   );
 }
 
+// Mirrors the Application Manager landing menu (manager/page.tsx): centered
+// column with back link, title, and 3 nav cards (icon tile + text + chevron).
+// Used as the route-guard Suspense fallback, which most often precedes the menu.
+export function ManagerMenuSkeleton() {
+  return (
+    <div className="flex flex-1 w-full items-center justify-center p-6">
+      <div className="flex flex-col gap-8 w-full max-w-md">
+        <div className="flex flex-col gap-1.5">
+          <Skeleton className="h-3.5 w-12" />
+          <Skeleton className="h-7 w-56" />
+          <Skeleton className="h-3.5 w-72 max-w-full" />
+        </div>
+        <div className="flex flex-col gap-3">
+          {Array.from({ length: 3 }, (_, i) => (
+            <div key={i} className="border rounded-xl px-4 py-3.5 flex items-center gap-3.5 bg-background">
+              <Skeleton className="h-10 w-10 rounded-full flex-shrink-0" />
+              <div className="flex flex-col gap-1.5 min-w-0 flex-1">
+                <Skeleton className="h-4 w-32" />
+                <Skeleton className="h-3 w-48 max-w-full" />
+              </div>
+              <Skeleton className="h-4 w-4 rounded-sm flex-shrink-0" />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Shared shell for the manager sub-screens (coffee-chats, infosession): the
+// max-w-3xl column plus a back-link + title header, with a slot for the
+// page-specific body skeleton. Used by their loading.tsx route segments.
+export function ManagerShellSkeleton({ children }: { children?: React.ReactNode }) {
+  return (
+    <div className="w-full max-w-3xl mx-auto p-6 flex flex-col gap-10">
+      <div className="flex flex-col gap-1">
+        <Skeleton className="h-4 w-16" />
+        <Skeleton className="h-8 w-52" />
+      </div>
+      {children}
+    </div>
+  );
+}
+
 // Mirrors the manager "Upcoming" coffee-chat slot cards.
 export function SlotCardsSkeleton({ count = 3 }: { count?: number }) {
   return (

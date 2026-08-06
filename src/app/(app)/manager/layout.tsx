@@ -4,10 +4,11 @@ import { accessIsBoardOrExec } from "@/lib/roles";
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import { Suspense } from "react";
+import { ManagerMenuSkeleton } from "@/components/skeletons";
 
 export default function ManagerLayout({ children }: { children: React.ReactNode }) {
   return (
-    <Suspense>
+    <Suspense fallback={<ManagerMenuSkeleton />}>
       <ManagerGuard>{children}</ManagerGuard>
     </Suspense>
   );
