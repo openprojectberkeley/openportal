@@ -13,9 +13,9 @@ import { SlotCardsSkeleton } from "@/components/skeletons";
 
 const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
 
-const HOURS = Array.from({ length: 13 }, (_, i) => i + 8); // 8am–8pm
+const HOURS = Array.from({ length: 17 }, (_, i) => i + 7); // 7am–12am (last slot 11pm–midnight)
 const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-const REQUIRED_PER_WEEK = 5;
+const REQUIRED_TOTAL = 30;
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -303,10 +303,7 @@ export default function ManagerCoffeeChatsPage() {
   const slotInfo = new Map<string, UpcomingSlot>();
   for (const s of upcomingSlots) slotInfo.set(new Date(s.meeting_time).toISOString(), s);
 
-  const weekSelectedCount = weekDates.reduce(
-    (count, date) => count + HOURS.filter((h) => selected.has(slotKey(date, h))).length,
-    0
-  );
+  const totalSelectedCount = selected.size;
 
   // Normalized bounds of the in-progress drag rectangle, used to preview which
   // tiles the current drag would affect.
@@ -461,8 +458,8 @@ export default function ManagerCoffeeChatsPage() {
         <div className="flex items-center justify-between flex-wrap gap-2">
           <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Your Availability</h2>
           <div className="flex items-center gap-3">
-            <span className={`text-sm font-medium tabular-nums ${weekSelectedCount >= REQUIRED_PER_WEEK ? "text-green-600" : "text-amber-500"}`}>
-              {weekSelectedCount} / {REQUIRED_PER_WEEK} hrs this week
+            <span className={`text-sm font-medium tabular-nums ${totalSelectedCount >= REQUIRED_TOTAL ? "text-green-600" : "text-amber-500"}`}>
+              {totalSelectedCount} / {REQUIRED_TOTAL} hrs total availability
             </span>
             {GOOGLE_CLIENT_ID && (
               <button
