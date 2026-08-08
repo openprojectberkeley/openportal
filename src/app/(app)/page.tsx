@@ -69,16 +69,21 @@ export default function HomePage() {
       // board/exec get the portal dashboard.
       if (!member.active && !isBoardOrExec) {
         setView("checklist");
+        // .limit(1) + length check instead of .maybeSingle(): a stray
+        // duplicate row (e.g. an applicant claiming two infosession codes)
+        // makes .maybeSingle() throw "multiple rows returned", which — since
+        // only `data` is read below — silently downgrades to "not completed"
+        // instead of surfacing the error.
         const [{ data: coffeeChat }, { data: infosession }, { data: application }] =
           await Promise.all([
-            supabase.from("coffee_chats").select("applicant_id").eq("applicant_id", user.id).eq("complete", true).maybeSingle(),
-            supabase.from("infosesh_attendance").select("applicant_id").eq("applicant_id", user.id).maybeSingle(),
-            supabase.from("applications").select("applicant_id").eq("applicant_id", user.id).maybeSingle(),
+            supabase.from("coffee_chats").select("applicant_id").eq("applicant_id", user.id).eq("complete", true).limit(1),
+            supabase.from("infosesh_attendance").select("applicant_id").eq("applicant_id", user.id).limit(1),
+            supabase.from("applications").select("applicant_id").eq("applicant_id", user.id).limit(1),
           ]);
         setCompleted({
-          coffeeChat: !!coffeeChat,
-          infosession: !!infosession,
-          application: !!application,
+          coffeeChat: !!coffeeChat?.length,
+          infosession: !!infosession?.length,
+          application: !!application?.length,
         });
         return;
       }
