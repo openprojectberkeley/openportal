@@ -5,7 +5,7 @@ import { fetchBusyIntervals, requestFreeBusyToken } from "@/lib/google-calendar"
 import Link from "next/link";
 import Script from "next/script";
 import { useCallback, useEffect, useState } from "react";
-import { CalendarCheck, ChevronLeft, ChevronRight } from "lucide-react";
+import { CalendarCheck, Check, ChevronLeft, ChevronRight } from "lucide-react";
 import { useRoleSim } from "@/components/role-simulation-provider";
 import { usePersonProfile } from "@/components/person-profile-provider";
 import { ScrollArea } from "@/components/overlay-scrollbar";
@@ -74,7 +74,7 @@ type UpcomingSlot = {
   meeting_time: string;
   capacity: number;
   filled: number;
-  attendees: { name: string; user_id: string; email: string | null }[];
+  attendees: { id: string; name: string; user_id: string; email: string | null; complete: boolean }[];
 };
 
 export default function ManagerCoffeeChatsPage() {
@@ -145,7 +145,7 @@ export default function ManagerCoffeeChatsPage() {
 
     const { data: rows } = await supabase
       .from("coffee_chats")
-      .select("meeting_time, applicant_id")
+      .select("id, meeting_time, applicant_id, complete")
       .eq("member_id", user.id)
       .gte("meeting_time", rangeStart.toISOString())
       .lt("meeting_time", addDays(rangeEnd, 1).toISOString())
@@ -161,10 +161,10 @@ export default function ManagerCoffeeChatsPage() {
     }
 
     // Build upcoming slots grouped by meeting_time
-    const grouped = new Map<string, (string | null)[]>();
+    const grouped = new Map<string, { id: string; applicant_id: string | null; complete: boolean }[]>();
     for (const row of rows) {
       if (!grouped.has(row.meeting_time)) grouped.set(row.meeting_time, []);
-      grouped.get(row.meeting_time)!.push(row.applicant_id);
+      grouped.get(row.meeting_time)!.push({ id: row.id, applicant_id: row.applicant_id, complete: row.complete });
     }
 
     const applicantIds = [...new Set(rows.map((r) => r.applicant_id).filter((id): id is string => id !== null))];
@@ -183,15 +183,21 @@ export default function ManagerCoffeeChatsPage() {
 
     const nowMs = Date.now();
     const upcoming: UpcomingSlot[] = [];
-    for (const [meeting_time, ids] of grouped) {
+    for (const [meeting_time, entries] of grouped) {
       // Past meetings stay visible in the grid but drop off the "Upcoming" list.
       if (new Date(meeting_time).getTime() < nowMs) continue;
-      const filled = ids.filter((id): id is string => id !== null);
+      const filled = entries.filter((e): e is { id: string; applicant_id: string; complete: boolean } => e.applicant_id !== null);
       upcoming.push({
         meeting_time,
-        capacity: ids.length,
+        capacity: entries.length,
         filled: filled.length,
-        attendees: filled.map((id) => ({ user_id: id, name: nameMap.get(id) ?? "Unknown", email: emailMap.get(id) ?? null })),
+        attendees: filled.map((e) => ({
+          id: e.id,
+          user_id: e.applicant_id,
+          name: nameMap.get(e.applicant_id) ?? "Unknown",
+          email: emailMap.get(e.applicant_id) ?? null,
+          complete: e.complete,
+        })),
       });
     }
     setUpcomingSlots(upcoming);
@@ -356,6 +362,19 @@ export default function ManagerCoffeeChatsPage() {
     // Re-fetch so the grid and upcoming list reflect the saved state.
     await load();
     setSaving(false);
+  };
+
+  const toggleComplete = async (rowId: string, meetingTime: string, next: boolean) => {
+    const supabase = createClient();
+    const { error } = await supabase.from("coffee_chats").update({ complete: next }).eq("id", rowId);
+    if (error) return;
+    setUpcomingSlots((prev) =>
+      prev.map((slot) =>
+        slot.meeting_time !== meetingTime
+          ? slot
+          : { ...slot, attendees: slot.attendees.map((a) => (a.id === rowId ? { ...a, complete: next } : a)) },
+      ),
+    );
   };
 
   // Pull the manager's Google Calendar free/busy across the whole window and
@@ -629,20 +648,36 @@ export default function ManagerCoffeeChatsPage() {
                 {slot.attendees.length > 0 ? (
                   <div className="flex flex-wrap gap-1.5 pt-1">
                     {slot.attendees.map((a) => (
-                      <button
+                      <div
                         key={a.user_id}
-                        type="button"
-                        onClick={() =>
-                          openProfile({ userId: a.user_id, name: a.name, preloaded: { email: a.email } })
-                        }
-                        title={a.email ?? undefined}
-                        className="group relative px-2 py-0.5 rounded-full bg-foreground/10 text-xs font-medium hover:bg-foreground/20 transition-colors"
+                        className="flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-full bg-foreground/10 hover:bg-foreground/20 transition-colors"
                       >
-                        {a.name}
-                        <span className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1.5 hidden w-max max-w-[16rem] -translate-x-1/2 rounded-md bg-foreground px-2.5 py-1.5 text-[11px] text-background shadow-lg group-hover:block">
-                          {a.email ?? "No email on file"}
-                        </span>
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            openProfile({ userId: a.user_id, name: a.name, preloaded: { email: a.email } })
+                          }
+                          title={a.email ?? undefined}
+                          className="group relative text-xs font-medium"
+                        >
+                          {a.name}
+                          <span className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1.5 hidden w-max max-w-[16rem] -translate-x-1/2 rounded-md bg-foreground px-2.5 py-1.5 text-[11px] text-background shadow-lg group-hover:block">
+                            {a.email ?? "No email on file"}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => toggleComplete(a.id, slot.meeting_time, !a.complete)}
+                          title={a.complete ? "Mark as not complete" : "Mark complete"}
+                          className={`flex items-center justify-center w-4 h-4 rounded-full transition-colors ${
+                            a.complete
+                              ? "bg-green-500 text-white"
+                              : "border border-foreground/30 text-transparent hover:border-foreground/60"
+                          }`}
+                        >
+                          <Check size={10} />
+                        </button>
+                      </div>
                     ))}
                   </div>
                 ) : (
