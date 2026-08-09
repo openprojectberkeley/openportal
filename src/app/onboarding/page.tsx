@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { useRoleSim } from "@/components/role-simulation-provider";
 
 // Progressively formats digits as (xxx) xxx-xxxx while typing.
 function formatPhoneNumber(value: string): string {
@@ -14,6 +15,7 @@ function formatPhoneNumber(value: string): string {
 
 export default function OnboardingPage() {
   const router = useRouter();
+  const { ready: rolesReady, isExec } = useRoleSim();
   const [userId, setUserId] = useState<string | null>(null);
   const [email, setEmail] = useState<string | null>(null);
   const [preferredFirstname, setPreferredFirstname] = useState("");
@@ -28,16 +30,51 @@ export default function OnboardingPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // Wait for roles to resolve before deciding whether an already-onboarded
+    // visitor gets bounced, so we don't misclassify exec before we know
+    // their access level.
+    if (!rolesReady) return;
     const supabase = createClient();
-    supabase.auth.getUser().then(({ data: { user } }) => {
+
+    const load = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         router.replace("/auth/login");
         return;
       }
       setUserId(user.id);
       setEmail(user.email ?? null);
-    });
-  }, [router]);
+
+      // Onboarding has no route guard against being typed in directly, so
+      // anyone who already has a members row and isn't exec gets bounced
+      // back to the app instead of re-onboarding. Exec can still reach it
+      // (e.g. to fix their own profile) — pre-fill so re-submitting doesn't
+      // blank out their existing data.
+      const { data: existing } = await supabase
+        .from("members")
+        .select("preferred_firstname, lastname, major, grad_year, phone, linkedin, github, interests")
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      if (existing && !isExec) {
+        router.replace("/");
+        return;
+      }
+
+      if (existing) {
+        setPreferredFirstname(existing.preferred_firstname ?? "");
+        setLastname(existing.lastname ?? "");
+        setMajor(existing.major ?? "");
+        setGradYear(existing.grad_year ?? "");
+        setPhone(existing.phone ?? "");
+        setLinkedin(existing.linkedin ?? "");
+        setGithub(existing.github ?? "");
+        setInterests(existing.interests ?? "");
+      }
+    };
+
+    load();
+  }, [router, rolesReady, isExec]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -47,23 +84,26 @@ export default function OnboardingPage() {
     setError(null);
 
     const supabase = createClient();
-    const { error: insertError } = await supabase
+    const { error: upsertError } = await supabase
       .from("members")
-      .insert({
-        user_id: userId,
-        preferred_firstname: preferredFirstname.trim(),
-        lastname: lastname.trim(),
-        email,
-        major: major.trim(),
-        grad_year: gradYear.trim(),
-        phone: phone.trim(),
-        linkedin: linkedin.trim(),
-        github: github.trim(),
-        interests: interests.trim(),
-      });
+      .upsert(
+        {
+          user_id: userId,
+          preferred_firstname: preferredFirstname.trim(),
+          lastname: lastname.trim(),
+          email,
+          major: major.trim(),
+          grad_year: gradYear.trim(),
+          phone: phone.trim(),
+          linkedin: linkedin.trim(),
+          github: github.trim(),
+          interests: interests.trim(),
+        },
+        { onConflict: "user_id" },
+      );
 
-    if (insertError) {
-      setError(insertError.message);
+    if (upsertError) {
+      setError(upsertError.message);
       setLoading(false);
       return;
     }
