@@ -4,19 +4,9 @@ import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
-const COUNTRY_CODES = [
-  "+1", "+44", "+86", "+91", "+81", "+82", "+852", "+886", "+65", "+61",
-  "+49", "+33", "+34", "+39", "+31", "+46", "+52", "+55", "+63", "+62",
-  "+84", "+66", "+971", "+972", "+27",
-] as const;
-
-// +1 gets the familiar (xxx) xxx-xxxx grouping; any other code just keeps up
-// to 10 digits, unformatted, since one grouping pattern doesn't fit every
-// country. Re-run whenever the raw digits or the selected code change, so
-// switching codes reformats (or un-formats) whatever was already typed.
-function formatPhoneNumber(value: string, countryCode: string): string {
+// Progressively formats digits as (xxx) xxx-xxxx while typing.
+function formatPhoneNumber(value: string): string {
   const digits = value.replace(/\D/g, "").slice(0, 10);
-  if (countryCode !== "+1") return digits;
   if (digits.length < 4) return digits;
   if (digits.length < 7) return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
   return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
@@ -30,7 +20,6 @@ export default function OnboardingPage() {
   const [lastname, setLastname] = useState("");
   const [major, setMajor] = useState("");
   const [gradYear, setGradYear] = useState("");
-  const [countryCode, setCountryCode] = useState("+1");
   const [phone, setPhone] = useState("");
   const [linkedin, setLinkedin] = useState("");
   const [github, setGithub] = useState("");
@@ -67,7 +56,7 @@ export default function OnboardingPage() {
         email,
         major: major.trim(),
         grad_year: gradYear.trim(),
-        phone: phone.trim() ? `${countryCode} ${phone.trim()}` : "",
+        phone: phone.trim(),
         linkedin: linkedin.trim(),
         github: github.trim(),
         interests: interests.trim(),
@@ -137,27 +126,13 @@ export default function OnboardingPage() {
           </div>
           <div className="flex flex-col gap-1">
             <label className="text-sm font-medium">Phone</label>
-            <div className="flex gap-2">
-              <select
-                value={countryCode}
-                onChange={(e) => {
-                  setCountryCode(e.target.value);
-                  setPhone((prev) => formatPhoneNumber(prev, e.target.value));
-                }}
-                className="border rounded-md px-2 py-2 text-sm bg-background"
-              >
-                {COUNTRY_CODES.map((code) => (
-                  <option key={code} value={code}>{code}</option>
-                ))}
-              </select>
-              <input
-                type="tel"
-                value={phone}
-                onChange={(e) => setPhone(formatPhoneNumber(e.target.value, countryCode))}
-                placeholder={countryCode === "+1" ? "(510) 555-0123" : "Phone number"}
-                className="border rounded-md px-3 py-2 text-sm w-full"
-              />
-            </div>
+            <input
+              type="tel"
+              value={phone}
+              onChange={(e) => setPhone(formatPhoneNumber(e.target.value))}
+              placeholder="(510) 555-0123"
+              className="border rounded-md px-3 py-2 text-sm w-full"
+            />
           </div>
           <div className="flex flex-col gap-1">
             <label className="text-sm font-medium">LinkedIn</label>
