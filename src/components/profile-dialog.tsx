@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/overlay-scrollbar";
 import { X } from "lucide-react";
 
+const CLASS_YEARS = ["Freshman", "Sophomore", "Junior", "Senior", "Postgrad"] as const;
+
 type ProfileFields = {
   preferred_firstname: string;
   lastname: string;
@@ -35,7 +37,7 @@ const LABELS: Record<keyof ProfileFields, string> = {
   preferred_firstname: "Preferred first name",
   lastname: "Last name",
   major: "Major(s)",
-  grad_year: "Grad year",
+  grad_year: "Year",
   phone: "Phone",
   linkedin: "LinkedIn",
   github: "GitHub",
@@ -122,6 +124,18 @@ export function ProfileDialog({ open, onOpenChange, userId, onSave }: Props) {
           rows={2}
           className="border rounded-md px-3 py-2 text-sm w-full resize-none bg-background focus:outline-none focus:ring-1 focus:ring-ring"
         />
+      ) : key === "grad_year" ? (
+        <select
+          id={key}
+          value={fields[key]}
+          onChange={(e) => setFields((f) => ({ ...f, [key]: e.target.value }))}
+          className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring md:text-sm"
+        >
+          <option value="">Select year</option>
+          {CLASS_YEARS.map((year) => (
+            <option key={year} value={year}>{year}</option>
+          ))}
+        </select>
       ) : (
         <Input
           id={key}

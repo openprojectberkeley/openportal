@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useRoleSim } from "@/components/role-simulation-provider";
 
+const CLASS_YEARS = ["Freshman", "Sophomore", "Junior", "Senior", "Postgrad"] as const;
+
 // Progressively formats digits as (xxx) xxx-xxxx while typing.
 function formatPhoneNumber(value: string): string {
   const digits = value.replace(/\D/g, "").slice(0, 10);
@@ -163,14 +165,17 @@ export default function OnboardingPage() {
               />
             </div>
             <div className="flex flex-col gap-1">
-              <label className="text-sm font-medium">Grad year</label>
-              <input
-                type="text"
+              <label className="text-sm font-medium">Year</label>
+              <select
                 value={gradYear}
                 onChange={(e) => setGradYear(e.target.value)}
-                placeholder="Grad year"
-                className="border rounded-md px-3 py-2 text-sm w-full"
-              />
+                className="border rounded-md px-3 py-2 text-sm w-full bg-background"
+              >
+                <option value="">Select year</option>
+                {CLASS_YEARS.map((year) => (
+                  <option key={year} value={year}>{year}</option>
+                ))}
+              </select>
             </div>
             <div className="flex flex-col gap-1">
               <label className="text-sm font-medium">Phone</label>
