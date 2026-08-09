@@ -19,6 +19,7 @@ export type PublicProfile = {
   github: string | null;
   interests: string | null;
   active: boolean | null;
+  avatar_url: string | null;
   roles: Role[];
 };
 

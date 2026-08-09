@@ -89,9 +89,18 @@ export function ProfileModal({ target, cached, onLoaded, onClose }: Props) {
         <ScrollArea viewportClassName="max-h-[90vh] p-6">
         <DialogHeader>
           <div className="flex items-center gap-4">
-            <div className="h-14 w-14 rounded-full bg-foreground/10 flex items-center justify-center text-sm font-semibold flex-shrink-0">
-              {initials(name)}
-            </div>
+            {merged.avatar_url ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={merged.avatar_url}
+                alt={name}
+                className="h-14 w-14 rounded-full object-cover flex-shrink-0"
+              />
+            ) : (
+              <div className="h-14 w-14 rounded-full bg-foreground/10 flex items-center justify-center text-sm font-semibold flex-shrink-0">
+                {initials(name)}
+              </div>
+            )}
             <div className="flex flex-col gap-1.5 min-w-0">
               <DialogTitle className="truncate">{name}</DialogTitle>
               <div className="flex flex-wrap items-center gap-1">

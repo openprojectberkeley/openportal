@@ -14,6 +14,7 @@ import {
 import { ChevronDown } from "lucide-react";
 
 const CLASS_YEARS = ["Freshman", "Sophomore", "Junior", "Senior", "Postgrad"] as const;
+import { AvatarPicker } from "@/components/avatar-picker";
 
 // Progressively formats digits as (xxx) xxx-xxxx while typing.
 function formatPhoneNumber(value: string): string {
@@ -41,6 +42,7 @@ export default function OnboardingPage() {
   const [linkedin, setLinkedin] = useState("");
   const [github, setGithub] = useState("");
   const [interests, setInterests] = useState("");
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -68,7 +70,7 @@ export default function OnboardingPage() {
       // pre-fill so re-submitting doesn't blank out their existing data.
       const { data: existing } = await supabase
         .from("members")
-        .select("preferred_firstname, lastname, major, grad_year, phone, linkedin, github, interests")
+        .select("preferred_firstname, lastname, major, grad_year, phone, linkedin, github, interests, avatar_url")
         .eq("user_id", user.id)
         .maybeSingle();
 
@@ -86,6 +88,7 @@ export default function OnboardingPage() {
         setLinkedin(existing.linkedin ?? "");
         setGithub(existing.github ?? "");
         setInterests(existing.interests ?? "");
+        setAvatarUrl(existing.avatar_url ?? null);
       }
     };
 
@@ -114,6 +117,7 @@ export default function OnboardingPage() {
           linkedin: linkedin.trim(),
           github: github.trim(),
           interests: interests.trim(),
+          avatar_url: avatarUrl,
         },
         { onConflict: "user_id" },
       );
@@ -137,6 +141,17 @@ export default function OnboardingPage() {
           </p>
         </div>
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+          <div className="flex flex-col gap-1">
+            <label className="text-sm font-medium">Profile picture</label>
+            {userId && (
+              <AvatarPicker
+                userId={userId}
+                value={avatarUrl}
+                name={[preferredFirstname, lastname].filter(Boolean).join(" ")}
+                onChange={setAvatarUrl}
+              />
+            )}
+          </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1">
               <label className="text-sm font-medium">Preferred first name</label>

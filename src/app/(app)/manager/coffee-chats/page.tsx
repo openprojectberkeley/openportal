@@ -143,15 +143,30 @@ export default function ManagerCoffeeChatsPage() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    const { data: rows } = await supabase
-      .from("coffee_chats")
-      .select("id, meeting_time, applicant_id, complete")
-      .eq("member_id", user.id)
-      .gte("meeting_time", rangeStart.toISOString())
-      .lt("meeting_time", addDays(rangeEnd, 1).toISOString())
-      .order("meeting_time", { ascending: true });
+    // Each availability slot is stored as `slotCapacity` seat rows, so a full
+    // window easily exceeds Supabase's 1000-row response cap. Page through with
+    // .range() until a short page so no slots are silently dropped (which would
+    // otherwise make the grid look "cut off" mid-window after a big import).
+    // meeting_time isn't unique across seats, so add id as a stable tiebreaker
+    // to keep paging deterministic.
+    const PAGE_SIZE = 1000;
+    const rows: { id: string; meeting_time: string; applicant_id: string | null; complete: boolean }[] = [];
+    for (let from = 0; ; from += PAGE_SIZE) {
+      const { data: page } = await supabase
+        .from("coffee_chats")
+        .select("id, meeting_time, applicant_id, complete")
+        .eq("member_id", user.id)
+        .gte("meeting_time", rangeStart.toISOString())
+        .lt("meeting_time", addDays(rangeEnd, 1).toISOString())
+        .order("meeting_time", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, from + PAGE_SIZE - 1);
+      if (!page?.length) break;
+      rows.push(...page);
+      if (page.length < PAGE_SIZE) break;
+    }
 
-    if (!rows?.length) {
+    if (!rows.length) {
       setUpcomingSlots([]);
       setDbTimes(new Set());
       setBookedTimes(new Set());

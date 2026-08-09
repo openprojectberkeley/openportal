@@ -16,6 +16,7 @@ them in order in the Supabase SQL editor.
 | `0004_app_settings_coffee_chat_window.sql` | `app_settings` table + `is_vp_tech()` + RLS for the coffee-chat window. |
 | `0005_projects.sql` | `projects` + `project_members` tables, `is_exec()`, RLS (read: all signed-in, write: exec). |
 | `0009_infosesh_attendance_one_per_applicant.sql` | Unique index: one infosession code claim per applicant. |
+| `0010_member_avatars.sql` | Adds `members.avatar_url`; public `avatars` Storage bucket + RLS (public read, write only within `{uid}/`). |
 
 > Note: the Supabase CLI expects a `supabase/` directory at the repo root. These
 > live under `src/supabase/` for co-location; if you later adopt the CLI, move

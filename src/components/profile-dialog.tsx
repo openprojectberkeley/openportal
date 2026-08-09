@@ -17,6 +17,7 @@ import {
 import { ChevronDown, X } from "lucide-react";
 
 const CLASS_YEARS = ["Freshman", "Sophomore", "Junior", "Senior", "Postgrad"] as const;
+import { AvatarPicker } from "@/components/avatar-picker";
 
 type ProfileFields = {
   preferred_firstname: string;
@@ -55,11 +56,12 @@ type Props = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   userId: string;
-  onSave?: (fields: ProfileFields) => void;
+  onSave?: (fields: ProfileFields, avatarUrl: string | null) => void;
 };
 
 export function ProfileDialog({ open, onOpenChange, userId, onSave }: Props) {
   const [fields, setFields] = useState<ProfileFields>(EMPTY);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
@@ -72,7 +74,7 @@ export function ProfileDialog({ open, onOpenChange, userId, onSave }: Props) {
     const supabase = createClient();
     supabase
       .from("members")
-      .select("preferred_firstname, lastname, major, grad_year, phone, linkedin, github, interests")
+      .select("preferred_firstname, lastname, major, grad_year, phone, linkedin, github, interests, avatar_url")
       .eq("user_id", userId)
       .maybeSingle()
       .then(({ data }) => {
@@ -87,6 +89,7 @@ export function ProfileDialog({ open, onOpenChange, userId, onSave }: Props) {
             github: data.github ?? "",
             interests: data.interests ?? "",
           });
+          setAvatarUrl(data.avatar_url ?? null);
         }
       });
   }, [open, userId]);
@@ -104,7 +107,7 @@ export function ProfileDialog({ open, onOpenChange, userId, onSave }: Props) {
     const supabase = createClient();
     const { error: updateError } = await supabase
       .from("members")
-      .update(fields)
+      .update({ ...fields, avatar_url: avatarUrl })
       .eq("user_id", userId);
 
     if (updateError) {
@@ -113,7 +116,7 @@ export function ProfileDialog({ open, onOpenChange, userId, onSave }: Props) {
       return;
     }
 
-    onSave?.(fields);
+    onSave?.(fields, avatarUrl);
     onOpenChange(false);
     setLoading(false);
   };
@@ -188,6 +191,12 @@ export function ProfileDialog({ open, onOpenChange, userId, onSave }: Props) {
           </button>
         </div>
         <ScrollArea className="min-h-0" viewportClassName="px-6 pb-6 flex flex-col gap-4">
+          <AvatarPicker
+            userId={userId}
+            value={avatarUrl}
+            name={[fields.preferred_firstname, fields.lastname].filter(Boolean).join(" ")}
+            onChange={setAvatarUrl}
+          />
           <div className="grid grid-cols-2 gap-3">
             {renderField("preferred_firstname")}
             {renderField("lastname")}

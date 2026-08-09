@@ -41,7 +41,7 @@ export default function CoffeeChatPage() {
 
     const [{ data: allRoles }, { data: profiles }, { data: chats }, { data: myChats }] = await Promise.all([
       supabase.from("members_roles").select("user_id, roles(id, role_name)").in("user_id", userIds),
-      supabase.from("members").select("user_id, preferred_firstname, lastname, interests").in("user_id", userIds),
+      supabase.from("members").select("user_id, preferred_firstname, lastname, interests, avatar_url").in("user_id", userIds),
       supabase
         .from("coffee_chats")
         .select("member_id, meeting_time, applicant_id")
@@ -88,7 +88,7 @@ export default function CoffeeChatPage() {
         user_id: p.user_id,
         name: nameMap.get(p.user_id) ?? "Unknown",
         roles: rolesMap.get(p.user_id) ?? [],
-        avatarUrl: null,
+        avatarUrl: p.avatar_url ?? null,
         interests: p.interests ?? null,
         bookable: (openHours.get(p.user_id)?.size ?? 0) > 0,
         booked: bookedMemberIds.has(p.user_id),

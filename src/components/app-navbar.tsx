@@ -17,6 +17,7 @@ type MemberInfo = {
   userId: string;
   preferredFirstname: string;
   lastname: string;
+  avatarUrl: string | null;
   isMember: boolean;
 };
 
@@ -33,7 +34,7 @@ export function AppNavbar() {
 
       const { data: memberData } = await supabase
         .from("members")
-        .select("preferred_firstname, lastname, active")
+        .select("preferred_firstname, lastname, active, avatar_url")
         .eq("user_id", user.id)
         .maybeSingle();
 
@@ -42,6 +43,7 @@ export function AppNavbar() {
           userId: user.id,
           preferredFirstname: memberData.preferred_firstname ?? "",
           lastname: memberData.lastname ?? "",
+          avatarUrl: memberData.avatar_url ?? null,
           isMember: !!memberData.active,
         });
       }
@@ -71,8 +73,17 @@ export function AppNavbar() {
           {member && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button className="h-9 w-9 rounded-full bg-foreground text-background flex items-center justify-center text-xs font-semibold hover:opacity-80 transition-opacity focus:outline-none">
-                  {initials}
+                <button className="h-9 w-9 rounded-full bg-foreground text-background flex items-center justify-center text-xs font-semibold hover:opacity-80 transition-opacity focus:outline-none overflow-hidden">
+                  {member.avatarUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={member.avatarUrl}
+                      alt="Profile picture"
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    initials
+                  )}
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
@@ -100,10 +111,15 @@ export function AppNavbar() {
           open={profileOpen}
           onOpenChange={setProfileOpen}
           userId={member.userId}
-          onSave={(fields) =>
+          onSave={(fields, avatarUrl) =>
             setMember((m) =>
               m
-                ? { ...m, preferredFirstname: fields.preferred_firstname, lastname: fields.lastname }
+                ? {
+                    ...m,
+                    preferredFirstname: fields.preferred_firstname,
+                    lastname: fields.lastname,
+                    avatarUrl,
+                  }
                 : m,
             )
           }

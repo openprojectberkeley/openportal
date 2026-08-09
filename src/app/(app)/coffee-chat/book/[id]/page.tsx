@@ -93,7 +93,7 @@ function BookingPageInner() {
       const [{ data: profile }, { data: roleRows }] = await Promise.all([
         supabase
           .from("members")
-          .select("preferred_firstname, lastname, interests")
+          .select("preferred_firstname, lastname, interests, avatar_url")
           .eq("user_id", id)
           .maybeSingle(),
         supabase
@@ -105,7 +105,7 @@ function BookingPageInner() {
       setPerson({
         name: [profile?.preferred_firstname, profile?.lastname].filter(Boolean).join(" ") || "Member",
         roles: (roleRows ?? []).flatMap((r: any) => (r.roles ? [r.roles] : [])),
-        avatarUrl: null,
+        avatarUrl: profile?.avatar_url ?? null,
         interests: profile?.interests ?? null,
       });
     };
