@@ -63,7 +63,7 @@ export function ProfileModal({ target, cached, onLoaded, onClose }: Props) {
 
   const academic: { label: string; value: string }[] = [];
   if (merged.major) academic.push({ label: "Major", value: merged.major });
-  if (merged.grad_year) academic.push({ label: "Graduation year", value: String(merged.grad_year) });
+  if (merged.grad_year) academic.push({ label: "Grad year", value: String(merged.grad_year) });
 
   // This modal is portaled at the app root, so it's a DOM *sibling* of any modal
   // it was opened from (e.g. the portal-members modal) rather than a descendant.

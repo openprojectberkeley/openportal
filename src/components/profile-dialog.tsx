@@ -34,8 +34,8 @@ const EMPTY: ProfileFields = {
 const LABELS: Record<keyof ProfileFields, string> = {
   preferred_firstname: "Preferred first name",
   lastname: "Last name",
-  major: "Major",
-  grad_year: "Graduation year",
+  major: "Major(s)",
+  grad_year: "Grad year",
   phone: "Phone",
   linkedin: "LinkedIn",
   github: "GitHub",

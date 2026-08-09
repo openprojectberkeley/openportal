@@ -117,12 +117,12 @@ export default function OnboardingPage() {
               />
             </div>
             <div className="flex flex-col gap-1">
-              <label className="text-sm font-medium">Graduation year</label>
+              <label className="text-sm font-medium">Grad year</label>
               <input
                 type="text"
                 value={gradYear}
                 onChange={(e) => setGradYear(e.target.value)}
-                placeholder="Graduation year"
+                placeholder="Grad year"
                 className="border rounded-md px-3 py-2 text-sm w-full"
               />
             </div>
