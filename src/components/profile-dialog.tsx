@@ -7,7 +7,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/overlay-scrollbar";
-import { X } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { ChevronDown, X } from "lucide-react";
 
 const CLASS_YEARS = ["Freshman", "Sophomore", "Junior", "Senior", "Postgrad"] as const;
 
@@ -125,17 +132,31 @@ export function ProfileDialog({ open, onOpenChange, userId, onSave }: Props) {
           className="border rounded-md px-3 py-2 text-sm w-full resize-none bg-background focus:outline-none focus:ring-1 focus:ring-ring"
         />
       ) : key === "grad_year" ? (
-        <select
-          id={key}
-          value={fields[key]}
-          onChange={(e) => setFields((f) => ({ ...f, [key]: e.target.value }))}
-          className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring md:text-sm"
-        >
-          <option value="">Select year</option>
-          {CLASS_YEARS.map((year) => (
-            <option key={year} value={year}>{year}</option>
-          ))}
-        </select>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              id={key}
+              type="button"
+              className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 text-sm shadow-sm transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            >
+              <span className={fields[key] ? "" : "text-muted-foreground"}>
+                {fields[key] || "Select year"}
+              </span>
+              <ChevronDown size={14} className="text-muted-foreground" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="min-w-[9rem]">
+            <DropdownMenuRadioGroup
+              value={fields[key]}
+              onValueChange={(v) => setFields((f) => ({ ...f, [key]: v }))}
+            >
+              <DropdownMenuRadioItem value="">Select year</DropdownMenuRadioItem>
+              {CLASS_YEARS.map((year) => (
+                <DropdownMenuRadioItem key={year} value={year}>{year}</DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
       ) : (
         <Input
           id={key}

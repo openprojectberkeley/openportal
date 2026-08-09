@@ -4,6 +4,14 @@ import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useRoleSim } from "@/components/role-simulation-provider";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { ChevronDown } from "lucide-react";
 
 const CLASS_YEARS = ["Freshman", "Sophomore", "Junior", "Senior", "Postgrad"] as const;
 
@@ -166,16 +174,27 @@ export default function OnboardingPage() {
             </div>
             <div className="flex flex-col gap-1">
               <label className="text-sm font-medium">Year</label>
-              <select
-                value={gradYear}
-                onChange={(e) => setGradYear(e.target.value)}
-                className="border rounded-md px-3 py-2 text-sm w-full bg-background"
-              >
-                <option value="">Select year</option>
-                {CLASS_YEARS.map((year) => (
-                  <option key={year} value={year}>{year}</option>
-                ))}
-              </select>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className="flex h-9 w-full items-center justify-between rounded-md border px-3 text-sm bg-background hover:bg-accent transition-colors focus:outline-none focus:ring-1 focus:ring-ring"
+                  >
+                    <span className={gradYear ? "" : "text-muted-foreground"}>
+                      {gradYear || "Select year"}
+                    </span>
+                    <ChevronDown size={14} className="text-muted-foreground" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="min-w-[9rem]">
+                  <DropdownMenuRadioGroup value={gradYear} onValueChange={setGradYear}>
+                    <DropdownMenuRadioItem value="">Select year</DropdownMenuRadioItem>
+                    {CLASS_YEARS.map((year) => (
+                      <DropdownMenuRadioItem key={year} value={year}>{year}</DropdownMenuRadioItem>
+                    ))}
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
             <div className="flex flex-col gap-1">
               <label className="text-sm font-medium">Phone</label>
