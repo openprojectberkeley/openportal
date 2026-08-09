@@ -5,31 +5,9 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 const COUNTRY_CODES = [
-  { code: "+1", label: "US/Canada (+1)" },
-  { code: "+44", label: "UK (+44)" },
-  { code: "+86", label: "China (+86)" },
-  { code: "+91", label: "India (+91)" },
-  { code: "+81", label: "Japan (+81)" },
-  { code: "+82", label: "South Korea (+82)" },
-  { code: "+852", label: "Hong Kong (+852)" },
-  { code: "+886", label: "Taiwan (+886)" },
-  { code: "+65", label: "Singapore (+65)" },
-  { code: "+61", label: "Australia (+61)" },
-  { code: "+49", label: "Germany (+49)" },
-  { code: "+33", label: "France (+33)" },
-  { code: "+34", label: "Spain (+34)" },
-  { code: "+39", label: "Italy (+39)" },
-  { code: "+31", label: "Netherlands (+31)" },
-  { code: "+46", label: "Sweden (+46)" },
-  { code: "+52", label: "Mexico (+52)" },
-  { code: "+55", label: "Brazil (+55)" },
-  { code: "+63", label: "Philippines (+63)" },
-  { code: "+62", label: "Indonesia (+62)" },
-  { code: "+84", label: "Vietnam (+84)" },
-  { code: "+66", label: "Thailand (+66)" },
-  { code: "+971", label: "UAE (+971)" },
-  { code: "+972", label: "Israel (+972)" },
-  { code: "+27", label: "South Africa (+27)" },
+  "+1", "+44", "+86", "+91", "+81", "+82", "+852", "+886", "+65", "+61",
+  "+49", "+33", "+34", "+39", "+31", "+46", "+52", "+55", "+63", "+62",
+  "+84", "+66", "+971", "+972", "+27",
 ] as const;
 
 // +1 gets the familiar (xxx) xxx-xxxx grouping; any other code just keeps up
@@ -168,8 +146,8 @@ export default function OnboardingPage() {
                 }}
                 className="border rounded-md px-2 py-2 text-sm bg-background"
               >
-                {COUNTRY_CODES.map((c) => (
-                  <option key={c.code} value={c.code}>{c.label}</option>
+                {COUNTRY_CODES.map((code) => (
+                  <option key={code} value={code}>{code}</option>
                 ))}
               </select>
               <input
