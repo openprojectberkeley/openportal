@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/overlay-scrollbar";
-import { X } from "lucide-react";
+import { ChevronDown, X } from "lucide-react";
 
 const CLASS_YEARS = ["Freshman", "Sophomore", "Junior", "Senior", "Postgrad"] as const;
 
@@ -125,17 +125,20 @@ export function ProfileDialog({ open, onOpenChange, userId, onSave }: Props) {
           className="border rounded-md px-3 py-2 text-sm w-full resize-none bg-background focus:outline-none focus:ring-1 focus:ring-ring"
         />
       ) : key === "grad_year" ? (
-        <select
-          id={key}
-          value={fields[key]}
-          onChange={(e) => setFields((f) => ({ ...f, [key]: e.target.value }))}
-          className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring md:text-sm"
-        >
-          <option value="">Select year</option>
-          {CLASS_YEARS.map((year) => (
-            <option key={year} value={year}>{year}</option>
-          ))}
-        </select>
+        <div className="relative">
+          <select
+            id={key}
+            value={fields[key]}
+            onChange={(e) => setFields((f) => ({ ...f, [key]: e.target.value }))}
+            className="appearance-none flex h-9 w-full rounded-md border border-input bg-transparent pl-3 pr-8 py-1 text-base shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring md:text-sm"
+          >
+            <option value="">Select year</option>
+            {CLASS_YEARS.map((year) => (
+              <option key={year} value={year}>{year}</option>
+            ))}
+          </select>
+          <ChevronDown size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+        </div>
       ) : (
         <Input
           id={key}
