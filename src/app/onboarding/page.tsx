@@ -77,8 +77,7 @@ export default function OnboardingPage() {
         <div className="flex flex-col gap-1">
           <h1 className="text-2xl font-bold">Welcome to Open Project!</h1>
           <p className="text-sm text-muted-foreground">
-            This is Open Portal — home base for coffee chats, applications, projects, and
-            everything else we get up to. Let&apos;s get your profile set up.
+            This is Open Portal, our hub for everything Open Project — let&apos;s get your profile set up.
           </p>
         </div>
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
