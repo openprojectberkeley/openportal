@@ -111,6 +111,27 @@ export function ProfileDialog({ open, onOpenChange, userId, onSave }: Props) {
 
   if (!mounted || !open) return null;
 
+  const renderField = (key: keyof ProfileFields) => (
+    <div key={key} className="flex flex-col gap-1">
+      <Label htmlFor={key}>{LABELS[key]}</Label>
+      {key === "interests" ? (
+        <textarea
+          id={key}
+          value={fields[key]}
+          onChange={(e) => setFields((f) => ({ ...f, [key]: e.target.value }))}
+          rows={2}
+          className="border rounded-md px-3 py-2 text-sm w-full resize-none bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+        />
+      ) : (
+        <Input
+          id={key}
+          value={fields[key]}
+          onChange={(e) => setFields((f) => ({ ...f, [key]: e.target.value }))}
+        />
+      )}
+    </div>
+  );
+
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div
@@ -132,26 +153,18 @@ export function ProfileDialog({ open, onOpenChange, userId, onSave }: Props) {
           </button>
         </div>
         <ScrollArea className="min-h-0" viewportClassName="px-6 pb-6 flex flex-col gap-4">
-          {(Object.keys(EMPTY) as (keyof ProfileFields)[]).map((key) => (
-            <div key={key} className="flex flex-col gap-1">
-              <Label htmlFor={key}>{LABELS[key]}</Label>
-              {key === "interests" ? (
-                <textarea
-                  id={key}
-                  value={fields[key]}
-                  onChange={(e) => setFields((f) => ({ ...f, [key]: e.target.value }))}
-                  rows={2}
-                  className="border rounded-md px-3 py-2 text-sm w-full resize-none bg-background focus:outline-none focus:ring-1 focus:ring-ring"
-                />
-              ) : (
-                <Input
-                  id={key}
-                  value={fields[key]}
-                  onChange={(e) => setFields((f) => ({ ...f, [key]: e.target.value }))}
-                />
-              )}
-            </div>
-          ))}
+          <div className="grid grid-cols-2 gap-3">
+            {renderField("preferred_firstname")}
+            {renderField("lastname")}
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            {renderField("major")}
+            {renderField("grad_year")}
+            {renderField("phone")}
+          </div>
+          {renderField("linkedin")}
+          {renderField("github")}
+          {renderField("interests")}
           {error && <p className="text-sm text-red-500">{error}</p>}
           <div className="flex justify-end gap-2 mt-2">
             <Button variant="outline" onClick={() => onOpenChange(false)}>

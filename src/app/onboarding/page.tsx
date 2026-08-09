@@ -81,57 +81,61 @@ export default function OnboardingPage() {
           </p>
         </div>
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-          <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium">Preferred first name</label>
-            <input
-              type="text"
-              value={preferredFirstname}
-              onChange={(e) => setPreferredFirstname(e.target.value)}
-              placeholder="Preferred first name"
-              required
-              className="border rounded-md px-3 py-2 text-sm w-full"
-            />
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1">
+              <label className="text-sm font-medium">Preferred first name</label>
+              <input
+                type="text"
+                value={preferredFirstname}
+                onChange={(e) => setPreferredFirstname(e.target.value)}
+                placeholder="Preferred first name"
+                required
+                className="border rounded-md px-3 py-2 text-sm w-full"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-sm font-medium">Last name</label>
+              <input
+                type="text"
+                value={lastname}
+                onChange={(e) => setLastname(e.target.value)}
+                placeholder="Last name"
+                required
+                className="border rounded-md px-3 py-2 text-sm w-full"
+              />
+            </div>
           </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium">Last name</label>
-            <input
-              type="text"
-              value={lastname}
-              onChange={(e) => setLastname(e.target.value)}
-              placeholder="Last name"
-              required
-              className="border rounded-md px-3 py-2 text-sm w-full"
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium">Major(s)</label>
-            <input
-              type="text"
-              value={major}
-              onChange={(e) => setMajor(e.target.value)}
-              placeholder="Major(s)"
-              className="border rounded-md px-3 py-2 text-sm w-full"
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium">Graduation year</label>
-            <input
-              type="text"
-              value={gradYear}
-              onChange={(e) => setGradYear(e.target.value)}
-              placeholder="Graduation year"
-              className="border rounded-md px-3 py-2 text-sm w-full"
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium">Phone</label>
-            <input
-              type="tel"
-              value={phone}
-              onChange={(e) => setPhone(formatPhoneNumber(e.target.value))}
-              placeholder="(510) 555-0123"
-              className="border rounded-md px-3 py-2 text-sm w-full"
-            />
+          <div className="grid grid-cols-3 gap-3">
+            <div className="flex flex-col gap-1">
+              <label className="text-sm font-medium">Major(s)</label>
+              <input
+                type="text"
+                value={major}
+                onChange={(e) => setMajor(e.target.value)}
+                placeholder="Major(s)"
+                className="border rounded-md px-3 py-2 text-sm w-full"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-sm font-medium">Graduation year</label>
+              <input
+                type="text"
+                value={gradYear}
+                onChange={(e) => setGradYear(e.target.value)}
+                placeholder="Graduation year"
+                className="border rounded-md px-3 py-2 text-sm w-full"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-sm font-medium">Phone</label>
+              <input
+                type="tel"
+                value={phone}
+                onChange={(e) => setPhone(formatPhoneNumber(e.target.value))}
+                placeholder="(510) 555-0123"
+                className="border rounded-md px-3 py-2 text-sm w-full"
+              />
+            </div>
           </div>
           <div className="flex flex-col gap-1">
             <label className="text-sm font-medium">LinkedIn</label>
