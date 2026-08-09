@@ -15,7 +15,9 @@ function formatPhoneNumber(value: string): string {
 
 export default function OnboardingPage() {
   const router = useRouter();
-  const { ready: rolesReady, isExec } = useRoleSim();
+  // canSimulate reflects the real VP Tech role (see role-simulation-provider),
+  // independent of whatever persona they're currently simulating.
+  const { ready: rolesReady, canSimulate: isVpTech } = useRoleSim();
   const [userId, setUserId] = useState<string | null>(null);
   const [email, setEmail] = useState<string | null>(null);
   const [preferredFirstname, setPreferredFirstname] = useState("");
@@ -31,7 +33,7 @@ export default function OnboardingPage() {
 
   useEffect(() => {
     // Wait for roles to resolve before deciding whether an already-onboarded
-    // visitor gets bounced, so we don't misclassify exec before we know
+    // visitor gets bounced, so we don't misclassify VP Tech before we know
     // their access level.
     if (!rolesReady) return;
     const supabase = createClient();
@@ -46,8 +48,8 @@ export default function OnboardingPage() {
       setEmail(user.email ?? null);
 
       // Onboarding has no route guard against being typed in directly, so
-      // anyone who already has a members row and isn't exec gets bounced
-      // back to the app instead of re-onboarding. Exec can still reach it
+      // anyone who already has a members row and isn't VP Tech gets bounced
+      // back to the app instead of re-onboarding. VP Tech can still reach it
       // (e.g. to fix their own profile) — pre-fill so re-submitting doesn't
       // blank out their existing data.
       const { data: existing } = await supabase
@@ -56,7 +58,7 @@ export default function OnboardingPage() {
         .eq("user_id", user.id)
         .maybeSingle();
 
-      if (existing && !isExec) {
+      if (existing && !isVpTech) {
         router.replace("/");
         return;
       }
@@ -74,7 +76,7 @@ export default function OnboardingPage() {
     };
 
     load();
-  }, [router, rolesReady, isExec]);
+  }, [router, rolesReady, isVpTech]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
