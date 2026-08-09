@@ -4,15 +4,41 @@ import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
-// Progressively formats digits as (xxx) xxx-xxxx while typing. A leading "+"
-// opts out — international numbers don't fit one grouping pattern, so we
-// just pass those through as typed (stripping letters) instead of mangling
-// them into a US shape. Nobody gets a +1 forced onto their number.
-function formatPhoneNumber(value: string): string {
-  if (value.trim().startsWith("+")) {
-    return value.replace(/[^\d+\-\s()]/g, "");
-  }
+const COUNTRY_CODES = [
+  { code: "+1", label: "US/Canada (+1)" },
+  { code: "+44", label: "UK (+44)" },
+  { code: "+86", label: "China (+86)" },
+  { code: "+91", label: "India (+91)" },
+  { code: "+81", label: "Japan (+81)" },
+  { code: "+82", label: "South Korea (+82)" },
+  { code: "+852", label: "Hong Kong (+852)" },
+  { code: "+886", label: "Taiwan (+886)" },
+  { code: "+65", label: "Singapore (+65)" },
+  { code: "+61", label: "Australia (+61)" },
+  { code: "+49", label: "Germany (+49)" },
+  { code: "+33", label: "France (+33)" },
+  { code: "+34", label: "Spain (+34)" },
+  { code: "+39", label: "Italy (+39)" },
+  { code: "+31", label: "Netherlands (+31)" },
+  { code: "+46", label: "Sweden (+46)" },
+  { code: "+52", label: "Mexico (+52)" },
+  { code: "+55", label: "Brazil (+55)" },
+  { code: "+63", label: "Philippines (+63)" },
+  { code: "+62", label: "Indonesia (+62)" },
+  { code: "+84", label: "Vietnam (+84)" },
+  { code: "+66", label: "Thailand (+66)" },
+  { code: "+971", label: "UAE (+971)" },
+  { code: "+972", label: "Israel (+972)" },
+  { code: "+27", label: "South Africa (+27)" },
+] as const;
+
+// +1 gets the familiar (xxx) xxx-xxxx grouping; any other code just keeps up
+// to 10 digits, unformatted, since one grouping pattern doesn't fit every
+// country. Re-run whenever the raw digits or the selected code change, so
+// switching codes reformats (or un-formats) whatever was already typed.
+function formatPhoneNumber(value: string, countryCode: string): string {
   const digits = value.replace(/\D/g, "").slice(0, 10);
+  if (countryCode !== "+1") return digits;
   if (digits.length < 4) return digits;
   if (digits.length < 7) return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
   return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
@@ -26,6 +52,7 @@ export default function OnboardingPage() {
   const [lastname, setLastname] = useState("");
   const [major, setMajor] = useState("");
   const [gradYear, setGradYear] = useState("");
+  const [countryCode, setCountryCode] = useState("+1");
   const [phone, setPhone] = useState("");
   const [linkedin, setLinkedin] = useState("");
   const [github, setGithub] = useState("");
@@ -62,7 +89,7 @@ export default function OnboardingPage() {
         email,
         major: major.trim(),
         grad_year: gradYear.trim(),
-        phone: phone.trim(),
+        phone: phone.trim() ? `${countryCode} ${phone.trim()}` : "",
         linkedin: linkedin.trim(),
         github: github.trim(),
         interests: interests.trim(),
@@ -132,14 +159,27 @@ export default function OnboardingPage() {
           </div>
           <div className="flex flex-col gap-1">
             <label className="text-sm font-medium">Phone</label>
-            <input
-              type="tel"
-              value={phone}
-              onChange={(e) => setPhone(formatPhoneNumber(e.target.value))}
-              placeholder="(510) 555-0123"
-              className="border rounded-md px-3 py-2 text-sm w-full"
-            />
-            <p className="text-xs text-muted-foreground">International? Start with a +.</p>
+            <div className="flex gap-2">
+              <select
+                value={countryCode}
+                onChange={(e) => {
+                  setCountryCode(e.target.value);
+                  setPhone((prev) => formatPhoneNumber(prev, e.target.value));
+                }}
+                className="border rounded-md px-2 py-2 text-sm bg-background"
+              >
+                {COUNTRY_CODES.map((c) => (
+                  <option key={c.code} value={c.code}>{c.label}</option>
+                ))}
+              </select>
+              <input
+                type="tel"
+                value={phone}
+                onChange={(e) => setPhone(formatPhoneNumber(e.target.value, countryCode))}
+                placeholder={countryCode === "+1" ? "(510) 555-0123" : "Phone number"}
+                className="border rounded-md px-3 py-2 text-sm w-full"
+              />
+            </div>
           </div>
           <div className="flex flex-col gap-1">
             <label className="text-sm font-medium">LinkedIn</label>
