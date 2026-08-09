@@ -4,6 +4,14 @@ import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
+// Progressively formats digits as (xxx) xxx-xxxx while typing.
+function formatPhoneNumber(value: string): string {
+  const digits = value.replace(/\D/g, "").slice(0, 10);
+  if (digits.length < 4) return digits;
+  if (digits.length < 7) return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
+  return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+}
+
 export default function OnboardingPage() {
   const router = useRouter();
   const [userId, setUserId] = useState<string | null>(null);
@@ -66,7 +74,13 @@ export default function OnboardingPage() {
   return (
     <div className="flex flex-1 w-full items-center justify-center p-6">
       <div className="flex flex-col gap-6 w-full max-w-md">
-        <h1 className="text-2xl font-bold">Tell us about yourself</h1>
+        <div className="flex flex-col gap-1">
+          <h1 className="text-2xl font-bold">Welcome to Open Project!</h1>
+          <p className="text-sm text-muted-foreground">
+            This is Open Portal — home base for coffee chats, applications, projects, and
+            everything else we get up to. Let&apos;s get your profile set up.
+          </p>
+        </div>
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <div className="flex flex-col gap-1">
             <label className="text-sm font-medium">Preferred first name</label>
@@ -113,10 +127,10 @@ export default function OnboardingPage() {
           <div className="flex flex-col gap-1">
             <label className="text-sm font-medium">Phone</label>
             <input
-              type="text"
+              type="tel"
               value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              placeholder="Phone"
+              onChange={(e) => setPhone(formatPhoneNumber(e.target.value))}
+              placeholder="(510) 555-0123"
               className="border rounded-md px-3 py-2 text-sm w-full"
             />
           </div>
@@ -129,6 +143,7 @@ export default function OnboardingPage() {
               placeholder="LinkedIn"
               className="border rounded-md px-3 py-2 text-sm w-full"
             />
+            <p className="text-xs text-muted-foreground">Don&apos;t have one? Make one — it takes two minutes.</p>
           </div>
           <div className="flex flex-col gap-1">
             <label className="text-sm font-medium">GitHub</label>
@@ -139,6 +154,7 @@ export default function OnboardingPage() {
               placeholder="GitHub"
               className="border rounded-md px-3 py-2 text-sm w-full"
             />
+            <p className="text-xs text-muted-foreground">Don&apos;t have one? Make one — it takes two minutes.</p>
           </div>
           <div className="flex flex-col gap-1">
             <label className="text-sm font-medium">Interests</label>
