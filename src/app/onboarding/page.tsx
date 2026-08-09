@@ -4,8 +4,14 @@ import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
-// Progressively formats digits as (xxx) xxx-xxxx while typing.
+// Progressively formats digits as (xxx) xxx-xxxx while typing. A leading "+"
+// opts out — international numbers don't fit one grouping pattern, so we
+// just pass those through as typed (stripping letters) instead of mangling
+// them into a US shape. Nobody gets a +1 forced onto their number.
 function formatPhoneNumber(value: string): string {
+  if (value.trim().startsWith("+")) {
+    return value.replace(/[^\d+\-\s()]/g, "");
+  }
   const digits = value.replace(/\D/g, "").slice(0, 10);
   if (digits.length < 4) return digits;
   if (digits.length < 7) return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
@@ -133,6 +139,7 @@ export default function OnboardingPage() {
               placeholder="(510) 555-0123"
               className="border rounded-md px-3 py-2 text-sm w-full"
             />
+            <p className="text-xs text-muted-foreground">International? Start with a +.</p>
           </div>
           <div className="flex flex-col gap-1">
             <label className="text-sm font-medium">LinkedIn</label>
