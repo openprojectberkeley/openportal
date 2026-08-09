@@ -15,9 +15,12 @@ function formatPhoneNumber(value: string): string {
 
 export default function OnboardingPage() {
   const router = useRouter();
-  // canSimulate reflects the real VP Tech role (see role-simulation-provider),
-  // independent of whatever persona they're currently simulating.
-  const { ready: rolesReady, canSimulate: isVpTech } = useRoleSim();
+  // `persona` is the real access-derived persona for everyone except VP
+  // Tech, who can simulate any persona — so gating on persona === "exec"
+  // means: real exec always passes, VP Tech only passes while simulating
+  // exec, and member/board are bounced either way (real or simulated).
+  const { ready: rolesReady, persona } = useRoleSim();
+  const viewingAsExec = persona === "exec";
   const [userId, setUserId] = useState<string | null>(null);
   const [email, setEmail] = useState<string | null>(null);
   const [preferredFirstname, setPreferredFirstname] = useState("");
@@ -33,8 +36,8 @@ export default function OnboardingPage() {
 
   useEffect(() => {
     // Wait for roles to resolve before deciding whether an already-onboarded
-    // visitor gets bounced, so we don't misclassify VP Tech before we know
-    // their access level.
+    // visitor gets bounced, so we don't misclassify them before we know
+    // their (possibly simulated) persona.
     if (!rolesReady) return;
     const supabase = createClient();
 
@@ -48,17 +51,18 @@ export default function OnboardingPage() {
       setEmail(user.email ?? null);
 
       // Onboarding has no route guard against being typed in directly, so
-      // anyone who already has a members row and isn't VP Tech gets bounced
-      // back to the app instead of re-onboarding. VP Tech can still reach it
-      // (e.g. to fix their own profile) — pre-fill so re-submitting doesn't
-      // blank out their existing data.
+      // anyone who already has a members row and isn't viewing as exec gets
+      // bounced back to the app instead of re-onboarding — member/board are
+      // bounced even for VP Tech unless they're simulating exec. Exec (real
+      // or simulated) can still reach it, e.g. to fix their own profile —
+      // pre-fill so re-submitting doesn't blank out their existing data.
       const { data: existing } = await supabase
         .from("members")
         .select("preferred_firstname, lastname, major, grad_year, phone, linkedin, github, interests")
         .eq("user_id", user.id)
         .maybeSingle();
 
-      if (existing && !isVpTech) {
+      if (existing && !viewingAsExec) {
         router.replace("/");
         return;
       }
@@ -76,7 +80,7 @@ export default function OnboardingPage() {
     };
 
     load();
-  }, [router, rolesReady, isVpTech]);
+  }, [router, rolesReady, viewingAsExec]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
