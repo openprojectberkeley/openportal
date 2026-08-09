@@ -140,7 +140,7 @@ export default function OnboardingPage() {
               type="text"
               value={linkedin}
               onChange={(e) => setLinkedin(e.target.value)}
-              placeholder="LinkedIn"
+              placeholder="linkedin.com/in/your-name"
               className="border rounded-md px-3 py-2 text-sm w-full"
             />
             <p className="text-xs text-muted-foreground">Don&apos;t have one? Make one — it takes two minutes.</p>
@@ -151,7 +151,7 @@ export default function OnboardingPage() {
               type="text"
               value={github}
               onChange={(e) => setGithub(e.target.value)}
-              placeholder="GitHub"
+              placeholder="github.com/your-username"
               className="border rounded-md px-3 py-2 text-sm w-full"
             />
             <p className="text-xs text-muted-foreground">Don&apos;t have one? Make one — it takes two minutes.</p>
