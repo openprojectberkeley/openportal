@@ -4,7 +4,6 @@ import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useRoleSim } from "@/components/role-simulation-provider";
-import { ChevronDown } from "lucide-react";
 
 const CLASS_YEARS = ["Freshman", "Sophomore", "Junior", "Senior", "Postgrad"] as const;
 
@@ -167,19 +166,16 @@ export default function OnboardingPage() {
             </div>
             <div className="flex flex-col gap-1">
               <label className="text-sm font-medium">Year</label>
-              <div className="relative">
-                <select
-                  value={gradYear}
-                  onChange={(e) => setGradYear(e.target.value)}
-                  className="appearance-none border rounded-md pl-3 pr-8 py-2 text-sm w-full bg-background focus:outline-none focus:ring-1 focus:ring-ring"
-                >
-                  <option value="">Select year</option>
-                  {CLASS_YEARS.map((year) => (
-                    <option key={year} value={year}>{year}</option>
-                  ))}
-                </select>
-                <ChevronDown size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-              </div>
+              <select
+                value={gradYear}
+                onChange={(e) => setGradYear(e.target.value)}
+                className="border rounded-md px-3 py-2 text-sm w-full bg-background"
+              >
+                <option value="">Select year</option>
+                {CLASS_YEARS.map((year) => (
+                  <option key={year} value={year}>{year}</option>
+                ))}
+              </select>
             </div>
             <div className="flex flex-col gap-1">
               <label className="text-sm font-medium">Phone</label>
