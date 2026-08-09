@@ -10,6 +10,12 @@ export default function OnboardingPage() {
   const [email, setEmail] = useState<string | null>(null);
   const [preferredFirstname, setPreferredFirstname] = useState("");
   const [lastname, setLastname] = useState("");
+  const [major, setMajor] = useState("");
+  const [gradYear, setGradYear] = useState("");
+  const [phone, setPhone] = useState("");
+  const [linkedin, setLinkedin] = useState("");
+  const [github, setGithub] = useState("");
+  const [interests, setInterests] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -40,6 +46,12 @@ export default function OnboardingPage() {
         preferred_firstname: preferredFirstname.trim(),
         lastname: lastname.trim(),
         email,
+        major: major.trim(),
+        grad_year: gradYear.trim(),
+        phone: phone.trim(),
+        linkedin: linkedin.trim(),
+        github: github.trim(),
+        interests: interests.trim(),
       });
 
     if (insertError) {
@@ -53,8 +65,8 @@ export default function OnboardingPage() {
 
   return (
     <div className="flex flex-1 w-full items-center justify-center p-6">
-      <div className="flex flex-col gap-6 w-full max-w-sm">
-        <h1 className="text-2xl font-bold">Tell us your name</h1>
+      <div className="flex flex-col gap-6 w-full max-w-md">
+        <h1 className="text-2xl font-bold">Tell us about yourself</h1>
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <div className="flex flex-col gap-1">
             <label className="text-sm font-medium">Preferred first name</label>
@@ -76,6 +88,66 @@ export default function OnboardingPage() {
               placeholder="Last name"
               required
               className="border rounded-md px-3 py-2 text-sm w-full"
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-sm font-medium">Major(s)</label>
+            <input
+              type="text"
+              value={major}
+              onChange={(e) => setMajor(e.target.value)}
+              placeholder="Major(s)"
+              className="border rounded-md px-3 py-2 text-sm w-full"
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-sm font-medium">Graduation year</label>
+            <input
+              type="text"
+              value={gradYear}
+              onChange={(e) => setGradYear(e.target.value)}
+              placeholder="Graduation year"
+              className="border rounded-md px-3 py-2 text-sm w-full"
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-sm font-medium">Phone</label>
+            <input
+              type="text"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              placeholder="Phone"
+              className="border rounded-md px-3 py-2 text-sm w-full"
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-sm font-medium">LinkedIn</label>
+            <input
+              type="text"
+              value={linkedin}
+              onChange={(e) => setLinkedin(e.target.value)}
+              placeholder="LinkedIn"
+              className="border rounded-md px-3 py-2 text-sm w-full"
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-sm font-medium">GitHub</label>
+            <input
+              type="text"
+              value={github}
+              onChange={(e) => setGithub(e.target.value)}
+              placeholder="GitHub"
+              className="border rounded-md px-3 py-2 text-sm w-full"
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-sm font-medium">Interests</label>
+            <textarea
+              value={interests}
+              onChange={(e) => setInterests(e.target.value)}
+              placeholder="Interests"
+              rows={2}
+              className="border rounded-md px-3 py-2 text-sm w-full resize-none"
             />
           </div>
           {error && <p className="text-sm text-red-500">{error}</p>}
