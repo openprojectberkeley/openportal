@@ -63,13 +63,15 @@
     @apply border-border;
   }
   html {
-    /* Disable elastic/rubber-band overscroll so the page can't be dragged past
-       its bounds (which visually shifts the fixed header). */
-    overscroll-behavior: none;
+    /* Disable vertical elastic/rubber-band overscroll so the page can't be
+       dragged past its bounds (which visually shifts the fixed header). Only the
+       y-axis is constrained — leaving overscroll-behavior-x at its default keeps
+       the browser's horizontal swipe-to-go-back/forward gesture working. */
+    overscroll-behavior-y: none;
   }
   body {
     @apply bg-background text-foreground;
-    overscroll-behavior: none;
+    overscroll-behavior-y: none;
   }
 
   /* Hide native scrollbars everywhere; a custom overlay scrollbar is rendered
