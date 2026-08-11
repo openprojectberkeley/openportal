@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { Cog, Users } from "lucide-react";
+import { ClipboardCheck, Cog, Users } from "lucide-react";
 import { readableTextColor } from "@/lib/portal-color";
 import { PortalSettingsModal } from "@/components/portal-settings-modal";
 import { PortalMembersModal } from "@/components/portal-members-modal";
+import { PortalAttendanceModal } from "@/components/portal-attendance-modal";
 import { usePortalMeta } from "@/components/portal-meta-provider";
 
 export type PortalSummary = {
@@ -21,6 +22,7 @@ export function PortalCard({ portal }: { portal: PortalSummary }) {
   const { overrides } = usePortalMeta();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [membersOpen, setMembersOpen] = useState(false);
+  const [attendanceOpen, setAttendanceOpen] = useState(false);
 
   // Live values: an in-session settings save (via context) wins over the
   // originally-fetched props, so the card updates instantly with no reload.
@@ -78,6 +80,13 @@ export function PortalCard({ portal }: { portal: PortalSummary }) {
           >
             <Users size={16} />
           </button>
+          <button
+            onClick={() => setAttendanceOpen(true)}
+            aria-label="Attendance"
+            className="text-muted-foreground group-hover:text-[var(--hover-fg)] opacity-70 hover:opacity-100 transition"
+          >
+            <ClipboardCheck size={16} />
+          </button>
           {portal.is_admin && (
             <button
               onClick={() => setSettingsOpen(true)}
@@ -95,6 +104,13 @@ export function PortalCard({ portal }: { portal: PortalSummary }) {
         open={membersOpen}
         onOpenChange={setMembersOpen}
         canEdit={portal.is_admin}
+      />
+
+      <PortalAttendanceModal
+        portalId={portal.id}
+        open={attendanceOpen}
+        onOpenChange={setAttendanceOpen}
+        canManage={portal.is_admin}
       />
 
       {portal.is_admin && (

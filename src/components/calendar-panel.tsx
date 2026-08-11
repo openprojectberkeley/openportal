@@ -3,17 +3,13 @@
 import { createClient } from "@/lib/supabase/client";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Plus, Pencil, Trash2, MapPin, CalendarPlus } from "lucide-react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import { EventListSkeleton } from "@/components/skeletons";
 import { accentTint } from "@/lib/portal-color";
 import { downloadEventIcs } from "@/lib/ics";
 import { cn } from "@/lib/utils";
 import { useRoleSim } from "@/components/role-simulation-provider";
 import { usePortalMeta } from "@/components/portal-meta-provider";
+import { EventFormDialog, deletePortalEvent, EVENT_FORM_SELECT, type EventFormValue } from "@/components/event-form-dialog";
 
 export type PortalEvent = {
   id: string;
@@ -55,36 +51,6 @@ function formatTime(iso: string): string {
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
 }
-
-// Local HH:mm for an ISO timestamp (used to prefill the edit form's time inputs).
-function timeValue(iso: string): string {
-  const d = new Date(iso);
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-}
-
-const EVENT_SELECT = "id, portal_id, title, description, location, start_time, end_time, all_day, portals(name, color)";
-
-type EventFields = {
-  title: string;
-  date: string;
-  allDay: boolean;
-  startTime: string;
-  endTime: string;
-  description: string;
-  location: string;
-  portalId: string;
-};
-
-const emptyFields = (date: string, portalId: string): EventFields => ({
-  title: "",
-  date,
-  allDay: false,
-  startTime: "18:00",
-  endTime: "",
-  description: "",
-  location: "",
-  portalId,
-});
 
 // One event, tinted with its portal's accent color (whole-card, not a badge).
 function EventCard({
@@ -201,16 +167,13 @@ export function CalendarPanel({ portalId }: Props) {
   // Portals the current user can manage events for (exec ⇒ all).
   const [manageablePortals, setManageablePortals] = useState<{ id: string; name: string }[]>([]);
 
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [fields, setFields] = useState<EventFields>(emptyFields(dayKey(today), ""));
-  const [saving, setSaving] = useState(false);
+  const [formOpen, setFormOpen] = useState(false);
+  const [editingEvent, setEditingEvent] = useState<PortalEvent | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [formError, setFormError] = useState<string | null>(null);
 
   const loadEvents = useCallback(async () => {
     const supabase = createClient();
-    let query = supabase.from("portal_events").select(EVENT_SELECT).order("start_time");
+    let query = supabase.from("portal_events").select(EVENT_FORM_SELECT).order("start_time");
     if (portalId) query = query.eq("portal_id", portalId);
     const { data } = await query;
     // `portals(name, color)` is a to-one FK embed (object at runtime); supabase-js
@@ -323,93 +286,30 @@ export function CalendarPanel({ portalId }: Props) {
   const selectedEvents = eventsByDay.get(selectedKey) ?? [];
 
   const openCreate = () => {
-    setEditingId(null);
-    setFields(emptyFields(selectedKey, portalId ?? manageablePortals[0]?.id ?? ""));
-    setFormError(null);
-    setDialogOpen(true);
+    setEditingEvent(null);
+    setFormOpen(true);
   };
 
   const openEdit = (ev: PortalEvent) => {
-    setEditingId(ev.id);
-    setFields({
-      title: ev.title,
-      date: dayKey(new Date(ev.start_time)),
-      allDay: ev.all_day,
-      startTime: ev.all_day ? "18:00" : timeValue(ev.start_time),
-      endTime: ev.end_time ? timeValue(ev.end_time) : "",
-      description: ev.description ?? "",
-      location: ev.location ?? "",
-      portalId: ev.portal_id,
-    });
-    setFormError(null);
-    setDialogOpen(true);
+    setEditingEvent(ev);
+    setFormOpen(true);
   };
 
-  const saveEvent = async () => {
-    const title = fields.title.trim();
-    if (!title) { setFormError("Title is required."); return; }
-    if (!fields.date) { setFormError("Date is required."); return; }
-    if (!fields.portalId) { setFormError("Pick a portal."); return; }
-
-    setSaving(true);
-    setFormError(null);
-    const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { setFormError("Not signed in."); setSaving(false); return; }
-
-    let start_time: string;
-    let end_time: string | null = null;
-    if (fields.allDay) {
-      start_time = new Date(`${fields.date}T00:00`).toISOString();
-    } else {
-      start_time = new Date(`${fields.date}T${fields.startTime || "00:00"}`).toISOString();
-      if (fields.endTime) end_time = new Date(`${fields.date}T${fields.endTime}`).toISOString();
-    }
-
-    const payload = {
-      title,
-      description: fields.description.trim() || null,
-      location: fields.location.trim() || null,
-      start_time,
-      end_time,
-      all_day: fields.allDay,
-    };
-
-    // portal_events has no updated_at trigger, so set it manually on edits.
-    // Editing keeps the event's own portal; creation uses the picked portal.
-    const query = editingId
-      ? supabase
-          .from("portal_events")
-          .update({ ...payload, updated_at: new Date().toISOString() })
-          .eq("id", editingId)
-      : supabase
-          .from("portal_events")
-          .insert({ ...payload, portal_id: fields.portalId, created_by: user.id });
-
-    const { data, error } = await query.select(EVENT_SELECT).single();
-
-    if (error) { setFormError(error.message); setSaving(false); return; }
-
-    const saved = data as unknown as PortalEvent;
+  const handleSaved = (saved: EventFormValue) => {
     setEvents((prev) =>
-      editingId ? prev.map((e) => (e.id === saved.id ? saved : e)) : [...prev, saved],
+      prev.some((e) => e.id === saved.id) ? prev.map((e) => (e.id === saved.id ? saved : e)) : [...prev, saved],
     );
     jumpTo(saved.start_time);
-    setSaving(false);
-    setDialogOpen(false);
   };
 
   const deleteEvent = async (ev: PortalEvent) => {
     if (!window.confirm(`Delete "${ev.title}"? This can't be undone.`)) return;
     setDeletingId(ev.id);
-    const supabase = createClient();
-    const { error } = await supabase.from("portal_events").delete().eq("id", ev.id);
-    if (error) { setDeletingId(null); return; }
+    const ok = await deletePortalEvent(ev.id);
+    if (!ok) { setDeletingId(null); return; }
     setEvents((prev) => prev.filter((e) => e.id !== ev.id));
     setDeletingId(null);
   };
-
-  const showPortalPicker = !editingId && !portalId;
 
   return (
     <div className="border rounded-xl p-4 bg-background">
@@ -542,78 +442,15 @@ export function CalendarPanel({ portalId }: Props) {
         </div>
       </div>
 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{editingId ? "Edit event" : "New event"}</DialogTitle>
-          </DialogHeader>
-          <div className="flex flex-col gap-4">
-            <div className="flex flex-col gap-1">
-              <Label htmlFor="event-title">Title</Label>
-              <Input id="event-title" value={fields.title} onChange={(e) => setFields((f) => ({ ...f, title: e.target.value }))} />
-            </div>
-            {showPortalPicker && (
-              <div className="flex flex-col gap-1">
-                <Label htmlFor="event-portal">Portal</Label>
-                <select
-                  id="event-portal"
-                  value={fields.portalId}
-                  onChange={(e) => setFields((f) => ({ ...f, portalId: e.target.value }))}
-                  className="border rounded-md h-9 px-3 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-ring"
-                >
-                  {manageablePortals.map((p) => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
-                  ))}
-                </select>
-              </div>
-            )}
-            <div className="flex flex-col gap-1">
-              <Label htmlFor="event-date">Date</Label>
-              <Input id="event-date" type="date" value={fields.date} onChange={(e) => setFields((f) => ({ ...f, date: e.target.value }))} />
-            </div>
-            <label className="flex items-center gap-2 text-sm">
-              <Checkbox checked={fields.allDay} onCheckedChange={(v) => setFields((f) => ({ ...f, allDay: v === true }))} />
-              All day
-            </label>
-            {!fields.allDay && (
-              <div className="flex gap-3">
-                <div className="flex flex-col gap-1 flex-1">
-                  <Label htmlFor="event-start">Start</Label>
-                  <Input id="event-start" type="time" value={fields.startTime} onChange={(e) => setFields((f) => ({ ...f, startTime: e.target.value }))} />
-                </div>
-                <div className="flex flex-col gap-1 flex-1">
-                  <Label htmlFor="event-end">End</Label>
-                  <Input id="event-end" type="time" value={fields.endTime} onChange={(e) => setFields((f) => ({ ...f, endTime: e.target.value }))} placeholder="Optional" />
-                </div>
-              </div>
-            )}
-            <div className="flex flex-col gap-1">
-              <Label htmlFor="event-location">Location</Label>
-              <Input
-                id="event-location"
-                value={fields.location}
-                onChange={(e) => setFields((f) => ({ ...f, location: e.target.value }))}
-                placeholder="Optional"
-              />
-            </div>
-            <div className="flex flex-col gap-1">
-              <Label htmlFor="event-description">Description</Label>
-              <textarea
-                id="event-description"
-                value={fields.description}
-                onChange={(e) => setFields((f) => ({ ...f, description: e.target.value }))}
-                rows={3}
-                className="border rounded-md px-3 py-2 text-sm w-full resize-none bg-background focus:outline-none focus:ring-1 focus:ring-ring"
-              />
-            </div>
-            {formError && <p className="text-sm text-red-500">{formError}</p>}
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-              <Button onClick={saveEvent} disabled={saving}>{saving ? "Saving..." : "Save"}</Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <EventFormDialog
+        open={formOpen}
+        onOpenChange={setFormOpen}
+        event={editingEvent}
+        portalId={portalId}
+        portals={portalId ? undefined : manageablePortals}
+        defaultDate={selectedKey}
+        onSaved={handleSaved}
+      />
     </div>
   );
 }

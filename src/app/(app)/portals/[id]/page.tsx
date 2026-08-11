@@ -4,13 +4,14 @@ import { createClient } from "@/lib/supabase/client";
 import { useParams, useRouter } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
-import { ChevronLeft, Cog, Users } from "lucide-react";
+import { ChevronLeft, ClipboardCheck, Cog, Users } from "lucide-react";
 import { useRoleSim } from "@/components/role-simulation-provider";
 import { CalendarPanel } from "@/components/calendar-panel";
 import { PortalDetailSkeleton } from "@/components/skeletons";
 import { Button } from "@/components/ui/button";
 import { PortalSettingsModal } from "@/components/portal-settings-modal";
 import { PortalMembersModal } from "@/components/portal-members-modal";
+import { PortalAttendanceModal } from "@/components/portal-attendance-modal";
 
 type Portal = {
   id: string;
@@ -40,6 +41,7 @@ function PortalDetail() {
   const [notFound, setNotFound] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [membersOpen, setMembersOpen] = useState(false);
+  const [attendanceOpen, setAttendanceOpen] = useState(false);
 
   useEffect(() => {
     const supabase = createClient();
@@ -120,6 +122,9 @@ function PortalDetail() {
           <Button variant="outline" size="sm" onClick={() => setMembersOpen(true)}>
             <Users size={15} /> View members
           </Button>
+          <Button variant="outline" size="sm" onClick={() => setAttendanceOpen(true)}>
+            <ClipboardCheck size={15} /> Attendance
+          </Button>
           {isAdmin && (
             <Button variant="outline" size="sm" onClick={() => setSettingsOpen(true)}>
               <Cog size={15} /> Settings
@@ -160,6 +165,12 @@ function PortalDetail() {
         open={membersOpen}
         onOpenChange={setMembersOpen}
         canEdit={isAdmin}
+      />
+      <PortalAttendanceModal
+        portalId={portal.id}
+        open={attendanceOpen}
+        onOpenChange={setAttendanceOpen}
+        canManage={isAdmin}
       />
     </div>
   );
