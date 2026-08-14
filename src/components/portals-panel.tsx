@@ -1,8 +1,8 @@
 "use client";
 
 import { createClient } from "@/lib/supabase/client";
-import { useEffect, useState } from "react";
-import { ChevronDown, ChevronRight, PlusCircle, Pencil, X } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { ChevronDown, ChevronRight, PlusCircle, Pencil, X, Lock } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -17,11 +17,14 @@ import { IconPicker } from "@/components/icon-picker";
 import { ColorPicker } from "@/components/color-picker";
 import { PanelListSkeleton } from "@/components/skeletons";
 import { PersonName } from "@/components/person-profile-provider";
+import { PortalCreateDialog, type PortalType, type ProjectOption } from "@/components/portal-create-dialog";
+import { AdminCrown } from "@/components/admin-crown";
+import { PortalDefaultIcon } from "@/components/portal-default-icon";
 
 export type MemberOption = { user_id: string; name: string };
 export type RoleOption = { id: string; role_name: string };
 
-type PortalMember = { user_id: string; name: string; is_admin: boolean };
+type PortalMember = { user_id: string; name: string; is_admin: boolean; locked?: boolean; owner?: boolean };
 type PortalRole = { id: string; role_name: string; is_admin: boolean };
 
 type Portal = {
@@ -29,18 +32,25 @@ type Portal = {
   name: string;
   description: string | null;
   icon: string | null;
+  icon_url: string | null;
   color: string | null;
+  type: PortalType;
+  project_id: string | null;
+  project_name: string | null;
   members: PortalMember[];
   roles: PortalRole[];
 };
 
-type PortalFields = { name: string; description: string; icon: string; color: string };
-const EMPTY_FIELDS: PortalFields = { name: "", description: "", icon: "", color: "" };
+type PortalFields = { name: string; description: string; icon: string; iconUrl: string | null; color: string };
+const EMPTY_FIELDS: PortalFields = { name: "", description: "", icon: "", iconUrl: null, color: "" };
+
+const TYPE_LABELS: Record<PortalType, string> = { general: "General", project: "Project", exec: "Exec" };
 
 type Props = { members: MemberOption[]; allRoles: RoleOption[] };
 
 export function PortalsPanel({ members, allRoles }: Props) {
   const [portals, setPortals] = useState<Portal[]>([]);
+  const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -51,16 +61,26 @@ export function PortalsPanel({ members, allRoles }: Props) {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetch("/api/admin/portals")
+  const loadPortals = useCallback(() => {
+    return fetch("/api/admin/portals")
       .then((r) => r.json())
       .then((data) => {
         if (data.error) setError(data.error);
         else setPortals(data);
-        setLoading(false);
       })
-      .catch(() => { setError("Failed to load."); setLoading(false); });
+      .catch(() => setError("Failed to load."));
   }, []);
+
+  useEffect(() => {
+    const supabase = createClient();
+    Promise.all([
+      loadPortals(),
+      supabase.from("projects").select("id, name").order("name"),
+    ]).then(([, { data: projectRows }]) => {
+      setProjects(projectRows ?? []);
+      setLoading(false);
+    });
+  }, [loadPortals]);
 
   const toggle = (id: string) =>
     setExpanded((prev) => {
@@ -69,26 +89,21 @@ export function PortalsPanel({ members, allRoles }: Props) {
       return next;
     });
 
-  const openCreate = () => {
-    setEditingId(null);
-    setFields(EMPTY_FIELDS);
-    setFormError(null);
-    setDialogOpen(true);
-  };
-
   const openEdit = (p: Portal) => {
     setEditingId(p.id);
     setFields({
       name: p.name,
       description: p.description ?? "",
       icon: p.icon ?? "",
+      iconUrl: p.icon_url,
       color: p.color ?? "",
     });
     setFormError(null);
     setDialogOpen(true);
   };
 
-  const savePortal = async () => {
+  const saveEdit = async () => {
+    if (!editingId) return;
     const name = fields.name.trim();
     if (!name) { setFormError("Name is required."); return; }
 
@@ -99,28 +114,17 @@ export function PortalsPanel({ members, allRoles }: Props) {
       name,
       description: fields.description.trim() || null,
       icon: fields.icon.trim() || null,
+      icon_url: fields.iconUrl || null,
       color: fields.color.trim() || null,
     };
 
-    if (editingId) {
-      const { error: updateError } = await supabase
-        .from("portals")
-        .update({ ...payload, updated_at: new Date().toISOString() })
-        .eq("id", editingId);
+    const { error: updateError } = await supabase
+      .from("portals")
+      .update({ ...payload, updated_at: new Date().toISOString() })
+      .eq("id", editingId);
 
-      if (updateError) { setFormError(updateError.message); setSaving(false); return; }
-      setPortals((prev) => prev.map((p) => (p.id === editingId ? { ...p, ...payload } : p)));
-    } else {
-      const { data, error: insertError } = await supabase
-        .from("portals")
-        .insert(payload)
-        .select("id, name, description, icon, color")
-        .single();
-
-      if (insertError) { setFormError(insertError.message); setSaving(false); return; }
-      setPortals((prev) => [...prev, { ...data, members: [], roles: [] }]);
-    }
-
+    if (updateError) { setFormError(updateError.message); setSaving(false); return; }
+    setPortals((prev) => prev.map((p) => (p.id === editingId ? { ...p, ...payload } : p)));
     setSaving(false);
     setDialogOpen(false);
   };
@@ -237,9 +241,13 @@ export function PortalsPanel({ members, allRoles }: Props) {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex justify-end">
-        <Button size="sm" onClick={openCreate}>
-          <PlusCircle size={15} /> New portal
-        </Button>
+        <PortalCreateDialog
+          allowedTypes={["general", "project", "exec"]}
+          projectOptions={projects}
+          memberOptions={members}
+          roleOptions={allRoles}
+          onCreated={() => loadPortals()}
+        />
       </div>
 
       <div className="border rounded-lg overflow-hidden">
@@ -256,9 +264,23 @@ export function PortalsPanel({ members, allRoles }: Props) {
                 <span className="text-muted-foreground flex-shrink-0">
                   {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                 </span>
-                <span className="flex-shrink-0 text-lg leading-none">{p.icon || "🚪"}</span>
+                {p.icon_url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={p.icon_url} alt="" className="h-6 w-6 flex-shrink-0 rounded object-cover" />
+                ) : p.icon ? (
+                  <span className="flex-shrink-0 text-lg leading-none">{p.icon}</span>
+                ) : (
+                  <PortalDefaultIcon
+                    className="h-5 w-5 flex-shrink-0 text-muted-foreground"
+                    style={{ color: p.color || undefined }}
+                  />
+                )}
                 <div className="flex items-center gap-2 flex-1 min-w-0 flex-wrap">
                   <span className="font-medium text-sm">{p.name}</span>
+                  <span className="px-2 py-0.5 rounded-full bg-foreground/10 text-foreground text-xs font-medium">
+                    {TYPE_LABELS[p.type]}
+                    {p.type === "project" && p.project_name ? ` · ${p.project_name}` : ""}
+                  </span>
                   <span className="text-xs text-muted-foreground">
                     {p.members.length} member{p.members.length === 1 ? "" : "s"}
                   </span>
@@ -277,10 +299,11 @@ export function PortalsPanel({ members, allRoles }: Props) {
                 </button>
               </div>
               {isOpen && (
-                <div className="px-11 pb-4 pt-1 flex flex-col gap-4 bg-accent/20">
+                <div className="px-11 pb-4 pt-3 flex flex-col gap-4 bg-accent/20">
                   {p.description && <p className="text-sm text-muted-foreground">{p.description}</p>}
 
-                  {/* Members roster */}
+                  {/* Members roster. Project portals derive members from the
+                      linked project (locked); explicit extras are editable. */}
                   <div className="flex flex-col gap-1.5">
                     <div className="flex items-center gap-2">
                       <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
@@ -315,22 +338,30 @@ export function PortalsPanel({ members, allRoles }: Props) {
                         {p.members.map((m) => (
                           <div key={m.user_id} className="flex items-center gap-2 text-sm">
                             <PersonName userId={m.user_id} name={m.name} className="flex-1" />
-                            <button
-                              onClick={() => toggleAdmin(p, m)}
-                              className={`px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${
-                                m.is_admin
-                                  ? "bg-foreground text-background"
-                                  : "bg-foreground/10 text-foreground hover:bg-foreground/20"
-                              }`}
-                            >
-                              Admin
-                            </button>
-                            <button
-                              onClick={() => removeMember(p, m)}
-                              className="text-muted-foreground hover:text-red-500 transition-colors"
-                            >
-                              <X size={13} />
-                            </button>
+                            {m.locked && (
+                              <span className="text-[10px] text-muted-foreground/70 italic">
+                                {m.owner ? "owner" : "via project"}
+                              </span>
+                            )}
+                            {m.locked && m.is_admin && (
+                              <Lock size={12} className="text-muted-foreground/60" aria-label="Admin locked" />
+                            )}
+                            <AdminCrown
+                              active={m.is_admin}
+                              owner={m.owner}
+                              locked={m.locked}
+                              onToggle={m.locked ? undefined : () => toggleAdmin(p, m)}
+                            />
+                            {m.locked ? (
+                              <span className="w-4 flex-shrink-0" aria-hidden />
+                            ) : (
+                              <button
+                                onClick={() => removeMember(p, m)}
+                                className="w-4 flex-shrink-0 flex justify-center text-muted-foreground hover:text-red-500 transition-colors"
+                              >
+                                <X size={13} />
+                              </button>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -374,19 +405,10 @@ export function PortalsPanel({ members, allRoles }: Props) {
                         {p.roles.map((r) => (
                           <div key={r.id} className="flex items-center gap-2 text-sm">
                             <span className="flex-1">{r.role_name}</span>
-                            <button
-                              onClick={() => toggleRoleAdmin(p, r)}
-                              className={`px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${
-                                r.is_admin
-                                  ? "bg-foreground text-background"
-                                  : "bg-foreground/10 text-foreground hover:bg-foreground/20"
-                              }`}
-                            >
-                              Admin
-                            </button>
+                            <AdminCrown active={r.is_admin} onToggle={() => toggleRoleAdmin(p, r)} />
                             <button
                               onClick={() => removeRole(p, r)}
-                              className="text-muted-foreground hover:text-red-500 transition-colors"
+                              className="w-4 flex-shrink-0 flex justify-center text-muted-foreground hover:text-red-500 transition-colors"
                             >
                               <X size={13} />
                             </button>
@@ -408,7 +430,7 @@ export function PortalsPanel({ members, allRoles }: Props) {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{editingId ? "Edit portal" : "New portal"}</DialogTitle>
+            <DialogTitle>Edit portal</DialogTitle>
           </DialogHeader>
           <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-1">
@@ -422,7 +444,13 @@ export function PortalsPanel({ members, allRoles }: Props) {
             <div className="flex gap-3">
               <div className="flex flex-col gap-1 w-28">
                 <Label>Icon</Label>
-                <IconPicker value={fields.icon} onChange={(v) => setFields((f) => ({ ...f, icon: v }))} />
+                <IconPicker
+                  value={fields.icon}
+                  onChange={(v) => setFields((f) => ({ ...f, icon: v }))}
+                  imageUrl={fields.iconUrl}
+                  onImageChange={(url) => setFields((f) => ({ ...f, iconUrl: url }))}
+                  portalId={editingId ?? undefined}
+                />
               </div>
               <div className="flex flex-col gap-1 flex-1">
                 <Label>Accent color</Label>
@@ -444,7 +472,7 @@ export function PortalsPanel({ members, allRoles }: Props) {
               <Button variant="outline" onClick={() => setDialogOpen(false)}>
                 Cancel
               </Button>
-              <Button onClick={savePortal} disabled={saving}>
+              <Button onClick={saveEdit} disabled={saving}>
                 {saving ? "Saving..." : "Save"}
               </Button>
             </div>

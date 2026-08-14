@@ -219,7 +219,7 @@ export function ProjectsPanel({ members }: Props) {
                 </button>
               </div>
               {isOpen && (
-                <div className="px-11 pb-4 pt-1 flex flex-col gap-3 bg-accent/20">
+                <div className="px-11 pb-4 pt-3 flex flex-col gap-3 bg-accent/20">
                   {p.description && <p className="text-sm text-muted-foreground">{p.description}</p>}
                   <div className="flex flex-col gap-1.5">
                     <div className="flex items-center gap-2">

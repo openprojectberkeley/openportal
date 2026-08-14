@@ -52,6 +52,8 @@ export default function AdminPage() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState<Set<string>>(new Set());
+  const [projectCount, setProjectCount] = useState<number | null>(null);
+  const [portalCount, setPortalCount] = useState<number | null>(null);
 
   // Guard: redirect out once we know the effective role isn't exec (honors the
   // "view as" simulation).
@@ -72,6 +74,13 @@ export default function AdminPage() {
       setAllRoles(rolesData ?? []);
       setLoading(false);
     }).catch(() => { setError("Failed to load."); setLoading(false); });
+
+    // Header counts (exec is a member of every portal via is_exec(), so these
+    // are unrestricted for exec).
+    supabase.from("projects").select("id", { count: "exact", head: true })
+      .then(({ count }) => setProjectCount(count ?? 0));
+    supabase.from("portals").select("id", { count: "exact", head: true })
+      .then(({ count }) => setPortalCount(count ?? 0));
   }, [ready, isExec]);
 
   const toggle = (id: string) =>
@@ -153,6 +162,12 @@ export default function AdminPage() {
             {t}
             {t === "members" && members.length > 0 && (
               <span className="ml-1 text-[10px] font-normal text-muted-foreground/60">({members.length})</span>
+            )}
+            {t === "projects" && projectCount !== null && (
+              <span className="ml-1 text-[10px] font-normal text-muted-foreground/60">({projectCount})</span>
+            )}
+            {t === "portals" && portalCount !== null && (
+              <span className="ml-1 text-[10px] font-normal text-muted-foreground/60">({portalCount})</span>
             )}
           </button>
         ))}
@@ -256,7 +271,7 @@ export default function AdminPage() {
                 </div>
               </div>
               {isOpen && (
-                <div className="px-11 pb-4 pt-1 grid grid-cols-2 gap-x-8 gap-y-2 bg-accent/20">
+                <div className="px-11 pb-4 pt-3 grid grid-cols-2 gap-x-8 gap-y-2 bg-accent/20">
                   {DETAIL_LABELS.map(({ key, label }) => (
                     <div key={key} className="flex gap-2 text-sm">
                       <span className="text-muted-foreground w-24 flex-shrink-0">{label}</span>

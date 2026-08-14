@@ -12,12 +12,14 @@ import { Button } from "@/components/ui/button";
 import { PortalSettingsModal } from "@/components/portal-settings-modal";
 import { PortalMembersModal } from "@/components/portal-members-modal";
 import { PortalAttendanceModal } from "@/components/portal-attendance-modal";
+import { PortalDefaultIcon } from "@/components/portal-default-icon";
 
 type Portal = {
   id: string;
   name: string;
   description: string | null;
   icon: string | null;
+  icon_url: string | null;
   color: string | null;
 };
 
@@ -57,7 +59,7 @@ function PortalDetail() {
       // row means no access.
       const { data: portalRow } = await supabase
         .from("portals")
-        .select("id, name, description, icon, color")
+        .select("id, name, description, icon, icon_url, color")
         .eq("id", portalId)
         .maybeSingle();
 
@@ -115,7 +117,21 @@ function PortalDetail() {
 
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
-          <span className="text-2xl leading-none">{portal.icon || "🚪"}</span>
+          {portal.icon_url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={portal.icon_url}
+              alt=""
+              className="h-9 w-9 flex-shrink-0 rounded-lg object-cover"
+            />
+          ) : portal.icon ? (
+            <span className="text-2xl leading-none">{portal.icon}</span>
+          ) : (
+            <PortalDefaultIcon
+              className="h-8 w-8 flex-shrink-0 text-foreground"
+              style={{ color: portal.color || undefined }}
+            />
+          )}
           <h1 className="text-3xl font-bold truncate">{portal.name}</h1>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
@@ -150,12 +166,13 @@ function PortalDetail() {
           initial={{
             name: portal.name,
             icon: portal.icon ?? "",
+            iconUrl: portal.icon_url,
             color: portal.color ?? "",
             description: portal.description ?? "",
           }}
           onMetaSaved={(m) =>
             setPortal((p) =>
-              p ? { ...p, name: m.name, icon: m.icon || null, color: m.color || null, description: m.description || null } : p,
+              p ? { ...p, name: m.name, icon: m.icon || null, icon_url: m.iconUrl, color: m.color || null, description: m.description || null } : p,
             )
           }
         />

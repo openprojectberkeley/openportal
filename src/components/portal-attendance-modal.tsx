@@ -216,36 +216,49 @@ export function PortalAttendanceModal({ portalId, open, onOpenChange, canManage 
   const setStatus = async (eventId: string, userId: string, status: Status) => {
     const k = key(eventId, userId);
     const prev = attendance[k];
-    if (prev === status) return;
+    // Clicking the already-selected status clears it back to the empty state.
+    const clearing = prev === status;
 
-    // Optimistic: update the map first, roll back on error.
-    setAttendance((m) => ({ ...m, [k]: status }));
-
-    const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-
-    const { error } = await supabase
-      .from("portal_event_attendance")
-      .upsert(
-        {
-          event_id: eventId,
-          user_id: userId,
-          status,
-          recorded_by: user.id,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "event_id,user_id" },
-      );
-
-    if (error) {
+    const rollback = () =>
       setAttendance((m) => {
         const next = { ...m };
         if (prev === undefined) delete next[k];
         else next[k] = prev;
         return next;
       });
-    }
+
+    // Optimistic: update the map first, roll back on error.
+    setAttendance((m) => {
+      const next = { ...m };
+      if (clearing) delete next[k];
+      else next[k] = status;
+      return next;
+    });
+
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) { rollback(); return; }
+
+    const { error } = clearing
+      ? await supabase
+          .from("portal_event_attendance")
+          .delete()
+          .eq("event_id", eventId)
+          .eq("user_id", userId)
+      : await supabase
+          .from("portal_event_attendance")
+          .upsert(
+            {
+              event_id: eventId,
+              user_id: userId,
+              status,
+              recorded_by: user.id,
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: "event_id,user_id" },
+          );
+
+    if (error) rollback();
   };
 
   const openCreate = () => {

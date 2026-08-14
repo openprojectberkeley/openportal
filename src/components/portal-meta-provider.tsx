@@ -9,6 +9,7 @@ import { createContext, useCallback, useContext, useMemo, useState } from "react
 export type PortalMetaOverride = {
   name: string;
   icon: string | null;
+  icon_url: string | null;
   color: string | null;
   description: string | null;
 };

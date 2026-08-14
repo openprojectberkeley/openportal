@@ -26,6 +26,8 @@ type RoleSim = {
   accessLevels: string[];
   isBoardOrExec: boolean;
   isExec: boolean;
+  // Real project-management fact (is_pm on any project); not persona-simulated.
+  isPm: boolean;
 };
 
 const RoleContext = createContext<RoleSim | null>(null);
@@ -42,16 +44,25 @@ export function RoleSimulationProvider({ children }: { children: React.ReactNode
   const [canSimulate, setCanSimulate] = useState(false);
   const [realLevels, setRealLevels] = useState<string[]>([]);
   const [persona, setPersonaState] = useState<Persona>("member");
+  const [isPm, setIsPm] = useState(false);
 
   useEffect(() => {
     const supabase = createClient();
     supabase.auth.getUser().then(async ({ data: { user } }) => {
       if (!user) { setReady(true); return; }
 
-      const { data: roleRows } = await supabase
-        .from("members_roles")
-        .select("roles(role_name, access_level)")
-        .eq("user_id", user.id);
+      const [{ data: roleRows }, { data: pmRows }] = await Promise.all([
+        supabase
+          .from("members_roles")
+          .select("roles(role_name, access_level)")
+          .eq("user_id", user.id),
+        supabase
+          .from("project_members")
+          .select("project_id")
+          .eq("user_id", user.id)
+          .eq("is_pm", true)
+          .limit(1),
+      ]);
 
       const roles = ((roleRows ?? []) as unknown as MemberRoleRow[]).flatMap((r) => (r.roles ? [r.roles] : []));
       const levels = roles.map((r) => r.access_level).filter(Boolean) as string[];
@@ -59,6 +70,7 @@ export function RoleSimulationProvider({ children }: { children: React.ReactNode
 
       setRealLevels(levels);
       setCanSimulate(vpTech);
+      setIsPm((pmRows ?? []).length > 0);
 
       const saved = readCookie(SIM_COOKIE);
       setPersonaState(vpTech && isPersona(saved) ? saved : personaFromAccessLevels(levels));
@@ -85,6 +97,7 @@ export function RoleSimulationProvider({ children }: { children: React.ReactNode
     accessLevels,
     isBoardOrExec: accessIsBoardOrExec(accessLevels),
     isExec: accessIsExec(accessLevels),
+    isPm,
   };
 
   return (
@@ -122,7 +135,7 @@ export function useRoleSim(): RoleSim {
     // Provider not mounted — safe, no-access defaults.
     return {
       ready: true, canSimulate: false, simulating: false, persona: "member",
-      setPersona: () => {}, accessLevels: [], isBoardOrExec: false, isExec: false,
+      setPersona: () => {}, accessLevels: [], isBoardOrExec: false, isExec: false, isPm: false,
     };
   }
   return ctx;

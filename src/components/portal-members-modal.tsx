@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/supabase/client";
 import { useEffect, useState } from "react";
-import { PlusCircle, X } from "lucide-react";
+import { PlusCircle, X, Lock } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/overlay-scrollbar";
 import { PersonName } from "@/components/person-profile-provider";
@@ -14,8 +14,11 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { MemberRosterSkeleton } from "@/components/skeletons";
+import { AdminCrown } from "@/components/admin-crown";
 
-type MemberRow = { user_id: string; name: string; is_admin: boolean };
+// `locked` rows (project-derived or the portal owner) are managed by triggers
+// and can't be edited from the UI. `owner` crowns render gold.
+type MemberRow = { user_id: string; name: string; is_admin: boolean; locked: boolean; owner: boolean };
 type MemberOption = { user_id: string; name: string };
 
 type Props = {
@@ -44,7 +47,7 @@ export function PortalMembersModal({ portalId, open, onOpenChange, canEdit }: Pr
     Promise.all([
       supabase
         .from("portal_members")
-        .select("user_id, is_admin, members(preferred_firstname, lastname)")
+        .select("user_id, is_admin, managed, is_owner, members(preferred_firstname, lastname)")
         .eq("portal_id", portalId),
       // The member directory is readable by any authenticated user; only needed
       // for the add-picker.
@@ -56,7 +59,13 @@ export function PortalMembersModal({ portalId, open, onOpenChange, canEdit }: Pr
         (pmRows ?? [])
           .map((pm) => {
             const m = pm.members as unknown as { preferred_firstname: string | null; lastname: string | null } | null;
-            return { user_id: pm.user_id as string, name: fullName(m?.preferred_firstname, m?.lastname), is_admin: pm.is_admin as boolean };
+            return {
+              user_id: pm.user_id as string,
+              name: fullName(m?.preferred_firstname, m?.lastname),
+              is_admin: pm.is_admin as boolean,
+              locked: (pm.managed as boolean) || (pm.is_owner as boolean),
+              owner: pm.is_owner as boolean,
+            };
           })
           .sort(byName),
       );
@@ -76,7 +85,7 @@ export function PortalMembersModal({ portalId, open, onOpenChange, canEdit }: Pr
       .from("portal_members")
       .insert({ portal_id: portalId, user_id: m.user_id, is_admin: false });
     if (error) return;
-    setRows((prev) => [...prev, { ...m, is_admin: false }].sort(byName));
+    setRows((prev) => [...prev, { ...m, is_admin: false, locked: false, owner: false }].sort(byName));
   };
 
   const removeMember = async (row: MemberRow) => {
@@ -129,28 +138,25 @@ export function PortalMembersModal({ portalId, open, onOpenChange, canEdit }: Pr
               {rows.map((r) => (
                 <div key={r.user_id} className="flex items-center gap-2 text-sm py-1">
                   <PersonName userId={r.user_id} name={r.name} className="flex-1 min-w-0 truncate" />
-                  {canEdit ? (
-                    <>
-                      <button
-                        onClick={() => toggleAdmin(r)}
-                        className={`px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${
-                          r.is_admin
-                            ? "bg-foreground text-background"
-                            : "bg-foreground/10 text-foreground hover:bg-foreground/20"
-                        }`}
-                      >
-                        Admin
-                      </button>
-                      <button onClick={() => removeMember(r)} className="text-muted-foreground hover:text-red-500 transition-colors">
-                        <X size={13} />
-                      </button>
-                    </>
+                  {/* Lock sits left of the crown when the admin tier is locked
+                      (owner / project-derived). */}
+                  {r.locked && r.is_admin && (
+                    <Lock size={12} className="text-muted-foreground/60 flex-shrink-0" aria-label="Admin locked" />
+                  )}
+                  <AdminCrown
+                    active={r.is_admin}
+                    owner={r.owner}
+                    locked={r.locked}
+                    onToggle={!r.locked && canEdit ? () => toggleAdmin(r) : undefined}
+                  />
+                  {/* The remove column is always reserved so crowns stay aligned
+                      even when a member can't be removed. */}
+                  {!r.locked && canEdit ? (
+                    <button onClick={() => removeMember(r)} className="w-4 flex-shrink-0 flex justify-center text-muted-foreground hover:text-red-500 transition-colors">
+                      <X size={13} />
+                    </button>
                   ) : (
-                    r.is_admin && (
-                      <span className="px-2 py-0.5 rounded-full bg-foreground/10 text-foreground text-xs font-medium">
-                        Admin
-                      </span>
-                    )
+                    <span className="w-4 flex-shrink-0" aria-hidden />
                   )}
                 </div>
               ))}

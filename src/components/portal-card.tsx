@@ -3,19 +3,23 @@
 import Link from "next/link";
 import { useState } from "react";
 import { ClipboardCheck, Cog, Users } from "lucide-react";
-import { readableTextColor } from "@/lib/portal-color";
+import { accentTint, readableTextColor } from "@/lib/portal-color";
 import { PortalSettingsModal } from "@/components/portal-settings-modal";
 import { PortalMembersModal } from "@/components/portal-members-modal";
 import { PortalAttendanceModal } from "@/components/portal-attendance-modal";
 import { usePortalMeta } from "@/components/portal-meta-provider";
+import { AdminCrown } from "@/components/admin-crown";
+import { PortalDefaultIcon } from "@/components/portal-default-icon";
 
 export type PortalSummary = {
   id: string;
   name: string;
   description: string | null;
   icon: string | null;
+  icon_url: string | null;
   color: string | null;
   is_admin: boolean;
+  is_owner: boolean;
 };
 
 export function PortalCard({ portal }: { portal: PortalSummary }) {
@@ -29,6 +33,7 @@ export function PortalCard({ portal }: { portal: PortalSummary }) {
   const o = overrides[portal.id];
   const name = o?.name ?? portal.name;
   const icon = (o ? o.icon : portal.icon) ?? "";
+  const iconUrl = (o ? o.icon_url : portal.icon_url) ?? null;
   const color = (o ? o.color : portal.color) ?? "";
   const description = (o ? o.description : portal.description) ?? "";
 
@@ -50,19 +55,33 @@ export function PortalCard({ portal }: { portal: PortalSummary }) {
 
         <div className="relative z-10 pointer-events-none flex flex-col gap-3 group-hover:text-[var(--hover-fg)] transition-colors">
           <div className="flex items-center gap-3">
-            <span
-              className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg text-xl bg-foreground/5"
-              style={{ backgroundColor: color || undefined }}
-            >
-              {icon || "🚪"}
-            </span>
+            {iconUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={iconUrl}
+                alt=""
+                className="h-10 w-10 flex-shrink-0 rounded-lg object-cover"
+              />
+            ) : icon ? (
+              <span
+                className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg text-xl bg-foreground/5"
+                style={{ backgroundColor: color || undefined, color: color ? readableTextColor(color) : undefined }}
+              >
+                {icon}
+              </span>
+            ) : (
+              // Default mark: tint the tile with the accent and draw the P in the
+              // full accent color (currentColor) so it reads as the portal's color.
+              <span
+                className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-foreground/5"
+                style={{ backgroundColor: color ? accentTint(color) : undefined, color: color || undefined }}
+              >
+                <PortalDefaultIcon className="h-6 w-6" />
+              </span>
+            )}
             <div className="flex items-center gap-2 min-w-0 flex-wrap pr-12">
               <span className="font-medium truncate">{name}</span>
-              {portal.is_admin && (
-                <span className="px-2 py-0.5 rounded-full bg-foreground text-background group-hover:bg-background group-hover:text-foreground text-xs font-medium transition-colors">
-                  Admin
-                </span>
-              )}
+              <AdminCrown active={portal.is_admin} owner={portal.is_owner} />
             </div>
           </div>
           {description && (
@@ -118,7 +137,7 @@ export function PortalCard({ portal }: { portal: PortalSummary }) {
           portalId={portal.id}
           open={settingsOpen}
           onOpenChange={setSettingsOpen}
-          initial={{ name, icon, color, description }}
+          initial={{ name, icon, iconUrl, color, description }}
           onMetaSaved={() => {}}
         />
       )}

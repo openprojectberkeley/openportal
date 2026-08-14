@@ -17,7 +17,7 @@ import { IconPicker } from "@/components/icon-picker";
 import { ColorPicker } from "@/components/color-picker";
 import { usePortalMeta } from "@/components/portal-meta-provider";
 
-export type PortalMeta = { name: string; icon: string; color: string; description: string };
+export type PortalMeta = { name: string; icon: string; iconUrl: string | null; color: string; description: string };
 
 type RoleOption = { id: number; role_name: string };
 type PortalRoleRow = { role_id: number; role_name: string; is_admin: boolean };
@@ -76,6 +76,7 @@ export function PortalSettingsModal({ portalId, open, onOpenChange, initial, onM
     const payload = {
       name,
       icon: meta.icon.trim() || null,
+      icon_url: meta.iconUrl || null,
       color: meta.color.trim() || null,
       description: meta.description.trim() || null,
     };
@@ -90,12 +91,14 @@ export function PortalSettingsModal({ portalId, open, onOpenChange, initial, onM
     setPortalMeta(portalId, {
       name,
       icon: payload.icon,
+      icon_url: payload.icon_url,
       color: payload.color,
       description: payload.description,
     });
     onMetaSaved({
       name,
       icon: payload.icon ?? "",
+      iconUrl: payload.icon_url,
       color: payload.color ?? "",
       description: payload.description ?? "",
     });
@@ -152,7 +155,13 @@ export function PortalSettingsModal({ portalId, open, onOpenChange, initial, onM
             <div className="flex gap-3">
               <div className="flex flex-col gap-1 w-28">
                 <Label>Icon</Label>
-                <IconPicker value={meta.icon} onChange={(v) => setMeta((m) => ({ ...m, icon: v }))} />
+                <IconPicker
+                  value={meta.icon}
+                  onChange={(v) => setMeta((m) => ({ ...m, icon: v }))}
+                  imageUrl={meta.iconUrl}
+                  onImageChange={(url) => setMeta((m) => ({ ...m, iconUrl: url }))}
+                  portalId={portalId}
+                />
               </div>
               <div className="flex flex-col gap-1 flex-1">
                 <Label>Accent color</Label>
