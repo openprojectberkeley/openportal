@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/supabase/client";
 import { useCallback, useEffect, useState } from "react";
-import { ChevronDown, ChevronRight, PlusCircle, Pencil, X, Lock } from "lucide-react";
+import { ChevronDown, ChevronRight, PlusCircle, Pencil, X } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -342,9 +342,6 @@ export function PortalsPanel({ members, allRoles }: Props) {
                               <span className="text-[10px] text-muted-foreground/70 italic">
                                 {m.owner ? "owner" : "via project"}
                               </span>
-                            )}
-                            {m.locked && m.is_admin && (
-                              <Lock size={12} className="text-muted-foreground/60" aria-label="Admin locked" />
                             )}
                             <AdminCrown
                               active={m.is_admin}

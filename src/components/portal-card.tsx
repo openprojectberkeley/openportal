@@ -81,7 +81,7 @@ export function PortalCard({ portal }: { portal: PortalSummary }) {
             )}
             <div className="flex items-center gap-2 min-w-0 flex-wrap pr-12">
               <span className="font-medium truncate">{name}</span>
-              <AdminCrown active={portal.is_admin} owner={portal.is_owner} />
+              <AdminCrown active={portal.is_admin} owner={portal.is_owner} hoverInheritFg />
             </div>
           </div>
           {description && (

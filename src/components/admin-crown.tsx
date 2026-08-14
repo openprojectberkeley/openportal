@@ -1,6 +1,6 @@
 "use client";
 
-import { Crown } from "lucide-react";
+import { Crown, Lock } from "lucide-react";
 
 type Props = {
   /** Whether the admin tier is granted (crown "on"). */
@@ -11,26 +11,41 @@ type Props = {
   onToggle?: () => void;
   /** Locked = shown like "on" but dimmed and inert. */
   locked?: boolean;
+  /**
+   * For read-only crowns sitting inside a `group` that recolors its text to
+   * `--hover-fg` on hover (e.g. the portal card): make the crown follow that
+   * same color on hover so it stays visible against the accent swipe.
+   */
+  hoverInheritFg?: boolean;
   size?: number;
 };
 
 // Admin tier shown as a crown:
 //   off (toggle)      → light-gray outline, turns white outline on hover
 //   on (toggle)       → filled crown (gold if owner, else white)
-//   locked            → same as on, dimmed, no hover, not clickable
+//   locked            → dimmed crown with a small lock badge, no hover, inert
 //   read-only display → same as on, not clickable
-export function AdminCrown({ active, owner = false, onToggle, locked = false, size = 16 }: Props) {
+export function AdminCrown({ active, owner = false, onToggle, locked = false, hoverInheritFg = false, size = 16 }: Props) {
   const fillClass = owner ? "text-amber-400 fill-current" : "text-white fill-current";
+  // On hover, follow the group's hover text color so the crown stays visible.
+  const hoverClass = hoverInheritFg ? " transition-colors group-hover:text-[var(--hover-fg)]" : "";
 
   // Non-interactive states only ever render when admin is actually granted.
   if (locked || !onToggle) {
     if (!active) return null;
     return (
       <span
-        className={`inline-flex items-center justify-center p-1 ${locked ? "opacity-50" : ""}`}
+        className="relative inline-flex items-center justify-center p-1"
         aria-label={locked ? "Admin (locked)" : "Admin"}
       >
-        <Crown size={size} className={fillClass} />
+        {/* Locked crowns are grayed out and carry a small lock badge on their
+            bottom-right corner instead of a separate lock icon alongside. */}
+        <Crown size={size} className={fillClass + hoverClass + (locked ? " opacity-50" : "")} />
+        {locked && (
+          <span className="absolute -bottom-0.5 -right-0.5 flex items-center justify-center rounded-full bg-background" aria-hidden>
+            <Lock size={Math.round(size * 0.5)} strokeWidth={2.5} className="text-muted-foreground" />
+          </span>
+        )}
       </span>
     );
   }

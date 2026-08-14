@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/supabase/client";
 import { useEffect, useState } from "react";
-import { PlusCircle, X, Lock } from "lucide-react";
+import { PlusCircle, X } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/overlay-scrollbar";
 import { PersonName } from "@/components/person-profile-provider";
@@ -138,11 +138,6 @@ export function PortalMembersModal({ portalId, open, onOpenChange, canEdit }: Pr
               {rows.map((r) => (
                 <div key={r.user_id} className="flex items-center gap-2 text-sm py-1">
                   <PersonName userId={r.user_id} name={r.name} className="flex-1 min-w-0 truncate" />
-                  {/* Lock sits left of the crown when the admin tier is locked
-                      (owner / project-derived). */}
-                  {r.locked && r.is_admin && (
-                    <Lock size={12} className="text-muted-foreground/60 flex-shrink-0" aria-label="Admin locked" />
-                  )}
                   <AdminCrown
                     active={r.is_admin}
                     owner={r.owner}
