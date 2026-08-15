@@ -22,6 +22,10 @@ them in order in the Supabase SQL editor.
 | `0013_project_portal_membership_sync.sql` | Materializes project-portal rosters into `portal_members` (`managed` flag): populate-on-create + sync triggers on `project_members` (member→member, PM→admin), locks managed rows in RLS, drops the derived branches from the membership helpers, and backfills existing project portals. |
 | `0014_portal_owner_admin.sql` | Portal creator (exec or PM, any type) gets a locked `is_owner` admin row; owner rows are RLS-locked and never demoted/removed by the project-sync triggers. |
 | `0015_portal_icons.sql` | Adds `portals.icon_url`; public `portals` Storage bucket + RLS (public read, write gated by `is_portal_admin(portal_id)` on the `{portal_id}/icon.jpg` path). |
+| `0016_project_types_and_applications.sql` | Adds `projects.type` (studio/launch, default launch), `difficulty` (1-5), `estimated_members`, `num_subteams`; CHECK requiring a client for Studio; folds PMs into `is_board_or_exec()` (board = exec + PMs); `applications` + `application_rankings` tables + RLS (applicant manages own, board/exec read all). |
+| `0017_project_pm_update.sql` | Widens `projects` UPDATE RLS so a project's PMs (not just exec) can edit that project's details; insert/delete stay exec-only. |
+| `0018_project_difficulty_levels.sql` | Changes `projects.difficulty` from a 1-5 smallint to named levels (`beginner`/`intermediate`/`advanced`) with a matching CHECK. |
+| `0019_project_type_exec_only.sql` | BEFORE UPDATE trigger on `projects`: only exec can change a project's `type` (Studio/Launch); PMs can still edit other fields. |
 
 > Note: the Supabase CLI expects a `supabase/` directory at the repo root. These
 > live under `src/supabase/` for co-location; if you later adopt the CLI, move

@@ -67,10 +67,15 @@ export function RoleSimulationProvider({ children }: { children: React.ReactNode
       const roles = ((roleRows ?? []) as unknown as MemberRoleRow[]).flatMap((r) => (r.roles ? [r.roles] : []));
       const levels = roles.map((r) => r.access_level).filter(Boolean) as string[];
       const vpTech = roles.some((r) => r.role_name === VP_TECH_ROLE_NAME);
+      const pm = (pmRows ?? []).length > 0;
+
+      // board = exec + PMs: a PM of any project has board access even without a
+      // board/exec role row.
+      if (pm && !levels.includes("board")) levels.push("board");
 
       setRealLevels(levels);
       setCanSimulate(vpTech);
-      setIsPm((pmRows ?? []).length > 0);
+      setIsPm(pm);
 
       const saved = readCookie(SIM_COOKIE);
       setPersonaState(vpTech && isPersona(saved) ? saved : personaFromAccessLevels(levels));

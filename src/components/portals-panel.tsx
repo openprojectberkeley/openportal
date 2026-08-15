@@ -18,6 +18,7 @@ import { ColorPicker } from "@/components/color-picker";
 import { PanelListSkeleton } from "@/components/skeletons";
 import { PersonName } from "@/components/person-profile-provider";
 import { PortalCreateDialog, type PortalType, type ProjectOption } from "@/components/portal-create-dialog";
+import { ProjectEditDialog } from "@/components/project-edit-dialog";
 import { AdminCrown } from "@/components/admin-crown";
 import { PortalDefaultIcon } from "@/components/portal-default-icon";
 
@@ -60,6 +61,7 @@ export function PortalsPanel({ members, allRoles }: Props) {
   const [fields, setFields] = useState<PortalFields>(EMPTY_FIELDS);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [projectEditOpen, setProjectEditOpen] = useState(false);
 
   const loadPortals = useCallback(() => {
     return fetch("/api/admin/portals")
@@ -237,6 +239,8 @@ export function PortalsPanel({ members, allRoles }: Props) {
 
   if (loading) return <PanelListSkeleton />;
   if (error) return <div className="py-8 text-sm text-red-500">{error}</div>;
+
+  const editingPortal = portals.find((p) => p.id === editingId);
 
   return (
     <div className="flex flex-col gap-4">
@@ -464,6 +468,18 @@ export function PortalsPanel({ members, allRoles }: Props) {
                 className="border rounded-md px-3 py-2 text-sm w-full resize-none bg-background focus:outline-none focus:ring-1 focus:ring-ring"
               />
             </div>
+            {/* Linked project — edit the underlying project's details. */}
+            {editingPortal?.type === "project" && editingPortal.project_id && (
+              <div className="flex items-center justify-between gap-2 border-t pt-4">
+                <div className="flex flex-col">
+                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Project</span>
+                  <span className="text-xs text-muted-foreground">Edit the linked project&apos;s details.</span>
+                </div>
+                <Button variant="outline" size="sm" onClick={() => setProjectEditOpen(true)}>
+                  <Pencil size={14} /> Edit project
+                </Button>
+              </div>
+            )}
             {formError && <p className="text-sm text-red-500">{formError}</p>}
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setDialogOpen(false)}>
@@ -474,6 +490,15 @@ export function PortalsPanel({ members, allRoles }: Props) {
               </Button>
             </div>
           </div>
+
+          {editingPortal?.type === "project" && editingPortal.project_id && (
+            <ProjectEditDialog
+              projectId={editingPortal.project_id}
+              open={projectEditOpen}
+              onOpenChange={setProjectEditOpen}
+              onSaved={() => loadPortals()}
+            />
+          )}
         </DialogContent>
       </Dialog>
     </div>

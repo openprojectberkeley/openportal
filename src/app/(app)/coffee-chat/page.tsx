@@ -30,14 +30,27 @@ export default function CoffeeChatPage() {
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
-    const { data: boardExecEntries } = await supabase
-      .from("members_roles")
-      .select("user_id, roles!inner(id, role_name, access_level)")
-      .in("roles.access_level", ["board", "exec"]);
+    // The bookable team is board/exec plus every project PM (PMs count as
+    // board, and OP Studio applicants must chat with a project's PM).
+    const [{ data: boardExecEntries }, { data: pmEntries }] = await Promise.all([
+      supabase
+        .from("members_roles")
+        .select("user_id, roles!inner(id, role_name, access_level)")
+        .in("roles.access_level", ["board", "exec"]),
+      supabase
+        .from("project_members")
+        .select("user_id")
+        .eq("is_pm", true),
+    ]);
 
-    if (!boardExecEntries?.length) { setLoading(false); return; }
+    const userIds = [
+      ...new Set([
+        ...(boardExecEntries ?? []).map((e) => e.user_id),
+        ...(pmEntries ?? []).map((e) => e.user_id),
+      ]),
+    ];
 
-    const userIds = [...new Set(boardExecEntries.map((e) => e.user_id))];
+    if (userIds.length === 0) { setLoading(false); return; }
 
     const [{ data: allRoles }, { data: profiles }, { data: chats }, { data: myChats }] = await Promise.all([
       supabase.from("members_roles").select("user_id, roles(id, role_name)").in("user_id", userIds),

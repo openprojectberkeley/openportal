@@ -20,6 +20,16 @@ export async function getEffectiveAccessLevels(supabase: SupabaseClient): Promis
   const realLevels = roles.map((r) => r.access_level).filter(Boolean) as string[];
   const isVpTech = roles.some((r) => r.role_name === VP_TECH_ROLE_NAME);
 
+  // board = exec + PMs: a PM of any project has board access even without a
+  // board/exec role row.
+  const { data: pmRows } = await supabase
+    .from("project_members")
+    .select("project_id")
+    .eq("user_id", user.id)
+    .eq("is_pm", true)
+    .limit(1);
+  if ((pmRows ?? []).length > 0 && !realLevels.includes("board")) realLevels.push("board");
+
   if (!isVpTech) return realLevels;
 
   const persona = (await cookies()).get(SIM_COOKIE)?.value;

@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/supabase/client";
 import { useEffect, useState } from "react";
-import { PlusCircle, X } from "lucide-react";
+import { PlusCircle, X, Pencil } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   DropdownMenu,
@@ -15,7 +15,9 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { IconPicker } from "@/components/icon-picker";
 import { ColorPicker } from "@/components/color-picker";
+import { ProjectEditDialog } from "@/components/project-edit-dialog";
 import { usePortalMeta } from "@/components/portal-meta-provider";
+import { useRoleSim } from "@/components/role-simulation-provider";
 
 export type PortalMeta = { name: string; icon: string; iconUrl: string | null; color: string; description: string };
 
@@ -34,6 +36,7 @@ type Props = {
 // auto-assign role mappings. Roster editing lives in the View Members modal.
 export function PortalSettingsModal({ portalId, open, onOpenChange, initial, onMetaSaved }: Props) {
   const { setPortalMeta } = usePortalMeta();
+  const { isExec } = useRoleSim();
   const [meta, setMeta] = useState<PortalMeta>(initial);
   const [savingMeta, setSavingMeta] = useState(false);
   const [metaError, setMetaError] = useState<string | null>(null);
@@ -41,6 +44,11 @@ export function PortalSettingsModal({ portalId, open, onOpenChange, initial, onM
   const [roles, setRoles] = useState<PortalRoleRow[]>([]);
   const [allRoles, setAllRoles] = useState<RoleOption[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Set only for project portals: the linked project's id, enabling the "Edit
+  // project" section below.
+  const [projectId, setProjectId] = useState<string | null>(null);
+  const [projectEditOpen, setProjectEditOpen] = useState(false);
 
   // Reseed the form each time the dialog opens.
   useEffect(() => {
@@ -54,7 +62,8 @@ export function PortalSettingsModal({ portalId, open, onOpenChange, initial, onM
     Promise.all([
       supabase.from("portal_roles").select("role_id, is_admin, roles(role_name)").eq("portal_id", portalId),
       supabase.from("roles").select("id, role_name").order("role_name"),
-    ]).then(([{ data: prRows }, { data: roleRows }]) => {
+      supabase.from("portals").select("type, project_id").eq("id", portalId).maybeSingle(),
+    ]).then(([{ data: prRows }, { data: roleRows }, { data: portalRow }]) => {
       setRoles(
         (prRows ?? []).map((r) => ({
           role_id: r.role_id as number,
@@ -63,6 +72,7 @@ export function PortalSettingsModal({ portalId, open, onOpenChange, initial, onM
         })),
       );
       setAllRoles((roleRows ?? []) as RoleOption[]);
+      setProjectId(portalRow?.type === "project" ? (portalRow.project_id as string | null) : null);
       setLoading(false);
     });
   }, [open, portalId]);
@@ -186,6 +196,19 @@ export function PortalSettingsModal({ portalId, open, onOpenChange, initial, onM
             </div>
           </div>
 
+          {/* Linked project — edit the underlying project's details. */}
+          {projectId && (
+            <div className="flex items-center justify-between gap-2 border-t pt-4">
+              <div className="flex flex-col">
+                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Project</span>
+                <span className="text-xs text-muted-foreground">Edit the linked project&apos;s details.</span>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => setProjectEditOpen(true)}>
+                <Pencil size={14} /> Edit project
+              </Button>
+            </div>
+          )}
+
           {/* Auto-assign role mappings */}
           <div className="flex flex-col gap-1.5 border-t pt-4">
             <div className="flex items-center gap-2">
@@ -241,6 +264,15 @@ export function PortalSettingsModal({ portalId, open, onOpenChange, initial, onM
             )}
           </div>
         </div>
+
+        {projectId && (
+          <ProjectEditDialog
+            projectId={projectId}
+            open={projectEditOpen}
+            onOpenChange={setProjectEditOpen}
+            canEditType={isExec}
+          />
+        )}
       </DialogContent>
     </Dialog>
   );

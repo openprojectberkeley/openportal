@@ -46,6 +46,11 @@ export default function OnboardingPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // A phone is only valid once all 10 digits are present.
+  const phoneValid = phone.replace(/\D/g, "").length === 10;
+  const canSubmit =
+    !!preferredFirstname.trim() && !!lastname.trim() && phoneValid;
+
   useEffect(() => {
     // Wait for roles to resolve before deciding whether an already-onboarded
     // visitor gets bounced, so we don't misclassify them before we know
@@ -97,7 +102,7 @@ export default function OnboardingPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!userId || !preferredFirstname.trim() || !lastname.trim()) return;
+    if (!userId || !canSubmit) return;
 
     setLoading(true);
     setError(null);
@@ -161,7 +166,7 @@ export default function OnboardingPage() {
                 onChange={(e) => setPreferredFirstname(e.target.value)}
                 placeholder="Preferred first name"
                 required
-                className="border rounded-md px-3 py-2 text-sm w-full"
+                className="border bg-transparent rounded-md px-3 py-2 text-sm w-full"
               />
             </div>
             <div className="flex flex-col gap-1">
@@ -172,7 +177,7 @@ export default function OnboardingPage() {
                 onChange={(e) => setLastname(e.target.value)}
                 placeholder="Last name"
                 required
-                className="border rounded-md px-3 py-2 text-sm w-full"
+                className="border bg-transparent rounded-md px-3 py-2 text-sm w-full"
               />
             </div>
           </div>
@@ -184,7 +189,7 @@ export default function OnboardingPage() {
                 value={major}
                 onChange={(e) => setMajor(e.target.value)}
                 placeholder="Major(s)"
-                className="border rounded-md px-3 py-2 text-sm w-full"
+                className="border bg-transparent rounded-md px-3 py-2 text-sm w-full"
               />
             </div>
             <div className="flex flex-col gap-1">
@@ -193,7 +198,7 @@ export default function OnboardingPage() {
                 <DropdownMenuTrigger asChild>
                   <button
                     type="button"
-                    className="flex h-9 w-full items-center justify-between rounded-md border px-3 text-sm bg-background hover:bg-accent transition-colors focus:outline-none focus:ring-1 focus:ring-ring"
+                    className="flex w-full items-center justify-between border bg-transparent rounded-md px-3 py-2 text-sm"
                   >
                     <span className={gradYear ? "" : "text-muted-foreground"}>
                       {gradYear || "Select year"}
@@ -218,7 +223,8 @@ export default function OnboardingPage() {
                 value={phone}
                 onChange={(e) => setPhone(formatPhoneNumber(e.target.value))}
                 placeholder="(510) 555-0123"
-                className="border rounded-md px-3 py-2 text-sm w-full"
+                aria-invalid={phone.length > 0 && !phoneValid}
+                className="border bg-transparent rounded-md px-3 py-2 text-sm w-full"
               />
             </div>
           </div>
@@ -229,7 +235,7 @@ export default function OnboardingPage() {
               value={linkedin}
               onChange={(e) => setLinkedin(e.target.value)}
               placeholder="linkedin.com/in/your-name"
-              className="border rounded-md px-3 py-2 text-sm w-full"
+              className="border bg-transparent rounded-md px-3 py-2 text-sm w-full"
             />
             <p className="text-xs text-muted-foreground">Don&apos;t have one? Make one — it takes two minutes.</p>
           </div>
@@ -240,7 +246,7 @@ export default function OnboardingPage() {
               value={github}
               onChange={(e) => setGithub(e.target.value)}
               placeholder="github.com/your-username"
-              className="border rounded-md px-3 py-2 text-sm w-full"
+              className="border bg-transparent rounded-md px-3 py-2 text-sm w-full"
             />
             <p className="text-xs text-muted-foreground">Don&apos;t have one? Make one — it takes two minutes.</p>
           </div>
@@ -251,13 +257,16 @@ export default function OnboardingPage() {
               onChange={(e) => setInterests(e.target.value)}
               placeholder="Interests"
               rows={2}
-              className="border rounded-md px-3 py-2 text-sm w-full resize-none"
+              className="border bg-transparent rounded-md px-3 py-2 text-sm w-full resize-none"
             />
           </div>
+          {phone.length > 0 && !phoneValid && (
+            <p className="text-sm text-red-500">Please enter a valid 10-digit phone number.</p>
+          )}
           {error && <p className="text-sm text-red-500">{error}</p>}
           <button
             type="submit"
-            disabled={loading || !preferredFirstname.trim() || !lastname.trim()}
+            disabled={loading || !canSubmit}
             className="bg-foreground text-background rounded-md px-4 py-2 text-sm font-medium disabled:opacity-50"
           >
             {loading ? "Saving..." : "Continue"}
