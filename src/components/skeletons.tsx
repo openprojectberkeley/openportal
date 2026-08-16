@@ -259,6 +259,113 @@ export function CoffeeTeamSkeleton({ count = 6 }: { count?: number }) {
   );
 }
 
+// Mirrors an available project card: grip + name, description + meta lines.
+function AvailableCardSkeleton() {
+  return (
+    <div className="border rounded-xl p-3 flex flex-col gap-2 bg-background">
+      <div className="flex items-center gap-2">
+        <Skeleton className="h-3.5 w-3.5 rounded-sm" />
+        <Skeleton className="h-4 w-40" />
+      </div>
+      <Skeleton className="ml-6 h-3 w-11/12" />
+      <Skeleton className="ml-6 h-2.5 w-28" />
+    </div>
+  );
+}
+
+// Mirrors a ranked project card row: grip + rank badge + name + type + actions.
+function RankedCardSkeleton() {
+  return (
+    <div className="border rounded-xl p-3 flex items-center gap-2 bg-background">
+      <Skeleton className="h-4 w-4 rounded-sm" />
+      <Skeleton className="h-6 w-6 rounded-full" />
+      <Skeleton className="h-4 w-36" />
+      <Skeleton className="h-5 w-16 rounded-full" />
+      <Skeleton className="ml-auto h-4 w-4 rounded-sm" />
+      <Skeleton className="h-4 w-4 rounded-sm" />
+    </div>
+  );
+}
+
+// Mirrors the applicant application page: header, the two-pane projects/ranking
+// grid, and the submit bar. Used as its initial loading state.
+export function ApplicationPageSkeleton() {
+  return (
+    <div className="w-full max-w-5xl mx-auto p-6 flex flex-col gap-6">
+      {/* Header: back link, title, intro line. */}
+      <div className="flex flex-col gap-2">
+        <Skeleton className="h-4 w-16" />
+        <Skeleton className="h-7 w-40" />
+        <Skeleton className="h-3.5 w-96 max-w-full" />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Available projects: heading + two type groups of cards. */}
+        <div className="flex flex-col gap-4">
+          <Skeleton className="h-3.5 w-20" />
+          {[0, 1].map((g) => (
+            <div key={g} className="flex flex-col gap-2">
+              <Skeleton className="h-3 w-24" />
+              <div className="flex flex-col gap-2">
+                {Array.from({ length: 3 }, (_, i) => (
+                  <AvailableCardSkeleton key={i} />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Your ranking: heading + count, then ranked rows. */}
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center gap-2">
+            <Skeleton className="h-3.5 w-24" />
+            <Skeleton className="h-3 w-8" />
+          </div>
+          <div className="min-h-40 flex flex-col gap-2">
+            {Array.from({ length: 4 }, (_, i) => (
+              <RankedCardSkeleton key={i} />
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Submit bar. */}
+      <div className="border-t pt-6 flex justify-end">
+        <Skeleton className="h-9 w-40 rounded-md" />
+      </div>
+    </div>
+  );
+}
+
+// Mirrors the per-project application modal body: the essay block, a couple of
+// custom questions, and the footer actions. Rendered inside the open dialog.
+export function ProjectApplicationModalSkeleton() {
+  return (
+    <div className="flex flex-col gap-5">
+      {/* Essay: label, tall textarea, word-count line. */}
+      <div className="flex flex-col gap-1.5">
+        <Skeleton className="h-4 w-64 max-w-full" />
+        <Skeleton className="h-28 w-full rounded-md" />
+        <Skeleton className="h-3 w-40" />
+      </div>
+
+      {/* A couple of custom questions: label + control. */}
+      {Array.from({ length: 2 }, (_, i) => (
+        <div key={i} className="flex flex-col gap-2.5">
+          <Skeleton className="h-4 w-48 max-w-full" />
+          <Skeleton className="h-9 w-full rounded-md" />
+        </div>
+      ))}
+
+      {/* Footer actions. */}
+      <div className="flex justify-end gap-2 border-t pt-4">
+        <Skeleton className="h-9 w-20 rounded-md" />
+        <Skeleton className="h-9 w-24 rounded-md" />
+      </div>
+    </div>
+  );
+}
+
 // Mirrors the booking availability picker: day label + a row of time pills.
 export function AvailabilitySkeleton({ days = 2, slots = 5 }: { days?: number; slots?: number }) {
   return (

@@ -26,6 +26,8 @@ them in order in the Supabase SQL editor.
 | `0017_project_pm_update.sql` | Widens `projects` UPDATE RLS so a project's PMs (not just exec) can edit that project's details; insert/delete stay exec-only. |
 | `0018_project_difficulty_levels.sql` | Changes `projects.difficulty` from a 1-5 smallint to named levels (`beginner`/`intermediate`/`advanced`) with a matching CHECK. |
 | `0019_project_type_exec_only.sql` | BEFORE UPDATE trigger on `projects`: only exec can change a project's `type` (Studio/Launch); PMs can still edit other fields. |
+| `0020_application_questions_and_drafts.sql` | Adds `applications.status` (draft/submitted, `submitted_at` now nullable); makes `application_rankings` draft-friendly (rank no longer unique, `essay` nullable, adds `completed`/`updated_at`); adds `project_questions` (per-project custom questions, RLS exec/PM) + `application_answers` (applicant responses, RLS own/board+exec-read). |
+| `0021_application_rankings_soft_remove.sql` | Adds `application_rankings.ranked` (bool). Removing a project from the ranking soft-removes it (ranked=false) so its essay/answers survive and re-adding restores them; only ranked=true rows form the current ranking. |
 
 > Note: the Supabase CLI expects a `supabase/` directory at the repo root. These
 > live under `src/supabase/` for co-location; if you later adopt the CLI, move

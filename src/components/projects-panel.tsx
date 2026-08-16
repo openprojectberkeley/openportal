@@ -15,6 +15,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { PanelListSkeleton } from "@/components/skeletons";
 import { PersonName } from "@/components/person-profile-provider";
+import { ProjectQuestionsDialog } from "@/components/project-questions-dialog";
 import { type Difficulty, DIFFICULTIES, DIFFICULTY_LABELS } from "@/lib/projects";
 
 type ProjectMember = { user_id: string; name: string; is_pm: boolean };
@@ -78,6 +79,7 @@ export function ProjectsPanel({ members }: Props) {
   const [fields, setFields] = useState<ProjectFields>(EMPTY_FIELDS);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [questionsOpen, setQuestionsOpen] = useState(false);
 
   useEffect(() => {
     fetch("/api/admin/projects")
@@ -455,6 +457,17 @@ export function ProjectsPanel({ members }: Props) {
                 className="border rounded-md px-3 py-2 text-sm w-full resize-none bg-background focus:outline-none focus:ring-1 focus:ring-ring"
               />
             </div>
+            {editingId && (
+              <div className="flex items-center justify-between gap-2 border-t pt-4">
+                <div className="flex flex-col">
+                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Application questions</span>
+                  <span className="text-xs text-muted-foreground">Custom questions applicants answer for this project.</span>
+                </div>
+                <Button variant="outline" size="sm" onClick={() => setQuestionsOpen(true)}>
+                  Manage
+                </Button>
+              </div>
+            )}
             {formError && <p className="text-sm text-red-500">{formError}</p>}
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setDialogOpen(false)}>
@@ -465,6 +478,10 @@ export function ProjectsPanel({ members }: Props) {
               </Button>
             </div>
           </div>
+
+          {editingId && (
+            <ProjectQuestionsDialog projectId={editingId} open={questionsOpen} onOpenChange={setQuestionsOpen} />
+          )}
         </DialogContent>
       </Dialog>
     </div>

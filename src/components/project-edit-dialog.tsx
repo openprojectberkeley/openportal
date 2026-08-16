@@ -13,6 +13,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { ProjectQuestionsDialog } from "@/components/project-questions-dialog";
 import { type Difficulty, DIFFICULTIES, DIFFICULTY_LABELS } from "@/lib/projects";
 
 type ProjectType = "studio" | "launch";
@@ -55,6 +56,7 @@ export function ProjectEditDialog({ projectId, open, onOpenChange, onSaved, canE
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [questionsOpen, setQuestionsOpen] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -218,6 +220,15 @@ export function ProjectEditDialog({ projectId, open, onOpenChange, onSaved, canE
                 className="border rounded-md px-3 py-2 text-sm w-full resize-none bg-background focus:outline-none focus:ring-1 focus:ring-ring"
               />
             </div>
+            <div className="flex items-center justify-between gap-2 border-t pt-4">
+              <div className="flex flex-col">
+                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Application questions</span>
+                <span className="text-xs text-muted-foreground">Custom questions applicants answer for this project.</span>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => setQuestionsOpen(true)}>
+                Manage
+              </Button>
+            </div>
             {error && <p className="text-sm text-red-500">{error}</p>}
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
@@ -225,6 +236,8 @@ export function ProjectEditDialog({ projectId, open, onOpenChange, onSaved, canE
             </div>
           </div>
         )}
+
+        <ProjectQuestionsDialog projectId={projectId} open={questionsOpen} onOpenChange={setQuestionsOpen} />
       </DialogContent>
     </Dialog>
   );

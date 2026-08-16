@@ -81,7 +81,7 @@ export default function HomePage() {
           await Promise.all([
             supabase.from("coffee_chats").select("applicant_id").eq("applicant_id", user.id).eq("complete", true).limit(1),
             supabase.from("infosesh_attendance").select("applicant_id").eq("applicant_id", user.id).limit(1),
-            supabase.from("applications").select("applicant_id").eq("applicant_id", user.id).limit(1),
+            supabase.from("applications").select("applicant_id").eq("applicant_id", user.id).eq("status", "submitted").limit(1),
           ]);
         setCompleted({
           coffeeChat: !!coffeeChat?.length,

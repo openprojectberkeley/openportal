@@ -1,11 +1,26 @@
 "use client";
 
 import { createClient } from "@/lib/supabase/client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ChevronUp, ChevronDown, X, Plus, Check, AlertTriangle, Coffee } from "lucide-react";
+import { Check, Pencil, X, AlertTriangle, Coffee, GripVertical } from "lucide-react";
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  closestCenter,
+  useDraggable,
+  useDroppable,
+  type DragEndEvent,
+  type DragOverEvent,
+} from "@dnd-kit/core";
+import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { Button } from "@/components/ui/button";
-import { PanelListSkeleton } from "@/components/skeletons";
+import { ApplicationPageSkeleton } from "@/components/skeletons";
+import { ProjectApplicationModal } from "@/components/project-application-modal";
 import { type Difficulty, DIFFICULTY_LABELS } from "@/lib/projects";
 
 type ProjectType = "studio" | "launch";
@@ -29,42 +44,53 @@ const TYPE_LABELS: Record<ProjectType, string> = {
 };
 
 const RANK_COUNT = 7;
-const MIN_WORDS = 150;
-const MAX_WORDS = 200;
 
-const wordCount = (s: string) => {
-  const t = s.trim();
-  return t ? t.split(/\s+/).length : 0;
-};
+const metaLine = (p: Project) =>
+  [
+    p.difficulty ? DIFFICULTY_LABELS[p.difficulty] : null,
+    p.estimated_members != null ? `~${p.estimated_members} members` : null,
+    p.num_subteams != null ? `${p.num_subteams} subteam${p.num_subteams === 1 ? "" : "s"}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
 export default function ApplicationPage() {
   const [loading, setLoading] = useState(true);
   const [submitted, setSubmitted] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
-  // project_id -> its PMs
   const [pmMap, setPmMap] = useState<Record<string, Pm[]>>({});
-  // PM user_ids the applicant has completed a coffee chat with
   const [chattedWith, setChattedWith] = useState<Set<string>>(new Set());
 
-  // Ranked project ids in order (index 0 = rank 1), max RANK_COUNT.
+  // Draft application state.
+  const appIdRef = useRef<string | null>(null);
+  const userIdRef = useRef<string | null>(null);
   const [ranked, setRanked] = useState<string[]>([]);
-  // project_id -> essay text
-  const [essays, setEssays] = useState<Record<string, string>>({});
+  const [rankingIdByProject, setRankingIdByProject] = useState<Record<string, string>>({});
+  const [completedByProject, setCompletedByProject] = useState<Record<string, boolean>>({});
 
+  const [modalProject, setModalProject] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The id currently being dragged, so the DragOverlay can render a 1:1 preview.
+  const [activeId, setActiveId] = useState<string | null>(null);
+  // Which zone the pointer is currently over, so we can show a slot preview there.
+  const [overArea, setOverArea] = useState<"ranking" | "available" | null>(null);
+
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
   const load = useCallback(async () => {
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setLoading(false); return; }
+    userIdRef.current = user.id;
 
-    const { data: existing } = await supabase
+    const { data: app } = await supabase
       .from("applications")
-      .select("id")
+      .select("id, status")
       .eq("applicant_id", user.id)
-      .limit(1);
-    if (existing?.length) { setSubmitted(true); setLoading(false); return; }
+      .maybeSingle();
+
+    if (app?.status === "submitted") { setSubmitted(true); setLoading(false); return; }
 
     const [{ data: projectRows }, { data: pmRows }, { data: chatRows }] = await Promise.all([
       supabase
@@ -93,95 +119,190 @@ export default function ApplicationPage() {
     setProjects((projectRows ?? []) as Project[]);
     setPmMap(map);
     setChattedWith(new Set((chatRows ?? []).map((c) => c.member_id)));
+
+    // Hydrate an existing draft's ranking.
+    if (app?.id) {
+      appIdRef.current = app.id;
+      const { data: rankRows } = await supabase
+        .from("application_rankings")
+        .select("id, project_id, rank, completed")
+        .eq("application_id", app.id)
+        .eq("ranked", true)
+        .order("rank");
+      const rk: string[] = [];
+      const idMap: Record<string, string> = {};
+      const doneMap: Record<string, boolean> = {};
+      for (const r of rankRows ?? []) {
+        rk.push(r.project_id as string);
+        idMap[r.project_id as string] = r.id as string;
+        doneMap[r.project_id as string] = r.completed as boolean;
+      }
+      setRanked(rk);
+      setRankingIdByProject(idMap);
+      setCompletedByProject(doneMap);
+    }
+
     setLoading(false);
   }, []);
 
   useEffect(() => { load(); }, [load]);
 
-  const studioMet = (projectId: string) =>
-    (pmMap[projectId] ?? []).some((pm) => chattedWith.has(pm.user_id));
-
-  const addProject = (id: string) => {
-    setRanked((prev) => (prev.includes(id) || prev.length >= RANK_COUNT ? prev : [...prev, id]));
+  const ensureApp = async (): Promise<string | null> => {
+    if (appIdRef.current) return appIdRef.current;
+    const uid = userIdRef.current;
+    if (!uid) return null;
+    const supabase = createClient();
+    const { data, error: insertError } = await supabase
+      .from("applications")
+      .insert({ applicant_id: uid })
+      .select("id")
+      .single();
+    if (insertError || !data) {
+      // Likely a pre-existing draft (unique applicant_id) — fetch it.
+      const { data: existing } = await supabase.from("applications").select("id").eq("applicant_id", uid).maybeSingle();
+      if (existing) { appIdRef.current = existing.id; return existing.id; }
+      return null;
+    }
+    appIdRef.current = data.id;
+    return data.id;
   };
 
-  const removeProject = (id: string) => {
-    setRanked((prev) => prev.filter((p) => p !== id));
+  const syncRanks = async (list: string[], idMap: Record<string, string>) => {
+    const supabase = createClient();
+    await Promise.all(
+      list.map((pid, i) => supabase.from("application_rankings").update({ rank: i + 1 }).eq("id", idMap[pid])),
+    );
   };
 
-  const move = (index: number, dir: -1 | 1) => {
-    setRanked((prev) => {
-      const next = [...prev];
-      const target = index + dir;
-      if (target < 0 || target >= next.length) return prev;
-      [next[index], next[target]] = [next[target], next[index]];
-      return next;
-    });
+  const addProject = async (projectId: string, atIndex?: number) => {
+    if (ranked.includes(projectId) || ranked.length >= RANK_COUNT) return;
+    const aId = await ensureApp();
+    if (!aId) { setError("Couldn't start your application."); return; }
+    const index = atIndex ?? ranked.length;
+    const newRanked = [...ranked];
+    newRanked.splice(index, 0, projectId);
+
+    const supabase = createClient();
+
+    // A soft-removed row for this project still holds its essay/answers — restore
+    // it instead of creating a fresh one (see migration 0021).
+    const { data: existing } = await supabase
+      .from("application_rankings")
+      .select("id, completed")
+      .eq("application_id", aId)
+      .eq("project_id", projectId)
+      .maybeSingle();
+
+    let rid: string;
+    let completed = false;
+    if (existing) {
+      rid = existing.id as string;
+      completed = !!existing.completed;
+      const { error: updateError } = await supabase
+        .from("application_rankings")
+        .update({ ranked: true, rank: index + 1, updated_at: new Date().toISOString() })
+        .eq("id", rid);
+      if (updateError) return;
+    } else {
+      const { data, error: insertError } = await supabase
+        .from("application_rankings")
+        .insert({ application_id: aId, project_id: projectId, rank: index + 1, completed: false, ranked: true })
+        .select("id")
+        .single();
+      if (insertError || !data) return;
+      rid = data.id as string;
+    }
+
+    const nextMap = { ...rankingIdByProject, [projectId]: rid };
+    setRankingIdByProject(nextMap);
+    setCompletedByProject((p) => ({ ...p, [projectId]: completed }));
+    setRanked(newRanked);
+    await syncRanks(newRanked, nextMap);
+  };
+
+  const removeProject = async (projectId: string) => {
+    const rid = rankingIdByProject[projectId];
+    const newRanked = ranked.filter((p) => p !== projectId);
+    const supabase = createClient();
+    // Soft-remove: keep the row (and its essay/answers) so re-adding restores it.
+    if (rid) await supabase.from("application_rankings").update({ ranked: false }).eq("id", rid);
+    const nextMap = { ...rankingIdByProject };
+    delete nextMap[projectId];
+    setRankingIdByProject(nextMap);
+    setCompletedByProject((p) => { const n = { ...p }; delete n[projectId]; return n; });
+    setRanked(newRanked);
+    await syncRanks(newRanked, nextMap);
+  };
+
+  const reorder = async (newRanked: string[]) => {
+    setRanked(newRanked);
+    await syncRanks(newRanked, rankingIdByProject);
+  };
+
+  const areaOf = (overId: string | null): "ranking" | "available" | null => {
+    if (!overId) return null;
+    if (overId === "ranked-zone" || overId.startsWith("slot:") || ranked.includes(overId)) return "ranking";
+    if (overId === "available-zone" || overId.startsWith("avail:")) return "available";
+    return null;
+  };
+
+  const onDragOver = (event: DragOverEvent) => {
+    setOverArea(areaOf(event.over ? String(event.over.id) : null));
+  };
+
+  const onDragEnd = (event: DragEndEvent) => {
+    setOverArea(null);
+    const { active, over } = event;
+    if (!over) return;
+    const activeId = String(active.id);
+    const overId = String(over.id);
+    const area = areaOf(overId);
+
+    if (activeId.startsWith("avail:")) {
+      // Only a drop onto the ranking adds it — dropping back over the projects
+      // list (or its own area) does nothing. Appended at the end, matching the
+      // slot preview.
+      if (area === "ranking") addProject(activeId.slice(6));
+      return;
+    }
+
+    // A ranked item dropped back over the available list is removed; over the
+    // ranking it reorders.
+    if (ranked.includes(activeId)) {
+      if (area === "available") { removeProject(activeId); return; }
+      if (ranked.includes(overId) && activeId !== overId) {
+        reorder(arrayMove(ranked, ranked.indexOf(activeId), ranked.indexOf(overId)));
+      }
+    }
   };
 
   const projectById = (id: string) => projects.find((p) => p.id === id);
-
-  // Validation: exactly RANK_COUNT projects, each essay in [MIN,MAX] words, and
-  // every Studio project has a completed coffee chat with one of its PMs.
-  const essayOk = (id: string) => {
-    const n = wordCount(essays[id] ?? "");
-    return n >= MIN_WORDS && n <= MAX_WORDS;
-  };
+  const studioMet = (projectId: string) => (pmMap[projectId] ?? []).some((pm) => chattedWith.has(pm.user_id));
   const studioBlocked = ranked.filter((id) => projectById(id)?.type === "studio" && !studioMet(id));
-  const canSubmit =
-    ranked.length === RANK_COUNT &&
-    ranked.every(essayOk) &&
-    studioBlocked.length === 0;
+  const allCompleted = ranked.length > 0 && ranked.every((id) => completedByProject[id]);
+  const canSubmit = ranked.length === RANK_COUNT && allCompleted && studioBlocked.length === 0;
 
   const submit = async () => {
-    if (!canSubmit) return;
+    if (!canSubmit || !appIdRef.current) return;
     setSubmitting(true);
     setError(null);
     const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { setError("You must be signed in."); setSubmitting(false); return; }
-
-    const { data: app, error: appError } = await supabase
+    // Drop any soft-removed picks so the submitted application holds only its 7.
+    await supabase
+      .from("application_rankings")
+      .delete()
+      .eq("application_id", appIdRef.current)
+      .eq("ranked", false);
+    const { error: submitError } = await supabase
       .from("applications")
-      .insert({ applicant_id: user.id })
-      .select("id")
-      .single();
-
-    if (appError || !app) {
-      // Unique violation → an application already exists for this applicant.
-      setError(appError?.code === "23505" ? "You've already submitted an application." : (appError?.message ?? "Failed to submit."));
-      setSubmitting(false);
-      return;
-    }
-
-    const rows = ranked.map((projectId, i) => ({
-      application_id: app.id,
-      project_id: projectId,
-      rank: i + 1,
-      essay: (essays[projectId] ?? "").trim(),
-    }));
-
-    const { error: ranksError } = await supabase.from("application_rankings").insert(rows);
-    if (ranksError) {
-      // Roll back the parent so a dangling empty application doesn't mark the
-      // checklist complete.
-      await supabase.from("applications").delete().eq("id", app.id);
-      setError(ranksError.message);
-      setSubmitting(false);
-      return;
-    }
-
-    setSubmitted(true);
+      .update({ status: "submitted", submitted_at: new Date().toISOString() })
+      .eq("id", appIdRef.current);
+    if (submitError) { setError(submitError.message); setSubmitting(false); return; }
     setSubmitting(false);
+    setSubmitted(true);
   };
 
-  if (loading) {
-    return (
-      <div className="w-full max-w-3xl mx-auto p-6 flex flex-col gap-6">
-        <PanelListSkeleton />
-      </div>
-    );
-  }
+  if (loading) return <ApplicationPageSkeleton />;
 
   if (submitted) {
     return (
@@ -192,7 +313,7 @@ export default function ApplicationPage() {
           </div>
           <h1 className="text-2xl font-bold">Application submitted</h1>
           <p className="text-sm text-muted-foreground">
-            Thanks for applying! We&apos;ve received your project rankings and essays.
+            Thanks for applying! We&apos;ve received your project rankings and answers.
           </p>
           <Link href="/" className="text-sm text-muted-foreground hover:text-foreground">← Back home</Link>
         </div>
@@ -204,136 +325,73 @@ export default function ApplicationPage() {
   const studioAvailable = available.filter((p) => p.type === "studio");
   const launchAvailable = available.filter((p) => p.type === "launch");
   const full = ranked.length >= RANK_COUNT;
+  const activeIsAvail = !!activeId?.startsWith("avail:");
+  const activeProject = activeId
+    ? projectById(activeIsAvail ? activeId.slice(6) : activeId)
+    : null;
+  // Slot previews: an available card hovering the ranking previews at the end;
+  // a ranked card hovering the projects list previews back in its group.
+  const rankingGhost = (activeIsAvail && overArea === "ranking" && !full ? activeProject : null) ?? null;
+  const availableGhost =
+    (!activeIsAvail && activeId && ranked.includes(activeId) && overArea === "available" ? activeProject : null) ?? null;
 
   return (
-    <div className="w-full max-w-3xl mx-auto p-6 flex flex-col gap-8">
+    <div className="w-full max-w-5xl mx-auto p-6 flex flex-col gap-6">
       <div className="flex flex-col gap-1">
         <Link href="/" className="text-sm text-muted-foreground hover:text-foreground">← Back</Link>
         <h1 className="text-2xl font-bold">Application</h1>
         <p className="text-sm text-muted-foreground">
-          Rank your top {RANK_COUNT} projects and write a {MIN_WORDS}–{MAX_WORDS} word essay for each.
-          OP Studio projects require a completed coffee chat with one of the project&apos;s PMs.
+          Drag projects into your ranking (top {RANK_COUNT}), then open each to complete its questions.
+          Your progress saves automatically.
         </p>
       </div>
 
-      {/* Ranked list */}
-      <section className="flex flex-col gap-3">
-        <div className="flex items-center gap-2">
-          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Your ranking</h2>
-          <span className="text-xs font-medium text-muted-foreground tabular-nums">{ranked.length}/{RANK_COUNT}</span>
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragStart={(e) => setActiveId(String(e.active.id))}
+        onDragOver={onDragOver}
+        onDragEnd={(e) => { setActiveId(null); onDragEnd(e); }}
+        onDragCancel={() => { setActiveId(null); setOverArea(null); }}
+      >
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Available projects */}
+          <AvailableZone
+            studioAvailable={studioAvailable}
+            launchAvailable={launchAvailable}
+            pmMap={pmMap}
+            studioMet={studioMet}
+            full={full}
+            onAdd={addProject}
+            ghost={availableGhost}
+          />
+
+          {/* Ranking */}
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Your ranking</h2>
+              <span className="text-xs font-medium text-muted-foreground tabular-nums">{ranked.length}/{RANK_COUNT}</span>
+            </div>
+            <RankZone
+              ranked={ranked}
+              projectById={projectById}
+              completedByProject={completedByProject}
+              pmMap={pmMap}
+              studioMet={studioMet}
+              onOpen={(pid) => setModalProject(pid)}
+              onRemove={removeProject}
+              ghost={rankingGhost}
+            />
+          </div>
         </div>
 
-        {ranked.length === 0 ? (
-          <p className="text-sm text-muted-foreground border rounded-xl px-4 py-6 text-center">
-            Add projects from below to start building your ranking.
-          </p>
-        ) : (
-          <div className="flex flex-col gap-3">
-            {ranked.map((id, i) => {
-              const p = projectById(id);
-              if (!p) return null;
-              const n = wordCount(essays[id] ?? "");
-              const ok = n >= MIN_WORDS && n <= MAX_WORDS;
-              const studioNeedsChat = p.type === "studio" && !studioMet(id);
-              return (
-                <div key={id} className="border rounded-xl p-4 flex flex-col gap-3">
-                  <div className="flex items-start gap-3">
-                    <span className="h-6 w-6 rounded-full bg-foreground text-background text-xs font-semibold flex items-center justify-center flex-shrink-0">
-                      {i + 1}
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-medium text-sm">{p.name}</span>
-                        <span className="px-2 py-0.5 rounded-full bg-foreground/10 text-foreground text-[11px] font-medium">
-                          {TYPE_LABELS[p.type]}
-                        </span>
-                        {p.client && (
-                          <span className="text-xs text-muted-foreground">{p.client}</span>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-1 flex-shrink-0">
-                      <button
-                        onClick={() => move(i, -1)}
-                        disabled={i === 0}
-                        className="text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
-                        aria-label="Move up"
-                      >
-                        <ChevronUp size={16} />
-                      </button>
-                      <button
-                        onClick={() => move(i, 1)}
-                        disabled={i === ranked.length - 1}
-                        className="text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
-                        aria-label="Move down"
-                      >
-                        <ChevronDown size={16} />
-                      </button>
-                      <button
-                        onClick={() => removeProject(id)}
-                        className="text-muted-foreground hover:text-red-500 transition-colors ml-1"
-                        aria-label="Remove"
-                      >
-                        <X size={16} />
-                      </button>
-                    </div>
-                  </div>
+        {/* The picked-up card tracks the pointer 1:1 (no easing); the list
+            reflows underneath. */}
+        <DragOverlay dropAnimation={null}>
+          {activeProject ? <DragPreview project={activeProject} /> : null}
+        </DragOverlay>
+      </DndContext>
 
-                  {studioNeedsChat && (
-                    <div className="flex items-center gap-2 text-xs text-amber-600 dark:text-amber-500 bg-amber-500/10 rounded-md px-3 py-2">
-                      <AlertTriangle size={14} className="flex-shrink-0" />
-                      <span className="flex-1">
-                        Complete a coffee chat with a PM of this project
-                        {(pmMap[id] ?? []).length > 0 && ` (${(pmMap[id] ?? []).map((pm) => pm.name).join(", ")})`}
-                        {" "}before applying.
-                      </span>
-                      <Link href="/coffee-chat" className="inline-flex items-center gap-1 font-medium hover:underline flex-shrink-0">
-                        <Coffee size={13} /> Book
-                      </Link>
-                    </div>
-                  )}
-
-                  <div className="flex flex-col gap-1">
-                    <textarea
-                      value={essays[id] ?? ""}
-                      onChange={(e) => setEssays((prev) => ({ ...prev, [id]: e.target.value }))}
-                      rows={5}
-                      placeholder={`Why do you want to work on ${p.name}? (${MIN_WORDS}–${MAX_WORDS} words)`}
-                      className="border rounded-md px-3 py-2 text-sm w-full resize-y bg-background focus:outline-none focus:ring-1 focus:ring-ring"
-                    />
-                    <span className={`text-xs tabular-nums ${ok ? "text-muted-foreground" : "text-amber-600 dark:text-amber-500"}`}>
-                      {n} word{n === 1 ? "" : "s"} · {MIN_WORDS}–{MAX_WORDS} required
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </section>
-
-      {/* Project picker */}
-      {!full && (
-        <section className="flex flex-col gap-4">
-          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Add projects</h2>
-          <PickerGroup
-            title={TYPE_LABELS.studio}
-            list={studioAvailable}
-            pmMap={pmMap}
-            studioMet={studioMet}
-            onAdd={addProject}
-          />
-          <PickerGroup
-            title={TYPE_LABELS.launch}
-            list={launchAvailable}
-            pmMap={pmMap}
-            studioMet={studioMet}
-            onAdd={addProject}
-          />
-        </section>
-      )}
-
-      {/* Submit */}
       <div className="flex flex-col gap-2 border-t pt-6">
         {error && <p className="text-sm text-red-500">{error}</p>}
         {!canSubmit && (
@@ -342,7 +400,7 @@ export default function ApplicationPage() {
               ? `Rank exactly ${RANK_COUNT} projects (${ranked.length} selected).`
               : studioBlocked.length > 0
                 ? "Complete the required coffee chat(s) for your OP Studio picks."
-                : `Each essay must be ${MIN_WORDS}–${MAX_WORDS} words.`}
+                : "Open each ranked project and complete its questions."}
           </p>
         )}
         <div className="flex justify-end">
@@ -351,22 +409,65 @@ export default function ApplicationPage() {
           </Button>
         </div>
       </div>
+
+      {modalProject && rankingIdByProject[modalProject] && (
+        <ProjectApplicationModal
+          projectId={modalProject}
+          projectName={projectById(modalProject)?.name ?? "Project"}
+          rankingId={rankingIdByProject[modalProject]}
+          open={!!modalProject}
+          onOpenChange={(o) => { if (!o) setModalProject(null); }}
+          onSaved={(completed) => setCompletedByProject((p) => ({ ...p, [modalProject]: completed }))}
+        />
+      )}
     </div>
   );
 }
 
-function PickerGroup({
+function AvailableZone({
+  studioAvailable,
+  launchAvailable,
+  pmMap,
+  studioMet,
+  full,
+  onAdd,
+  ghost,
+}: {
+  studioAvailable: Project[];
+  launchAvailable: Project[];
+  pmMap: Record<string, Pm[]>;
+  studioMet: (id: string) => boolean;
+  full: boolean;
+  onAdd: (id: string) => void;
+  ghost: Project | null;
+}) {
+  // A drop target so a ranked project can be dragged back here to unrank it.
+  const { setNodeRef } = useDroppable({ id: "available-zone" });
+  return (
+    <div ref={setNodeRef} className="flex flex-col gap-4 rounded-xl">
+      <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Projects</h2>
+      <AvailableGroup title={TYPE_LABELS.studio} list={studioAvailable} pmMap={pmMap} studioMet={studioMet} full={full} onAdd={onAdd} ghost={ghost?.type === "studio" ? ghost : null} />
+      <AvailableGroup title={TYPE_LABELS.launch} list={launchAvailable} pmMap={pmMap} studioMet={studioMet} full={full} onAdd={onAdd} ghost={ghost?.type === "launch" ? ghost : null} />
+    </div>
+  );
+}
+
+function AvailableGroup({
   title,
   list,
   pmMap,
   studioMet,
+  full,
   onAdd,
+  ghost,
 }: {
   title: string;
   list: Project[];
   pmMap: Record<string, Pm[]>;
   studioMet: (id: string) => boolean;
+  full: boolean;
   onAdd: (id: string) => void;
+  ghost: Project | null;
 }) {
   return (
     <div className="flex flex-col gap-2">
@@ -374,52 +475,226 @@ function PickerGroup({
         <h3 className="text-xs font-semibold text-muted-foreground/80 uppercase tracking-wide">{title}</h3>
         <span className="text-[10px] font-normal text-muted-foreground/60">({list.length})</span>
       </div>
-      {list.length === 0 ? (
+      {list.length === 0 && !ghost ? (
         <p className="text-xs text-muted-foreground">None available.</p>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {list.map((p) => {
-            const meta = [
-              p.difficulty ? DIFFICULTY_LABELS[p.difficulty] : null,
-              p.estimated_members != null ? `~${p.estimated_members} members` : null,
-              p.num_subteams != null ? `${p.num_subteams} subteam${p.num_subteams === 1 ? "" : "s"}` : null,
-            ].filter(Boolean) as string[];
-            const met = p.type === "studio" ? studioMet(p.id) : true;
-            return (
-              <div key={p.id} className="border rounded-xl p-4 flex flex-col gap-2">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-medium text-sm">{p.name}</span>
-                      {p.client && <span className="text-xs text-muted-foreground">{p.client}</span>}
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => onAdd(p.id)}
-                    className="inline-flex items-center gap-1 text-xs font-medium border rounded-md px-2 py-1 hover:bg-accent transition-colors flex-shrink-0"
-                  >
-                    <Plus size={13} /> Add
-                  </button>
-                </div>
-                {p.description && (
-                  <p className="text-xs text-muted-foreground line-clamp-3">{p.description}</p>
-                )}
-                {meta.length > 0 && (
-                  <p className="text-[11px] text-muted-foreground/80">{meta.join(" · ")}</p>
-                )}
-                {p.type === "studio" && (
-                  <div className={`flex items-center gap-1.5 text-[11px] ${met ? "text-green-700 dark:text-green-400" : "text-amber-600 dark:text-amber-500"}`}>
-                    {met ? <Check size={12} /> : <Coffee size={12} />}
-                    {met
-                      ? "Coffee chat complete"
-                      : `Coffee chat needed${(pmMap[p.id] ?? []).length > 0 ? `: ${(pmMap[p.id] ?? []).map((pm) => pm.name).join(", ")}` : ""}`}
-                  </div>
-                )}
-              </div>
-            );
-          })}
+        <div className="flex flex-col gap-2">
+          {list.map((p) => (
+            <AvailableCard key={p.id} project={p} pmMap={pmMap} studioMet={studioMet} full={full} onAdd={onAdd} />
+          ))}
+          {ghost && <GhostCard project={ghost} />}
         </div>
       )}
+    </div>
+  );
+}
+
+function AvailableCard({
+  project,
+  pmMap,
+  studioMet,
+  full,
+  onAdd,
+}: {
+  project: Project;
+  pmMap: Record<string, Pm[]>;
+  studioMet: (id: string) => boolean;
+  full: boolean;
+  onAdd: (id: string) => void;
+}) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: `avail:${project.id}` });
+  // The DragOverlay renders the moving copy; the source just dims in place.
+  const style = { opacity: isDragging ? 0.4 : 1 };
+  const meta = metaLine(project);
+  const met = project.type === "studio" ? studioMet(project.id) : true;
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+      onClick={() => !full && onAdd(project.id)}
+      className={`border rounded-xl p-3 flex flex-col gap-1.5 bg-background touch-none select-none ${
+        full ? "opacity-50 cursor-not-allowed" : "cursor-grab hover:border-foreground/20 hover:shadow-sm"
+      } transition-all`}
+    >
+      <div className="flex items-center gap-2">
+        <GripVertical size={14} className="text-muted-foreground/50 flex-shrink-0" />
+        <span className="font-medium text-sm flex-1 min-w-0 truncate">{project.name}</span>
+        {project.client && <span className="text-xs text-muted-foreground">{project.client}</span>}
+      </div>
+      {project.description && <p className="text-xs text-muted-foreground line-clamp-2 pl-6">{project.description}</p>}
+      {meta && <p className="text-[11px] text-muted-foreground/80 pl-6">{meta}</p>}
+      {project.type === "studio" && (
+        <div className={`flex items-center gap-1.5 text-[11px] pl-6 ${met ? "text-green-700 dark:text-green-400" : "text-amber-600 dark:text-amber-500"}`}>
+          {met ? <Check size={12} /> : <Coffee size={12} />}
+          {met ? "Coffee chat complete" : `Coffee chat needed${(pmMap[project.id] ?? []).length ? `: ${(pmMap[project.id] ?? []).map((pm) => pm.name).join(", ")}` : ""}`}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RankZone({
+  ranked,
+  projectById,
+  completedByProject,
+  pmMap,
+  studioMet,
+  onOpen,
+  onRemove,
+  ghost,
+}: {
+  ranked: string[];
+  projectById: (id: string) => Project | undefined;
+  completedByProject: Record<string, boolean>;
+  pmMap: Record<string, Pm[]>;
+  studioMet: (id: string) => boolean;
+  onOpen: (id: string) => void;
+  onRemove: (id: string) => void;
+  ghost: Project | null;
+}) {
+  const { setNodeRef } = useDroppable({ id: "ranked-zone" });
+  return (
+    <div ref={setNodeRef} className="min-h-40 flex flex-col gap-2">
+      {ranked.length === 0 && !ghost ? (
+        <div className="flex-1 flex items-center justify-center text-center text-sm text-muted-foreground py-10 rounded-xl bg-accent/20">
+          Drag projects here to rank them.
+        </div>
+      ) : (
+        <>
+          <SortableContext items={ranked} strategy={verticalListSortingStrategy}>
+            {ranked.map((id, i) => {
+              const p = projectById(id);
+              if (!p) return null;
+              return (
+                <RankedCard
+                  key={id}
+                  project={p}
+                  rankNumber={i + 1}
+                  completed={!!completedByProject[id]}
+                  studioNeedsChat={p.type === "studio" && !studioMet(id)}
+                  pms={pmMap[id] ?? []}
+                  onOpen={() => onOpen(id)}
+                  onRemove={() => onRemove(id)}
+                />
+              );
+            })}
+          </SortableContext>
+          {ghost && <GhostCard project={ghost} rankNumber={ranked.length + 1} />}
+        </>
+      )}
+    </div>
+  );
+}
+
+function RankedCard({
+  project,
+  rankNumber,
+  completed,
+  studioNeedsChat,
+  pms,
+  onOpen,
+  onRemove,
+}: {
+  project: Project;
+  rankNumber: number;
+  completed: boolean;
+  studioNeedsChat: boolean;
+  pms: Pm[];
+  onOpen: () => void;
+  onRemove: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: project.id });
+  // Siblings reflow with the sortable transition; the dragged item is hidden in
+  // place (the DragOverlay shows the moving copy) so it tracks the pointer 1:1.
+  const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0 : 1 };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+      className={`rounded-xl border p-3 flex flex-col gap-2 transition-colors touch-none select-none cursor-grab active:cursor-grabbing ${
+        completed ? "border-green-600/40 bg-green-600/5" : "bg-background"
+      }`}
+    >
+      <div className="flex items-center gap-2">
+        <span className="text-muted-foreground/50 flex-shrink-0" aria-hidden>
+          <GripVertical size={15} />
+        </span>
+        <span
+          className={`h-6 w-6 rounded-full text-xs font-semibold flex items-center justify-center flex-shrink-0 ${
+            completed ? "bg-green-600 text-white" : "bg-foreground text-background"
+          }`}
+        >
+          {completed ? <Check size={14} /> : rankNumber}
+        </span>
+        <button onClick={onOpen} className="flex items-center gap-2 flex-1 min-w-0 text-left">
+          <span className="font-medium text-sm truncate">{project.name}</span>
+          {!completed && (
+            <span className="text-red-500 font-semibold flex-shrink-0" title="Required questions unfinished" aria-label="Required questions unfinished">
+              *
+            </span>
+          )}
+          <span className="px-2 py-0.5 rounded-full bg-foreground/10 text-foreground text-[11px] font-medium flex-shrink-0">
+            {TYPE_LABELS[project.type]}
+          </span>
+        </button>
+        <button onClick={onOpen} className="text-muted-foreground hover:text-foreground transition-colors flex-shrink-0" aria-label="Edit answers">
+          <Pencil size={14} />
+        </button>
+        <button onClick={onRemove} className="text-muted-foreground hover:text-red-500 transition-colors flex-shrink-0" aria-label="Remove">
+          <X size={15} />
+        </button>
+      </div>
+
+      {studioNeedsChat && (
+        <div className="flex items-center gap-2 text-xs text-amber-600 dark:text-amber-500 bg-amber-500/10 rounded-md px-3 py-2">
+          <AlertTriangle size={14} className="flex-shrink-0" />
+          <span className="flex-1">
+            Coffee chat with a PM{pms.length ? ` (${pms.map((pm) => pm.name).join(", ")})` : ""} required.
+          </span>
+          <Link href="/coffee-chat" className="inline-flex items-center gap-1 font-medium hover:underline flex-shrink-0">
+            <Coffee size={13} /> Book
+          </Link>
+        </div>
+      )}
+
+    </div>
+  );
+}
+
+// A faded placeholder showing where the dragged card will slot in.
+function GhostCard({ project, rankNumber }: { project: Project; rankNumber?: number }) {
+  return (
+    <div className="rounded-xl border border-dashed border-foreground/30 bg-accent/40 p-3 flex items-center gap-2 opacity-70">
+      {rankNumber != null ? (
+        <span className="h-6 w-6 rounded-full bg-foreground/30 text-background text-xs font-semibold flex items-center justify-center flex-shrink-0">
+          {rankNumber}
+        </span>
+      ) : (
+        <GripVertical size={15} className="text-muted-foreground/50 flex-shrink-0" />
+      )}
+      <span className="font-medium text-sm truncate">{project.name}</span>
+      <span className="px-2 py-0.5 rounded-full bg-foreground/10 text-foreground text-[11px] font-medium flex-shrink-0">
+        {TYPE_LABELS[project.type]}
+      </span>
+    </div>
+  );
+}
+
+// The card rendered under the pointer while dragging (via DragOverlay).
+function DragPreview({ project }: { project: Project }) {
+  return (
+    <div className="rounded-xl border bg-background p-3 shadow-lg flex items-center gap-2 cursor-grabbing">
+      <GripVertical size={15} className="text-muted-foreground/50 flex-shrink-0" />
+      <span className="font-medium text-sm truncate">{project.name}</span>
+      <span className="px-2 py-0.5 rounded-full bg-foreground/10 text-foreground text-[11px] font-medium flex-shrink-0">
+        {TYPE_LABELS[project.type]}
+      </span>
     </div>
   );
 }
