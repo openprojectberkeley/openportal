@@ -1,7 +1,7 @@
 "use client";
 
 import { createClient } from "@/lib/supabase/client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -39,6 +39,19 @@ type Props = {
   onSaved: (completed: boolean) => void;
 };
 
+// Order-independent, empty-insensitive snapshot of the answers, for detecting
+// unsaved changes.
+function serializeAnswers(map: Record<string, AnswerValue>): string {
+  const out: Record<string, { text: string; options: string[] }> = {};
+  for (const [id, v] of Object.entries(map)) {
+    const text = v.text ?? "";
+    const options = [...(v.options ?? [])].sort();
+    if (text.trim() === "" && options.length === 0) continue;
+    out[id] = { text: text.trim(), options };
+  }
+  return JSON.stringify(Object.keys(out).sort().map((k) => [k, out[k]]));
+}
+
 // The applicant's per-project application: the fixed 150-200 word essay first,
 // then the project's custom questions. Persists to the current draft.
 export function ProjectApplicationModal({ projectId, projectName, rankingId, open, onOpenChange, onSaved }: Props) {
@@ -48,6 +61,9 @@ export function ProjectApplicationModal({ projectId, projectName, rankingId, ope
   const [answers, setAnswers] = useState<Record<string, AnswerValue>>({});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Snapshot of the loaded state, to detect unsaved changes on close.
+  const initialEssayRef = useRef("");
+  const initialAnswersRef = useRef(serializeAnswers({}));
 
   useEffect(() => {
     if (!open) return;
@@ -77,6 +93,8 @@ export function ProjectApplicationModal({ projectId, projectName, rankingId, ope
         };
       }
       setAnswers(map);
+      initialEssayRef.current = ranking?.essay ?? "";
+      initialAnswersRef.current = serializeAnswers(map);
       setLoading(false);
     };
 
@@ -137,8 +155,20 @@ export function ProjectApplicationModal({ projectId, projectName, rankingId, ope
   const essayFilled = essayHasText(essay);
   const essayShort = essayFilled && essayWords < ESSAY_WARN_WORDS;
 
+  const isDirty = () =>
+    essay.trim() !== initialEssayRef.current.trim() || serializeAnswers(answers) !== initialAnswersRef.current;
+
+  // Guard every close path (Cancel, the ✕, click-outside, Escape): confirm
+  // before discarding unsaved edits. Saving closes via onOpenChange directly.
+  const handleOpenChange = (next: boolean) => {
+    if (!next && !loading && isDirty()) {
+      if (!window.confirm("You have unsaved changes to this application. Discard them?")) return;
+    }
+    onOpenChange(next);
+  };
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{projectName}</DialogTitle>
@@ -248,7 +278,7 @@ export function ProjectApplicationModal({ projectId, projectName, rankingId, ope
             {error && <p className="text-sm text-red-500">{error}</p>}
 
             <div className="flex justify-end gap-2 border-t pt-4">
-              <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+              <Button variant="outline" onClick={() => handleOpenChange(false)}>Cancel</Button>
               <Button onClick={save} disabled={saving}>{saving ? "Saving…" : "Save"}</Button>
             </div>
           </div>
