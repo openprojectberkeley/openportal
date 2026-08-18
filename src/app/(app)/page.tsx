@@ -26,6 +26,9 @@ export default function HomePage() {
   const [view, setView] = useState<"dashboard" | "checklist" | null>(null);
   const [firstName, setFirstName] = useState<string | null>(null);
   const [portals, setPortals] = useState<PortalSummary[] | null>(null);
+  // A returning member (active, non-staff) who hasn't re-applied to the currently
+  // open period yet — drives the non-blocking re-apply banner on the dashboard.
+  const [reapply, setReapply] = useState<{ periodName: string; infosessionDone: boolean } | null>(null);
   // Projects the current user PMs — the create dialog links a project portal to one.
   const [pmProjects, setPmProjects] = useState<ProjectOption[]>([]);
   const [completed, setCompleted] = useState<CompletionState>({
@@ -81,7 +84,7 @@ export default function HomePage() {
           await Promise.all([
             supabase.from("coffee_chats").select("applicant_id").eq("applicant_id", user.id).eq("complete", true).limit(1),
             supabase.from("infosesh_attendance").select("applicant_id").eq("applicant_id", user.id).limit(1),
-            supabase.from("applications").select("applicant_id").eq("applicant_id", user.id).eq("status", "submitted").limit(1),
+            supabase.from("applications").select("applicant_id").eq("applicant_id", user.id).in("status", ["submitted", "accepted", "rejected"]).limit(1),
           ]);
         setCompleted({
           coffeeChat: !!coffeeChat?.length,
@@ -93,6 +96,34 @@ export default function HomePage() {
 
       setView("dashboard");
       setFirstName(member.preferred_firstname);
+
+      // Returning members (active, non-staff) must re-apply each open round. Show
+      // a non-blocking prompt when a period is open and they haven't applied to it
+      // yet. Board/exec don't apply, so skip them.
+      if (member.active && !isBoardOrExec) {
+        const { data: openPeriods } = await supabase
+          .from("application_periods")
+          .select("id, name")
+          .eq("status", "open")
+          .order("created_at", { ascending: false })
+          .limit(1);
+        const period = openPeriods?.[0] ?? null;
+        if (period) {
+          const [{ data: appliedRows }, { data: infoRows }] = await Promise.all([
+            supabase
+              .from("applications")
+              .select("applicant_id")
+              .eq("applicant_id", user.id)
+              .eq("period_id", period.id)
+              .in("status", ["submitted", "accepted", "rejected"])
+              .limit(1),
+            supabase.from("infosesh_attendance").select("applicant_id").eq("applicant_id", user.id).limit(1),
+          ]);
+          if (!appliedRows?.length) {
+            setReapply({ periodName: period.name, infosessionDone: !!infoRows?.length });
+          }
+        }
+      }
 
       // Load the portals this user can access (RLS scopes the select to their
       // portals) plus enough to flag which ones they're an admin of.
@@ -194,6 +225,21 @@ export default function HomePage() {
           <Skeleton className="h-9 w-48" />
         )}
 
+        {reapply && (
+          <div className="flex flex-col gap-3 rounded-xl border border-foreground/15 bg-foreground/[0.03] p-4">
+            <div className="flex flex-col gap-0.5">
+              <h2 className="text-sm font-semibold">Applications are open for {reapply.periodName}</h2>
+              <p className="text-xs text-muted-foreground">
+                Returning members re-apply each round. Complete the steps below to apply.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <ReapplyStep label="Infosession" href="/infosession" done={reapply.infosessionDone} icon={Users} />
+              <ReapplyStep label="Application" href="/application" done={false} icon={FileText} />
+            </div>
+          </div>
+        )}
+
         <div className="flex flex-col lg:flex-row gap-6">
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between mb-3">
@@ -249,6 +295,35 @@ export default function HomePage() {
         </div>
       </div>
     </div>
+  );
+}
+
+function ReapplyStep({
+  label,
+  href,
+  done,
+  icon: Icon,
+}: {
+  label: string;
+  href: string;
+  done: boolean;
+  icon: React.ElementType;
+}) {
+  return (
+    <Link
+      href={href}
+      className="group inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm bg-background hover:border-foreground/20 hover:shadow-sm transition-all"
+    >
+      <span
+        className={`h-6 w-6 rounded-full flex items-center justify-center flex-shrink-0 transition-colors ${
+          done ? "bg-green-600/10 text-green-700 dark:text-green-400" : "bg-foreground/5 text-foreground/70"
+        }`}
+      >
+        {done ? <Check size={14} /> : <Icon size={14} />}
+      </span>
+      <span className="font-medium">{label}</span>
+      <ArrowRight size={14} className="text-muted-foreground/50 group-hover:translate-x-0.5 group-hover:text-muted-foreground transition-all" />
+    </Link>
   );
 }
 

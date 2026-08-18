@@ -366,6 +366,52 @@ export function ProjectApplicationModalSkeleton() {
   );
 }
 
+// Mirrors an application review row (manager/applications): applicant name +
+// status badge, a meta line, and the right-aligned "Review" button.
+const APP_ROW_NAME_WIDTHS = ["w-32", "w-40", "w-28", "w-44", "w-36"];
+export function ApplicationListSkeleton({ rows = 4 }: { rows?: number }) {
+  return (
+    <div className="flex flex-col gap-2.5">
+      {Array.from({ length: rows }, (_, i) => (
+        <div key={i} className="flex items-center gap-3 border rounded-xl px-4 py-3">
+          <div className="flex flex-col gap-1.5 min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <Skeleton className={`h-4 ${APP_ROW_NAME_WIDTHS[i % APP_ROW_NAME_WIDTHS.length]}`} />
+              <Skeleton className="h-5 w-20 rounded-full" />
+            </div>
+            <Skeleton className="h-3 w-56 max-w-full" />
+          </div>
+          <Skeleton className="h-8 w-16 rounded-md" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Mirrors the full manager/applications page: header (back link, title, intro),
+// the period-selector bar, and the applications list. Used by its loading.tsx.
+export function ApplicationManagerSkeleton() {
+  return (
+    <div className="w-full max-w-3xl mx-auto p-5 flex flex-col gap-6">
+      {/* Header: back link, title, two intro lines. */}
+      <div className="flex flex-col gap-2">
+        <Skeleton className="h-4 w-16" />
+        <Skeleton className="h-8 w-40" />
+        <Skeleton className="h-3.5 w-full max-w-lg" />
+        <Skeleton className="h-3.5 w-64 max-w-full" />
+      </div>
+
+      {/* Period bar: selector button + manage-periods button. */}
+      <div className="flex flex-wrap items-center gap-3">
+        <Skeleton className="h-9 w-48 rounded-md" />
+        <Skeleton className="h-8 w-36 rounded-md" />
+      </div>
+
+      <ApplicationListSkeleton rows={4} />
+    </div>
+  );
+}
+
 // Mirrors the booking availability picker: day label + a row of time pills.
 export function AvailabilitySkeleton({ days = 2, slots = 5 }: { days?: number; slots?: number }) {
   return (

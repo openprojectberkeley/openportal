@@ -324,6 +324,11 @@ export default function ManagerCoffeeChatsPage() {
   const slotInfo = new Map<string, UpcomingSlot>();
   for (const s of upcomingSlots) slotInfo.set(new Date(s.meeting_time).toISOString(), s);
 
+  // The Upcoming list only surfaces slots someone has actually booked; empty
+  // availability still lives in the grid above, so hiding it here just removes
+  // the noise of every open hour.
+  const bookedUpcoming = upcomingSlots.filter((s) => s.filled > 0);
+
   const totalSelectedCount = selected.size;
 
   // Normalized bounds of the in-progress drag rectangle, used to preview which
@@ -640,10 +645,10 @@ export default function ManagerCoffeeChatsPage() {
           <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Upcoming</h2>
           <SlotCardsSkeleton />
         </div>
-      ) : upcomingSlots.length > 0 ? (
+      ) : bookedUpcoming.length > 0 ? (
         <div className="flex flex-col gap-3">
           <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Upcoming</h2>
-          {upcomingSlots.map((slot) => {
+          {bookedUpcoming.map((slot) => {
             const d = new Date(slot.meeting_time);
             return (
               <div key={slot.meeting_time} className="border rounded-xl p-4 flex flex-col gap-2">

@@ -21,6 +21,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { Button } from "@/components/ui/button";
 import { ApplicationPageSkeleton } from "@/components/skeletons";
 import { ProjectApplicationModal } from "@/components/project-application-modal";
+import { useRoleSim } from "@/components/role-simulation-provider";
 import { type Difficulty, DIFFICULTY_LABELS } from "@/lib/projects";
 
 type ProjectType = "studio" | "launch";
@@ -55,8 +56,14 @@ const metaLine = (p: Project) =>
     .join(" · ");
 
 export default function ApplicationPage() {
+  const { isBoardOrExec } = useRoleSim();
   const [loading, setLoading] = useState(true);
   const [submitted, setSubmitted] = useState(false);
+  // No application period is currently open — the flow is gated shut.
+  const [closed, setClosed] = useState(false);
+  // Returning members (active) may apply to OP Studio; first-timers (inactive)
+  // are limited to OP Launch. Board/exec (staff) are always eligible.
+  const [memberActive, setMemberActive] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [pmMap, setPmMap] = useState<Record<string, Pm[]>>({});
   const [chattedWith, setChattedWith] = useState<Set<string>>(new Set());
@@ -64,6 +71,8 @@ export default function ApplicationPage() {
   // Draft application state.
   const appIdRef = useRef<string | null>(null);
   const userIdRef = useRef<string | null>(null);
+  // The open period this application belongs to (stamped on the draft).
+  const periodIdRef = useRef<string | null>(null);
   const [ranked, setRanked] = useState<string[]>([]);
   const [rankingIdByProject, setRankingIdByProject] = useState<Record<string, string>>({});
   const [completedByProject, setCompletedByProject] = useState<Record<string, boolean>>({});
@@ -84,15 +93,31 @@ export default function ApplicationPage() {
     if (!user) { setLoading(false); return; }
     userIdRef.current = user.id;
 
+    // Applications can only be built/submitted while a period's status is 'open'
+    // (the explicit switch — the start/end window is just an informational
+    // schedule). No open period → the flow is closed.
+    const { data: openPeriods } = await supabase
+      .from("application_periods")
+      .select("id")
+      .eq("status", "open")
+      .order("created_at", { ascending: false })
+      .limit(1);
+    const periodId = openPeriods?.[0]?.id ?? null;
+    periodIdRef.current = periodId;
+
+    if (!periodId) { setClosed(true); setLoading(false); return; }
+
     const { data: app } = await supabase
       .from("applications")
       .select("id, status")
       .eq("applicant_id", user.id)
+      .eq("period_id", periodId)
       .maybeSingle();
 
-    if (app?.status === "submitted") { setSubmitted(true); setLoading(false); return; }
+    // Already applied this period (submitted, or reviewed accepted/rejected).
+    if (app?.status && app.status !== "draft") { setSubmitted(true); setLoading(false); return; }
 
-    const [{ data: projectRows }, { data: pmRows }, { data: chatRows }] = await Promise.all([
+    const [{ data: projectRows }, { data: pmRows }, { data: chatRows }, { data: memberRow }] = await Promise.all([
       supabase
         .from("projects")
         .select("id, name, type, client, description, difficulty, estimated_members, num_subteams")
@@ -106,7 +131,10 @@ export default function ApplicationPage() {
         .select("member_id")
         .eq("applicant_id", user.id)
         .eq("complete", true),
+      supabase.from("members").select("active").eq("user_id", user.id).maybeSingle(),
     ]);
+
+    setMemberActive(!!memberRow?.active);
 
     const map: Record<string, Pm[]> = {};
     for (const row of pmRows ?? []) {
@@ -154,12 +182,17 @@ export default function ApplicationPage() {
     const supabase = createClient();
     const { data, error: insertError } = await supabase
       .from("applications")
-      .insert({ applicant_id: uid })
+      .insert({ applicant_id: uid, period_id: periodIdRef.current })
       .select("id")
       .single();
     if (insertError || !data) {
-      // Likely a pre-existing draft (unique applicant_id) — fetch it.
-      const { data: existing } = await supabase.from("applications").select("id").eq("applicant_id", uid).maybeSingle();
+      // Likely a pre-existing draft (unique applicant_id per period) — fetch it.
+      const { data: existing } = await supabase
+        .from("applications")
+        .select("id")
+        .eq("applicant_id", uid)
+        .eq("period_id", periodIdRef.current)
+        .maybeSingle();
       if (existing) { appIdRef.current = existing.id; return existing.id; }
       return null;
     }
@@ -176,6 +209,9 @@ export default function ApplicationPage() {
 
   const addProject = async (projectId: string, atIndex?: number) => {
     if (ranked.includes(projectId) || ranked.length >= RANK_COUNT) return;
+    // First-timers can't rank OP Studio projects (mirrors the RLS gate).
+    const proj = projects.find((p) => p.id === projectId);
+    if (proj?.type === "studio" && !(memberActive || isBoardOrExec)) return;
     const aId = await ensureApp();
     if (!aId) { setError("Couldn't start your application."); return; }
     const index = atIndex ?? ranked.length;
@@ -304,6 +340,24 @@ export default function ApplicationPage() {
 
   if (loading) return <ApplicationPageSkeleton />;
 
+  if (closed) {
+    return (
+      <div className="flex flex-1 w-full items-center justify-center p-6">
+        <div className="flex flex-col items-center gap-4 text-center max-w-sm">
+          <div className="h-12 w-12 rounded-full bg-foreground/5 text-foreground/70 flex items-center justify-center">
+            <X size={24} />
+          </div>
+          <h1 className="text-2xl font-bold">Applications are closed</h1>
+          <p className="text-sm text-muted-foreground">
+            There&apos;s no application period open right now. Check back when the next
+            one opens.
+          </p>
+          <Link href="/" className="text-sm text-muted-foreground hover:text-foreground">← Back home</Link>
+        </div>
+      </div>
+    );
+  }
+
   if (submitted) {
     return (
       <div className="flex flex-1 w-full items-center justify-center p-6">
@@ -321,8 +375,11 @@ export default function ApplicationPage() {
     );
   }
 
+  // First-time members (inactive) may only apply to OP Launch; returning members
+  // (active) and staff (board/exec) may also apply to OP Studio.
+  const studioEligible = memberActive || isBoardOrExec;
   const available = projects.filter((p) => !ranked.includes(p.id));
-  const studioAvailable = available.filter((p) => p.type === "studio");
+  const studioAvailable = studioEligible ? available.filter((p) => p.type === "studio") : [];
   const launchAvailable = available.filter((p) => p.type === "launch");
   const full = ranked.length >= RANK_COUNT;
   const activeIsAvail = !!activeId?.startsWith("avail:");
@@ -359,6 +416,7 @@ export default function ApplicationPage() {
           <AvailableZone
             studioAvailable={studioAvailable}
             launchAvailable={launchAvailable}
+            studioEligible={studioEligible}
             pmMap={pmMap}
             studioMet={studioMet}
             full={full}
@@ -427,6 +485,7 @@ export default function ApplicationPage() {
 function AvailableZone({
   studioAvailable,
   launchAvailable,
+  studioEligible,
   pmMap,
   studioMet,
   full,
@@ -435,6 +494,7 @@ function AvailableZone({
 }: {
   studioAvailable: Project[];
   launchAvailable: Project[];
+  studioEligible: boolean;
   pmMap: Record<string, Pm[]>;
   studioMet: (id: string) => boolean;
   full: boolean;
@@ -446,7 +506,16 @@ function AvailableZone({
   return (
     <div ref={setNodeRef} className="flex flex-col gap-4 rounded-xl">
       <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Projects</h2>
-      <AvailableGroup title={TYPE_LABELS.studio} list={studioAvailable} pmMap={pmMap} studioMet={studioMet} full={full} onAdd={onAdd} ghost={ghost?.type === "studio" ? ghost : null} />
+      {studioEligible ? (
+        <AvailableGroup title={TYPE_LABELS.studio} list={studioAvailable} pmMap={pmMap} studioMet={studioMet} full={full} onAdd={onAdd} ghost={ghost?.type === "studio" ? ghost : null} />
+      ) : (
+        <div className="flex flex-col gap-1.5">
+          <h3 className="text-xs font-semibold text-muted-foreground">{TYPE_LABELS.studio}</h3>
+          <p className="rounded-lg border border-dashed px-3 py-2.5 text-xs text-muted-foreground">
+            OP Studio is open to returning members only. First-time applicants can apply to OP Launch projects.
+          </p>
+        </div>
+      )}
       <AvailableGroup title={TYPE_LABELS.launch} list={launchAvailable} pmMap={pmMap} studioMet={studioMet} full={full} onAdd={onAdd} ghost={ghost?.type === "launch" ? ghost : null} />
     </div>
   );
