@@ -25,6 +25,7 @@ export default function CoffeeChatPage() {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
   const [cancelling, setCancelling] = useState<string | null>(null);
+  const [cancelError, setCancelError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const supabase = createClient();
@@ -52,23 +53,44 @@ export default function CoffeeChatPage() {
 
     if (userIds.length === 0) { setLoading(false); return; }
 
-    const [{ data: allRoles }, { data: profiles }, { data: chats }, { data: myChats }] = await Promise.all([
+    const nowIso = new Date().toISOString();
+
+    const [{ data: allRoles }, { data: profiles }, { data: myChats }] = await Promise.all([
       supabase.from("members_roles").select("user_id, roles(id, role_name)").in("user_id", userIds),
       supabase.from("members").select("user_id, preferred_firstname, lastname, interests, avatar_url").in("user_id", userIds),
-      supabase
-        .from("coffee_chats")
-        .select("member_id, meeting_time, applicant_id")
-        .in("member_id", userIds)
-        .gte("meeting_time", new Date().toISOString()),
       user
         ? supabase
             .from("coffee_chats")
             .select("id, member_id, meeting_time")
             .eq("applicant_id", user.id)
-            .gte("meeting_time", new Date().toISOString())
+            .gte("meeting_time", nowIso)
             .order("meeting_time", { ascending: true })
         : Promise.resolve({ data: [] as any[] }),
     ]);
+
+    // Which members still have at least one open future slot. Each member's
+    // availability is stored one row per seat, so across the whole team this
+    // easily exceeds Supabase's 1000-row response cap — a single unpaginated
+    // read gets entirely consumed by whichever member has the most slots,
+    // leaving everyone else looking fully booked. Page through with .range()
+    // (open slots only) so every member is represented. member_id isn't unique,
+    // so add id as a stable tiebreaker to keep paging deterministic.
+    const PAGE_SIZE = 1000;
+    const bookableMemberIds = new Set<string>();
+    for (let from = 0; ; from += PAGE_SIZE) {
+      const { data: page } = await supabase
+        .from("coffee_chats")
+        .select("member_id, id")
+        .in("member_id", userIds)
+        .is("applicant_id", null)
+        .gte("meeting_time", nowIso)
+        .order("member_id", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, from + PAGE_SIZE - 1);
+      if (!page?.length) break;
+      for (const row of page) bookableMemberIds.add(row.member_id);
+      if (page.length < PAGE_SIZE) break;
+    }
 
     const rolesMap = new Map<string, { id: string; role_name: string }[]>();
     for (const entry of allRoles ?? []) {
@@ -79,17 +101,6 @@ export default function CoffeeChatPage() {
     const nameMap = new Map<string, string>();
     for (const p of profiles ?? []) {
       nameMap.set(p.user_id, [p.preferred_firstname, p.lastname].filter(Boolean).join(" ") || "Unknown");
-    }
-
-    // Track distinct hours each member still has open — a member is bookable as
-    // long as they have any open slot.
-    const openHours = new Map<string, Set<string>>();
-    for (const c of chats ?? []) {
-      if (c.applicant_id === null) {
-        const key = new Date(c.meeting_time).toISOString();
-        if (!openHours.has(c.member_id)) openHours.set(c.member_id, new Set());
-        openHours.get(c.member_id)!.add(key);
-      }
     }
 
     // Members the current user has already booked — one chat per person max.
@@ -103,7 +114,7 @@ export default function CoffeeChatPage() {
         roles: rolesMap.get(p.user_id) ?? [],
         avatarUrl: p.avatar_url ?? null,
         interests: p.interests ?? null,
-        bookable: (openHours.get(p.user_id)?.size ?? 0) > 0,
+        bookable: bookableMemberIds.has(p.user_id),
         booked: bookedMemberIds.has(p.user_id),
       })),
     );
@@ -129,28 +140,43 @@ export default function CoffeeChatPage() {
   useRefreshOnReturn(load);
 
   const handleCancel = async (bookingId: string) => {
+    const booking = bookings.find((b) => b.id === bookingId);
+    const when = booking
+      ? new Date(booking.meeting_time).toLocaleString("en-US", {
+          weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+        })
+      : null;
+    const message = booking
+      ? `Cancel your coffee chat with ${booking.memberName} on ${when}? This frees the slot for someone else.`
+      : "Cancel this coffee chat? This frees the slot for someone else.";
+    if (!window.confirm(message)) return;
+
     setCancelling(bookingId);
+    setCancelError(null);
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setCancelling(null); return; }
 
     // Free the slot back up — guard on applicant_id so we only clear our own.
-    // .select() confirms the row actually changed (RLS / already-cancelled).
-    const { data: cleared } = await supabase
+    // Confirm via `error`, not the returned rows: the freed row (applicant_id
+    // null, member someone else) can fall outside our SELECT visibility, so a
+    // successful release could still return zero rows and look like a failure.
+    const { error } = await supabase
       .from("coffee_chats")
       .update({ applicant_id: null })
       .eq("id", bookingId)
-      .eq("applicant_id", user.id)
-      .select();
+      .eq("applicant_id", user.id);
 
-    if (cleared && cleared.length > 0) {
-      // Reload so everything re-derives from the DB: the booking disappears,
-      // the member's card flips from "Booked" back to bookable, and their freed
-      // slot becomes available again.
-      window.location.reload();
+    if (error) {
+      setCancelError("Couldn't cancel that chat. Please try again.");
+      setCancelling(null);
       return;
     }
-    setCancelling(null);
+
+    // Reload so everything re-derives from the DB: the booking disappears,
+    // the member's card flips from "Booked" back to bookable, and their freed
+    // slot becomes available again.
+    window.location.reload();
   };
 
   return (
@@ -164,6 +190,7 @@ export default function CoffeeChatPage() {
       {!loading && bookings.length > 0 && (
         <section className="flex flex-col gap-3">
           <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Your Coffee Chats</h2>
+          {cancelError && <p className="text-sm text-red-500">{cancelError}</p>}
           <div className="flex flex-col gap-3">
             {bookings.map((b) => {
               const d = new Date(b.meeting_time);

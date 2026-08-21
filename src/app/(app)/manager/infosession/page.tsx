@@ -139,6 +139,12 @@ export default function ManagerInfosessionPage() {
   const handleDelete = async (id: string) => {
     if (!userId) return;
     const row = rows.find((r) => r.id === id);
+
+    const message = row?.claimedBy
+      ? `Delete code ${row.code}? ${row.claimedBy} has already checked in with it — this removes their attendance record. This can't be undone.`
+      : `Delete code ${row?.code ?? "this code"}? This can't be undone.`;
+    if (!window.confirm(message)) return;
+
     setDeletingId(id);
     const supabase = createClient();
     const { error } = await supabase
