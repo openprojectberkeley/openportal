@@ -16,12 +16,13 @@ type PersonInfo = {
 
 type OpenSlot = {
   meeting_time: string;
+  duration_minutes: number;
   openCount: number;
 };
 
 type DayGroup = {
   label: string;
-  slots: { meeting_time: string; timeLabel: string; openCount: number }[];
+  slots: { meeting_time: string; timeLabel: string; duration_minutes: number; openCount: number }[];
 };
 
 // useParams() reads uncached route data; cacheComponents requires it to sit
@@ -50,22 +51,24 @@ function BookingPageInner() {
 
     const { data: rows } = await supabase
       .from("coffee_chats")
-      .select("meeting_time, applicant_id")
+      .select("meeting_time, applicant_id, duration_minutes")
       .eq("member_id", id)
       .gte("meeting_time", new Date().toISOString())
       .order("meeting_time", { ascending: true });
 
     // Count open (unclaimed) rows per meeting_time
     const openMap = new Map<string, number>();
+    const durationMap = new Map<string, number>();
     for (const r of rows ?? []) {
       const key = new Date(r.meeting_time).toISOString();
       if (!openMap.has(key)) openMap.set(key, 0);
+      if (!durationMap.has(key)) durationMap.set(key, r.duration_minutes);
       if (r.applicant_id === null) openMap.set(key, openMap.get(key)! + 1);
     }
 
     const openSlots: OpenSlot[] = [...openMap.entries()]
       .filter(([, count]) => count > 0)
-      .map(([meeting_time, openCount]) => ({ meeting_time, openCount }));
+      .map(([meeting_time, openCount]) => ({ meeting_time, duration_minutes: durationMap.get(meeting_time) ?? 30, openCount }));
 
     // Group by day
     const dayMap = new Map<string, DayGroup>();
@@ -74,7 +77,7 @@ function BookingPageInner() {
       const dayLabel = d.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
       const timeLabel = d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
       if (!dayMap.has(dayLabel)) dayMap.set(dayLabel, { label: dayLabel, slots: [] });
-      dayMap.get(dayLabel)!.slots.push({ meeting_time: slot.meeting_time, timeLabel, openCount: slot.openCount });
+      dayMap.get(dayLabel)!.slots.push({ meeting_time: slot.meeting_time, timeLabel, duration_minutes: slot.duration_minutes, openCount: slot.openCount });
     }
 
     setDays([...dayMap.values()]);
@@ -241,13 +244,16 @@ function BookingPageInner() {
                     <button
                       key={slot.meeting_time}
                       onClick={() => setSelected(slot.meeting_time)}
-                      className={`px-4 py-2 rounded-md border text-sm font-medium transition-colors ${
+                      className={`flex flex-col items-center px-4 py-2 rounded-md border text-sm font-medium transition-colors ${
                         isSelected
                           ? "bg-foreground text-background border-foreground"
                           : "hover:bg-accent"
                       }`}
                     >
                       {slot.timeLabel}
+                      <span className={`text-[11px] font-normal ${isSelected ? "opacity-80" : "text-muted-foreground"}`}>
+                        {slot.duration_minutes} min
+                      </span>
                     </button>
                   );
                 })}
@@ -266,6 +272,8 @@ function BookingPageInner() {
                 {new Date(selected).toLocaleString("en-US", {
                   weekday: "long", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
                 })}
+                {" · "}
+                {days.flatMap((d) => d.slots).find((s) => s.meeting_time === selected)?.duration_minutes ?? 30} min
               </span>
             </p>
           )}

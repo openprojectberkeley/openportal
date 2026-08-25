@@ -15,6 +15,7 @@ type MemberCard = CoffeeChatCardProps & { user_id: string; bookable: boolean; bo
 type Booking = {
   id: string;
   meeting_time: string;
+  duration_minutes: number;
   memberName: string;
   memberUserId: string;
 };
@@ -61,7 +62,7 @@ export default function CoffeeChatPage() {
       user
         ? supabase
             .from("coffee_chats")
-            .select("id, member_id, meeting_time")
+            .select("id, member_id, meeting_time, duration_minutes")
             .eq("applicant_id", user.id)
             .gte("meeting_time", nowIso)
             .order("meeting_time", { ascending: true })
@@ -123,6 +124,7 @@ export default function CoffeeChatPage() {
       (myChats ?? []).map((c: any) => ({
         id: c.id,
         meeting_time: c.meeting_time,
+        duration_minutes: c.duration_minutes,
         memberName: nameMap.get(c.member_id) ?? "Unknown",
         memberUserId: c.member_id,
       })),
@@ -202,12 +204,15 @@ export default function CoffeeChatPage() {
                       {d.toLocaleString("en-US", {
                         weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
                       })}
+                      {" · "}
+                      {b.duration_minutes} min
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
                     <a
                       href={gcalUrl({
                         start: d,
+                        durationMs: b.duration_minutes * 60 * 1000,
                         title: `Coffee Chat with ${b.memberName}`,
                         details: "Open Project Berkeley coffee chat.",
                       })}

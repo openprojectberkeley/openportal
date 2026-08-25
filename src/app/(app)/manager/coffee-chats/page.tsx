@@ -19,6 +19,21 @@ const REQUIRED_TOTAL = 30;
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
+// A manager still only picks hour-granularity start times in the grid (no
+// finer time picker), but each hour tile is tagged with a real appointment
+// duration. Since 15/20/30 all divide 60 evenly, an hour tile expands into
+// that many real back-to-back sub-slots on Save, each with its own seat
+// count — shorter appointments fit more (smaller) sessions into the same
+// hour of offered availability.
+type Duration = 15 | 20 | 30;
+const DURATIONS: Duration[] = [15, 20, 30];
+const SUBSLOT_OFFSETS: Record<Duration, number[]> = {
+  15: [0, 15, 30, 45],
+  20: [0, 20, 40],
+  30: [0, 30],
+};
+const SEATS_PER_SUBSLOT: Record<Duration, number> = { 15: 1, 20: 2, 30: 3 };
+
 // Fallback window used only until VP Tech configures one (or the app_settings
 // row is missing). Months are 0-indexed, so (2026, 7, 1) = Aug 1, 2026.
 const DEFAULT_RANGE_START = new Date(2026, 7, 1);
@@ -64,24 +79,31 @@ function parseLocalDate(s: string): Date {
   return new Date(y, (m ?? 1) - 1, d ?? 1);
 }
 
+// Tile key for the grid: the top of the hour, as an ISO string.
 function slotKey(date: Date, hour: number): string {
   const d = new Date(date);
   d.setHours(hour, 0, 0, 0);
   return d.toISOString();
 }
 
+// Which hour tile a raw DB meeting_time (possibly offset into a sub-slot)
+// belongs to — the inverse of slotKey's hour-truncation.
+function hourKeyOf(meetingTimeIso: string): string {
+  const d = new Date(meetingTimeIso);
+  d.setMinutes(0, 0, 0);
+  return d.toISOString();
+}
+
 type UpcomingSlot = {
   meeting_time: string;
+  duration_minutes: number;
   capacity: number;
   filled: number;
   attendees: { id: string; name: string; user_id: string; email: string | null; complete: boolean }[];
 };
 
 export default function ManagerCoffeeChatsPage() {
-  // Exec availability holds more attendees per slot than board (PM). Only real
-  // VP Tech (viewing as themselves) may edit the bookable window.
-  const { isExec, canSimulate, persona } = useRoleSim();
-  const slotCapacity = isExec ? 5 : 3;
+  const { canSimulate, persona } = useRoleSim();
   const canEditWindow = canSimulate && persona === "exec";
 
   const [upcomingSlots, setUpcomingSlots] = useState<UpcomingSlot[]>([]);
@@ -97,11 +119,19 @@ export default function ManagerCoffeeChatsPage() {
   const [windowError, setWindowError] = useState<string | null>(null);
 
   const [weekOffset, setWeekOffset] = useState(0);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  // Which hour tiles are on, and the duration tagged onto each. Includes
+  // already-saved (editable or booked) tiles, pre-populated by load().
+  const [selected, setSelected] = useState<Map<string, Duration>>(new Map());
   const [dbTimes, setDbTimes] = useState<Set<string>>(new Set());
+  const [dbDurations, setDbDurations] = useState<Map<string, Duration>>(new Map());
   const [bookedTimes, setBookedTimes] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
   const { openProfile } = usePersonProfile();
+
+  // The duration "pen" — applied to any newly painted tile (drag, click, or
+  // Google Calendar sync). Changing the brush never retags already-placed
+  // tiles; those are retagged individually via their corner badge.
+  const [brushDuration, setBrushDuration] = useState<Duration>(30);
 
   // Google Calendar free/busy auto-fill.
   const [syncing, setSyncing] = useState(false);
@@ -143,18 +173,17 @@ export default function ManagerCoffeeChatsPage() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    // Each availability slot is stored as `slotCapacity` seat rows, so a full
-    // window easily exceeds Supabase's 1000-row response cap. Page through with
-    // .range() until a short page so no slots are silently dropped (which would
-    // otherwise make the grid look "cut off" mid-window after a big import).
-    // meeting_time isn't unique across seats, so add id as a stable tiebreaker
-    // to keep paging deterministic.
+    // Each hour tile is stored as one or more sub-slot timestamps, each with
+    // its own seat rows, so a full window easily exceeds Supabase's 1000-row
+    // response cap. Page through with .range() until a short page so no
+    // slots are silently dropped. meeting_time isn't unique across seats, so
+    // add id as a stable tiebreaker to keep paging deterministic.
     const PAGE_SIZE = 1000;
-    const rows: { id: string; meeting_time: string; applicant_id: string | null; complete: boolean }[] = [];
+    const rows: { id: string; meeting_time: string; applicant_id: string | null; complete: boolean; duration_minutes: number }[] = [];
     for (let from = 0; ; from += PAGE_SIZE) {
       const { data: page } = await supabase
         .from("coffee_chats")
-        .select("id, meeting_time, applicant_id, complete")
+        .select("id, meeting_time, applicant_id, complete, duration_minutes")
         .eq("member_id", user.id)
         .gte("meeting_time", rangeStart.toISOString())
         .lt("meeting_time", addDays(rangeEnd, 1).toISOString())
@@ -169,17 +198,20 @@ export default function ManagerCoffeeChatsPage() {
     if (!rows.length) {
       setUpcomingSlots([]);
       setDbTimes(new Set());
+      setDbDurations(new Map());
       setBookedTimes(new Set());
-      setSelected(new Set());
+      setSelected(new Map());
       setLoading(false);
       return;
     }
 
-    // Build upcoming slots grouped by meeting_time
+    // Build upcoming slots grouped by the exact sub-slot meeting_time.
     const grouped = new Map<string, { id: string; applicant_id: string | null; complete: boolean }[]>();
+    const exactDuration = new Map<string, number>();
     for (const row of rows) {
       if (!grouped.has(row.meeting_time)) grouped.set(row.meeting_time, []);
       grouped.get(row.meeting_time)!.push({ id: row.id, applicant_id: row.applicant_id, complete: row.complete });
+      if (!exactDuration.has(row.meeting_time)) exactDuration.set(row.meeting_time, row.duration_minutes);
     }
 
     const applicantIds = [...new Set(rows.map((r) => r.applicant_id).filter((id): id is string => id !== null))];
@@ -204,6 +236,7 @@ export default function ManagerCoffeeChatsPage() {
       const filled = entries.filter((e): e is { id: string; applicant_id: string; complete: boolean } => e.applicant_id !== null);
       upcoming.push({
         meeting_time,
+        duration_minutes: exactDuration.get(meeting_time) ?? 30,
         capacity: entries.length,
         filled: filled.length,
         attendees: filled.map((e) => ({
@@ -217,15 +250,23 @@ export default function ManagerCoffeeChatsPage() {
     }
     setUpcomingSlots(upcoming);
 
-    // Pre-populate availability grid — normalize timestamps so they match
-    // the ISO keys the grid generates via slotKey().
-    const dbSet = new Set(rows.map((r) => new Date(r.meeting_time).toISOString()));
-    const bookedSet = new Set(
-      rows.filter((r) => r.applicant_id !== null).map((r) => new Date(r.meeting_time).toISOString())
-    );
+    // Pre-populate the availability grid at hour-tile granularity: every
+    // sub-slot within an hour rolls up into that hour's tile key, tagged
+    // with the duration shared by all its sub-slots, and locked (booked) if
+    // any sub-slot has a filled seat.
+    const dbSet = new Set<string>();
+    const bookedSet = new Set<string>();
+    const durMap = new Map<string, Duration>();
+    for (const row of rows) {
+      const tileKey = hourKeyOf(row.meeting_time);
+      dbSet.add(tileKey);
+      if (!durMap.has(tileKey)) durMap.set(tileKey, row.duration_minutes as Duration);
+      if (row.applicant_id !== null) bookedSet.add(tileKey);
+    }
     setDbTimes(dbSet);
+    setDbDurations(durMap);
     setBookedTimes(bookedSet);
-    setSelected(new Set(dbSet));
+    setSelected(new Map([...dbSet].map((k) => [k, durMap.get(k)!])));
     setLoading(false);
   }, [rangeStart, rangeEnd]);
 
@@ -291,7 +332,10 @@ export default function ManagerCoffeeChatsPage() {
   };
 
   // Commit the drawn rectangle on pointer-up (listener on window so releasing
-  // outside the grid still finishes the drag).
+  // outside the grid still finishes the drag). Newly-painted tiles are
+  // tagged with the current brush duration; tiles already in `selected` keep
+  // whatever duration they already have, even if a later rectangle re-covers
+  // them.
   useEffect(() => {
     if (!dragState) return;
     const commit = () => {
@@ -301,15 +345,18 @@ export default function ManagerCoffeeChatsPage() {
         const d1 = Math.max(dragState.anchor.di, dragCurrent.di);
         const h0 = Math.min(dragState.anchor.hi, dragCurrent.hi);
         const h1 = Math.max(dragState.anchor.hi, dragCurrent.hi);
-        const next = new Set(prev);
+        const next = new Map(prev);
         for (let di = d0; di <= d1; di++) {
           for (let hi = h0; hi <= h1; hi++) {
             const date = weekDates[di];
             const hour = HOURS[hi];
             const key = slotKey(date, hour);
             if (!isEditable(date, hour, key)) continue;
-            if (dragState.mode === "select") next.add(key);
-            else next.delete(key);
+            if (dragState.mode === "select") {
+              if (!next.has(key)) next.set(key, brushDuration);
+            } else {
+              next.delete(key);
+            }
           }
         }
         return next;
@@ -319,10 +366,28 @@ export default function ManagerCoffeeChatsPage() {
     };
     window.addEventListener("pointerup", commit);
     return () => window.removeEventListener("pointerup", commit);
-  }, [dragState, dragCurrent, weekDates, bookedTimes]);
+  }, [dragState, dragCurrent, weekDates, bookedTimes, brushDuration]);
 
-  const slotInfo = new Map<string, UpcomingSlot>();
-  for (const s of upcomingSlots) slotInfo.set(new Date(s.meeting_time).toISOString(), s);
+  // Cycle one already-placed, editable tile's duration 15 -> 20 -> 30 -> 15.
+  const cycleDuration = (key: string) => {
+    setSelected((prev) => {
+      const cur = prev.get(key);
+      if (cur === undefined) return prev;
+      const idx = DURATIONS.indexOf(cur);
+      const next = new Map(prev);
+      next.set(key, DURATIONS[(idx + 1) % DURATIONS.length]);
+      return next;
+    });
+  };
+
+  // Tooltip data: every upcoming sub-slot, grouped by the hour tile it falls
+  // inside (one hour tile can now contain several real sub-slot times).
+  const tileSlotInfos = new Map<string, UpcomingSlot[]>();
+  for (const s of upcomingSlots) {
+    const tk = hourKeyOf(s.meeting_time);
+    if (!tileSlotInfos.has(tk)) tileSlotInfos.set(tk, []);
+    tileSlotInfos.get(tk)!.push(s);
+  }
 
   // The Upcoming list only surfaces slots someone has actually booked; empty
   // availability still lives in the grid above, so hiding it here just removes
@@ -343,7 +408,10 @@ export default function ManagerCoffeeChatsPage() {
     : null;
 
   const hasChanges = (() => {
-    for (const k of selected) if (!dbTimes.has(k)) return true;
+    for (const [k, d] of selected) {
+      if (!dbTimes.has(k)) return true;
+      if (d !== dbDurations.get(k)) return true;
+    }
     for (const k of dbTimes) if (!selected.has(k) && !bookedTimes.has(k)) return true;
     return false;
   })();
@@ -354,29 +422,53 @@ export default function ManagerCoffeeChatsPage() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setSaving(false); return; }
 
-    const toInsert = [...selected].filter((k) => !dbTimes.has(k));
+    const toInsert = [...selected.keys()].filter((k) => !dbTimes.has(k));
     const toDelete = [...dbTimes].filter((k) => !selected.has(k) && !bookedTimes.has(k));
+    const toRetag = [...selected.keys()].filter(
+      (k) => dbTimes.has(k) && !bookedTimes.has(k) && selected.get(k) !== dbDurations.get(k),
+    );
 
-    if (toInsert.length > 0) {
-      await supabase.from("coffee_chats").insert(
-        toInsert.flatMap((meeting_time) =>
-          Array.from({ length: slotCapacity }, () => ({
-            member_id: user.id,
-            meeting_time,
-            applicant_id: null,
-            complete: false,
-          }))
-        )
-      );
-    }
-
-    for (const meeting_time of toDelete) {
-      await supabase
+    // Range-delete every row within an hour tile — used both for plain
+    // removal and for retagging, where the old sub-slot layout must be fully
+    // replaced by the new one.
+    const deleteHour = (hourKeyIso: string) => {
+      const start = new Date(hourKeyIso);
+      const end = new Date(start.getTime() + 60 * 60 * 1000);
+      return supabase
         .from("coffee_chats")
         .delete()
         .eq("member_id", user.id)
-        .eq("meeting_time", meeting_time)
+        .gte("meeting_time", start.toISOString())
+        .lt("meeting_time", end.toISOString())
         .is("applicant_id", null);
+    };
+
+    const buildRows = (hourKeyIso: string, duration: Duration) => {
+      const start = new Date(hourKeyIso);
+      const seats = SEATS_PER_SUBSLOT[duration];
+      return SUBSLOT_OFFSETS[duration].flatMap((offsetMin) => {
+        const d = new Date(start);
+        d.setMinutes(offsetMin, 0, 0);
+        const meeting_time = d.toISOString();
+        return Array.from({ length: seats }, () => ({
+          member_id: user.id,
+          meeting_time,
+          applicant_id: null,
+          complete: false,
+          duration_minutes: duration,
+        }));
+      });
+    };
+
+    for (const key of toRetag) await deleteHour(key);
+    for (const key of toDelete) await deleteHour(key);
+
+    const rowsToInsert = [
+      ...toInsert.flatMap((key) => buildRows(key, selected.get(key)!)),
+      ...toRetag.flatMap((key) => buildRows(key, selected.get(key)!)),
+    ];
+    if (rowsToInsert.length > 0) {
+      await supabase.from("coffee_chats").insert(rowsToInsert);
     }
 
     // Re-fetch so the grid and upcoming list reflect the saved state.
@@ -398,8 +490,12 @@ export default function ManagerCoffeeChatsPage() {
   };
 
   // Pull the manager's Google Calendar free/busy across the whole window and
-  // auto-select every editable hour that has no overlapping event. This only
-  // paints the grid — the member reviews and clicks Save to persist.
+  // auto-select every editable hour that has no overlapping event, tagging
+  // each newly-painted tile with the current brush duration. This only
+  // paints the grid — the member reviews and clicks Save to persist. The
+  // overlap check stays a conservative full hour regardless of the tagged
+  // duration: a shorter appointment still needs a genuinely free hour to
+  // land in, and the manager reviews/adjusts before saving anyway.
   const handleSync = async () => {
     setSyncError(null);
     setSyncSummary(null);
@@ -410,7 +506,7 @@ export default function ManagerCoffeeChatsPage() {
 
       let added = 0;
       setSelected((prev) => {
-        const next = new Set(prev);
+        const next = new Map(prev);
         for (let date = new Date(rangeStart); date < rangeEndExclusive; date = addDays(date, 1)) {
           for (const hour of HOURS) {
             const key = slotKey(date, hour);
@@ -420,7 +516,7 @@ export default function ManagerCoffeeChatsPage() {
             const slotEnd = new Date(slotStart.getTime() + 60 * 60 * 1000);
             const overlaps = busy.some((b) => b.start < slotEnd && b.end > slotStart);
             if (!overlaps) {
-              next.add(key);
+              next.set(key, brushDuration);
               added++;
             }
           }
@@ -519,6 +615,29 @@ export default function ManagerCoffeeChatsPage() {
             </button>
           </div>
         </div>
+
+        {/* Duration brush — sets the length tagged onto newly painted tiles */}
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">New slots:</span>
+          <div className="flex items-center gap-0.5 rounded-md border p-0.5">
+            {DURATIONS.map((d) => (
+              <button
+                key={d}
+                type="button"
+                onClick={() => setBrushDuration(d)}
+                className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                  brushDuration === d ? "bg-foreground text-background" : "text-muted-foreground hover:bg-accent"
+                }`}
+              >
+                {d}m
+              </button>
+            ))}
+          </div>
+          <span className="text-xs text-muted-foreground">
+            (click the badge on a placed tile to change its duration)
+          </span>
+        </div>
+
         {syncError && <p className="text-sm text-red-500">{syncError}</p>}
         {syncSummary && <p className="text-sm text-green-600">{syncSummary}</p>}
 
@@ -573,7 +692,8 @@ export default function ManagerCoffeeChatsPage() {
                     const outOfRange = !inRange(date);
                     const past = isPast(date, hour);
                     const booked = bookedTimes.has(key);
-                    const info = slotInfo.get(key);
+                    const infos = tileSlotInfos.get(key) ?? [];
+                    const tileDuration = selected.get(key);
 
                     // While dragging, editable tiles inside the rectangle preview
                     // the pending select/clear so the effect is visible live.
@@ -583,6 +703,8 @@ export default function ManagerCoffeeChatsPage() {
                       hi >= dragRect.h0 && hi <= dragRect.h1 &&
                       isEditable(date, hour, key);
                     const sel = inDrag ? dragState!.mode === "select" : selected.has(key);
+                    const showEditableBadge = !inDrag && sel && !booked && !outOfRange && !past;
+                    const showBookedBadge = booked && tileDuration !== undefined;
 
                     return (
                       <div key={di} className="relative group">
@@ -606,18 +728,40 @@ export default function ManagerCoffeeChatsPage() {
                               : "border-border hover:bg-accent"
                           }`}
                         />
-                        {info && (
-                          <div className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1.5 hidden w-max max-w-[12rem] -translate-x-1/2 flex-col gap-1 rounded-md bg-foreground px-2.5 py-1.5 text-background shadow-lg group-hover:flex">
-                            <span className="text-xs font-semibold tabular-nums">
-                              {info.filled}/{info.capacity} booked
-                            </span>
-                            {info.attendees.length > 0 ? (
-                              <span className="text-[11px] leading-snug">
-                                {info.attendees.map((a) => a.name).join(", ")}
-                              </span>
-                            ) : (
-                              <span className="text-[11px] italic opacity-70">No attendees yet</span>
-                            )}
+                        {showEditableBadge && (
+                          <button
+                            type="button"
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onClick={(e) => { e.stopPropagation(); cycleDuration(key); }}
+                            title="Click to change this slot's duration"
+                            className="absolute -top-1.5 -right-1.5 z-10 rounded-full bg-foreground text-background text-[9px] font-semibold leading-none px-1.5 py-0.5 shadow hover:opacity-80"
+                          >
+                            {tileDuration}m
+                          </button>
+                        )}
+                        {showBookedBadge && (
+                          <span className="pointer-events-none absolute -top-1.5 -right-1.5 z-10 rounded-full bg-blue-700 text-white text-[9px] font-semibold leading-none px-1.5 py-0.5 shadow">
+                            {tileDuration}m
+                          </span>
+                        )}
+                        {infos.length > 0 && (
+                          <div className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1.5 hidden w-max max-w-[14rem] -translate-x-1/2 flex-col gap-1.5 rounded-md bg-foreground px-2.5 py-1.5 text-background shadow-lg group-hover:flex">
+                            {infos.map((info) => (
+                              <div key={info.meeting_time} className="flex flex-col gap-0.5">
+                                <span className="text-xs font-semibold tabular-nums">
+                                  {new Date(info.meeting_time).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
+                                  {" · "}
+                                  {info.filled}/{info.capacity}
+                                </span>
+                                {info.attendees.length > 0 ? (
+                                  <span className="text-[11px] leading-snug opacity-90">
+                                    {info.attendees.map((a) => a.name).join(", ")}
+                                  </span>
+                                ) : (
+                                  <span className="text-[11px] italic opacity-70">No attendees yet</span>
+                                )}
+                              </div>
+                            ))}
                           </div>
                         )}
                       </div>
@@ -659,6 +803,8 @@ export default function ManagerCoffeeChatsPage() {
                     </p>
                     <p className="text-xs text-muted-foreground">
                       {d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
+                      {" · "}
+                      {slot.duration_minutes} min
                     </p>
                   </div>
                   <span className={`text-sm font-semibold tabular-nums ${slot.filled === slot.capacity ? "text-red-500" : "text-green-600"}`}>
