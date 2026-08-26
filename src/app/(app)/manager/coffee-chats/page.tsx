@@ -1004,14 +1004,14 @@ export default function ManagerCoffeeChatsPage() {
               <div />
               {weekDates.map((date, i) => {
                 const seats = seatsByDate.get(toDateInputValue(date)) ?? 0;
-                const belowMin = seats > 0 && seats < MIN_SEATS_PER_DAY;
+                const belowMin = seats < MIN_SEATS_PER_DAY;
                 return (
                   <div key={i} className={`text-center transition-opacity ${inRange(date) ? "" : "opacity-30"}`}>
                     <p className="text-xs text-muted-foreground">{DAY_LABELS[i]}</p>
                     <p className={`text-sm font-semibold ${date.toDateString() === now.toDateString() ? "text-blue-500" : ""}`}>
                       {date.getDate()}
                     </p>
-                    {inRange(date) && seats > 0 && (
+                    {inRange(date) && (
                       <p className={`text-[10px] tabular-nums ${belowMin ? "text-amber-500" : "text-green-600"}`}>
                         {seats}/{MIN_SEATS_PER_DAY} seats
                       </p>
