@@ -873,14 +873,16 @@ export default function ManagerCoffeeChatsPage() {
         <div className="flex items-center justify-between flex-wrap gap-2">
           <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Your Availability</h2>
           <div className="flex items-center gap-3">
-            <span className="text-sm font-medium tabular-nums">
-              {bookedCount} coffee chat{bookedCount === 1 ? "" : "s"} booked this window
-            </span>
-            {bookedCount < SATURDAY_REQUIRED_BELOW && (
-              <span className="text-xs text-amber-500">
-                Under {SATURDAY_REQUIRED_BELOW} booked — keep Saturdays open
+            <div className="flex flex-col gap-0.5">
+              <span className="text-sm font-medium tabular-nums">
+                {bookedCount} coffee chat{bookedCount === 1 ? "" : "s"} booked this window
               </span>
-            )}
+              {bookedCount < SATURDAY_REQUIRED_BELOW && (
+                <span className="text-xs text-amber-500">
+                  Under {SATURDAY_REQUIRED_BELOW} booked — keep Saturdays open
+                </span>
+              )}
+            </div>
             {bookedCount >= MAY_CLOSE_AT && (
               <button
                 onClick={() => setClearOpen(true)}
