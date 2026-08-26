@@ -8,6 +8,7 @@ import { CoffeeChatCard, type CoffeeChatCardProps } from "@/components/coffee-ch
 import { PersonName } from "@/components/person-profile-provider";
 import { gcalUrl } from "@/lib/gcal";
 import { useRefreshOnReturn } from "@/lib/use-refresh-on-return";
+import { loadCoffeeChatWindowBounds } from "@/lib/coffee-chat-window";
 import { CoffeeTeamSkeleton } from "@/components/skeletons";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { MapPin } from "lucide-react";
@@ -76,13 +77,20 @@ export default function CoffeeChatPage() {
         : Promise.resolve({ data: [] as any[] }),
     ]);
 
-    // Which members still have at least one open future slot. Each member's
-    // availability is stored one row per seat, so across the whole team this
-    // easily exceeds Supabase's 1000-row response cap — a single unpaginated
-    // read gets entirely consumed by whichever member has the most slots,
-    // leaving everyone else looking fully booked. Page through with .range()
-    // (open slots only) so every member is represented. member_id isn't unique,
-    // so add id as a stable tiebreaker to keep paging deterministic.
+    // Which members still have at least one open future slot inside the current
+    // coffee-chat window. Availability created under an older, wider window
+    // stays stored but must not make a host look bookable once the window is cut
+    // back (that would link to an empty booking page). Lower bound is the later
+    // of "now" and the window start so past slots stay excluded.
+    //
+    // Each member's availability is stored one row per seat, so across the whole
+    // team this easily exceeds Supabase's 1000-row response cap — a single
+    // unpaginated read gets entirely consumed by whichever member has the most
+    // slots, leaving everyone else looking fully booked. Page through with
+    // .range() (open slots only) so every member is represented. member_id isn't
+    // unique, so add id as a stable tiebreaker to keep paging deterministic.
+    const { startIso, endExclusiveIso } = await loadCoffeeChatWindowBounds(supabase);
+    const lowerIso = startIso > nowIso ? startIso : nowIso;
     const PAGE_SIZE = 1000;
     const bookableMemberIds = new Set<string>();
     for (let from = 0; ; from += PAGE_SIZE) {
@@ -91,7 +99,8 @@ export default function CoffeeChatPage() {
         .select("member_id, id")
         .in("member_id", userIds)
         .is("applicant_id", null)
-        .gte("meeting_time", nowIso)
+        .gte("meeting_time", lowerIso)
+        .lt("meeting_time", endExclusiveIso)
         .order("member_id", { ascending: true })
         .order("id", { ascending: true })
         .range(from, from + PAGE_SIZE - 1);
