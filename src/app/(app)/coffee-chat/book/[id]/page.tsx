@@ -324,14 +324,15 @@ function BookingPageInner() {
                       }`}
                     >
                       {slot.timeLabel}
-                      <span className={`text-[11px] font-normal ${isSelected ? "opacity-80" : "text-muted-foreground"}`}>
-                        {slot.duration_minutes} min
+                      <span className={`flex items-center gap-1.5 text-[11px] font-normal ${isSelected ? "opacity-80" : "text-muted-foreground"}`}>
+                        <span>{slot.duration_minutes} min</span>
+                        {slot.capacity > 1 && (
+                          <>
+                            <span className="h-1 w-1 rounded-full bg-current" />
+                            <span className="tabular-nums">{slot.filled}/{slot.capacity}</span>
+                          </>
+                        )}
                       </span>
-                      {slot.capacity > 1 && (
-                        <span className={`text-[11px] font-normal tabular-nums ${isSelected ? "opacity-80" : "text-muted-foreground"}`}>
-                          {slot.filled}/{slot.capacity} booked
-                        </span>
-                      )}
                       {slot.attendees.length > 0 && (
                         <span className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1.5 hidden w-max max-w-[14rem] -translate-x-1/2 flex-col gap-0.5 rounded-md bg-foreground px-2.5 py-1.5 text-background shadow-lg group-hover:flex">
                           <span className="text-[11px] font-semibold">
