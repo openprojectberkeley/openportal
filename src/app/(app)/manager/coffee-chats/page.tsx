@@ -5,7 +5,7 @@ import { fetchBusyIntervals, requestFreeBusyToken } from "@/lib/google-calendar"
 import Link from "next/link";
 import Script from "next/script";
 import { useCallback, useEffect, useState } from "react";
-import { CalendarCheck, Check, ChevronLeft, ChevronRight } from "lucide-react";
+import { CalendarCheck, Check, ChevronLeft, ChevronRight, Lock } from "lucide-react";
 import { useRoleSim } from "@/components/role-simulation-provider";
 import { usePersonProfile } from "@/components/person-profile-provider";
 import { ScrollArea } from "@/components/overlay-scrollbar";
@@ -19,20 +19,24 @@ const REQUIRED_TOTAL = 30;
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
-// A manager still only picks hour-granularity start times in the grid (no
-// finer time picker), but each hour tile is tagged with a real appointment
-// duration. Since 15/20/30 all divide 60 evenly, an hour tile expands into
-// that many real back-to-back sub-slots on Save, each with its own seat
-// count — shorter appointments fit more (smaller) sessions into the same
-// hour of offered availability.
+// Availability is picked at sub-hour granularity: an hour is split into equal
+// segments sized by the current brush duration (30m → 2 halves, 20m → 3
+// thirds, 15m → 4 quarters, since all divide 60 evenly), and each painted
+// segment becomes one real appointment sub-slot with its own seat count on
+// Save. All selected segments within one hour share a single duration (mixed
+// durations would overlap in time), so an hour is always split exactly one
+// way. Shorter appointments fit more (smaller) sessions into the same hour.
 type Duration = 15 | 20 | 30;
 const DURATIONS: Duration[] = [15, 20, 30];
-const SUBSLOT_OFFSETS: Record<Duration, number[]> = {
-  15: [0, 15, 30, 45],
-  20: [0, 20, 40],
-  30: [0, 30],
-};
+// How many equal segments an hour is split into for each duration (60 / dur).
+const DIVISION: Record<Duration, number> = { 15: 4, 20: 3, 30: 2 };
 const SEATS_PER_SUBSLOT: Record<Duration, number> = { 15: 1, 20: 2, 30: 3 };
+// Fill color for a selected segment, by the duration its hour is split into.
+const DURATION_COLOR: Record<Duration, string> = {
+  30: "bg-green-500",
+  20: "bg-amber-400",
+  15: "bg-blue-400",
+};
 
 // Fallback window used only until VP Tech configures one (or the app_settings
 // row is missing). Months are 0-indexed, so (2026, 7, 1) = Aug 1, 2026.
@@ -79,10 +83,18 @@ function parseLocalDate(s: string): Date {
   return new Date(y, (m ?? 1) - 1, d ?? 1);
 }
 
-// Tile key for the grid: the top of the hour, as an ISO string.
+// Hour key for the grid: the top of the hour, as an ISO string.
 function slotKey(date: Date, hour: number): string {
   const d = new Date(date);
   d.setHours(hour, 0, 0, 0);
+  return d.toISOString();
+}
+
+// Exact sub-slot key == the DB meeting_time for a segment starting at
+// `offsetMin` past the hour. subKey(date, hour, 0) === slotKey(date, hour).
+function subKey(date: Date, hour: number, offsetMin: number): string {
+  const d = new Date(date);
+  d.setHours(hour, offsetMin, 0, 0);
   return d.toISOString();
 }
 
@@ -102,6 +114,30 @@ type UpcomingSlot = {
   attendees: { id: string; name: string; user_id: string; email: string | null; complete: boolean }[];
 };
 
+// Hover tooltip listing every booked sub-slot inside an hour cell.
+function SlotTooltip({ infos }: { infos: UpcomingSlot[] }) {
+  return (
+    <div className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1.5 hidden w-max max-w-[14rem] -translate-x-1/2 flex-col gap-1.5 rounded-md bg-foreground px-2.5 py-1.5 text-background shadow-lg group-hover:flex">
+      {infos.map((info) => (
+        <div key={info.meeting_time} className="flex flex-col gap-0.5">
+          <span className="text-xs font-semibold tabular-nums">
+            {new Date(info.meeting_time).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
+            {" · "}
+            {info.filled}/{info.capacity}
+          </span>
+          {info.attendees.length > 0 ? (
+            <span className="text-[11px] leading-snug opacity-90">
+              {info.attendees.map((a) => a.name).join(", ")}
+            </span>
+          ) : (
+            <span className="text-[11px] italic opacity-70">No attendees yet</span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function ManagerCoffeeChatsPage() {
   const { canSimulate, persona } = useRoleSim();
   const canEditWindow = canSimulate && persona === "exec";
@@ -119,12 +155,16 @@ export default function ManagerCoffeeChatsPage() {
   const [windowError, setWindowError] = useState<string | null>(null);
 
   const [weekOffset, setWeekOffset] = useState(0);
-  // Which hour tiles are on, and the duration tagged onto each. Includes
-  // already-saved (editable or booked) tiles, pre-populated by load().
+  // Which unbooked sub-slot segments are on, keyed by exact meeting_time ISO,
+  // valued by the duration their hour is split into. All segments in one hour
+  // share a duration. Pre-populated from the DB by load().
   const [selected, setSelected] = useState<Map<string, Duration>>(new Map());
-  const [dbTimes, setDbTimes] = useState<Set<string>>(new Set());
-  const [dbDurations, setDbDurations] = useState<Map<string, Duration>>(new Map());
-  const [bookedTimes, setBookedTimes] = useState<Set<string>>(new Set());
+  // Snapshot of the unbooked sub-slots currently persisted, for change diffing.
+  const [dbSlots, setDbSlots] = useState<Map<string, Duration>>(new Map());
+  // Hours locked because at least one seat in them is booked; value is the
+  // stored duration, used to render the locked block. Kept out of `selected`
+  // and `dbSlots` so they can never be range-deleted or enter the diff.
+  const [bookedHours, setBookedHours] = useState<Map<string, Duration>>(new Map());
   const [saving, setSaving] = useState(false);
   const { openProfile } = usePersonProfile();
 
@@ -138,11 +178,26 @@ export default function ManagerCoffeeChatsPage() {
   const [syncError, setSyncError] = useState<string | null>(null);
   const [syncSummary, setSyncSummary] = useState<string | null>(null);
 
-  // Drag-to-select: hold and drag across tiles to paint (or clear) a rectangle
-  // of availability at once. `anchor`/`current` are [dayIndex, hourIndex] into
-  // weekDates/HOURS; `mode` is decided by the anchor tile's state on mousedown.
-  const [dragState, setDragState] = useState<{ anchor: { di: number; hi: number }; mode: "select" | "deselect" } | null>(null);
-  const [dragCurrent, setDragCurrent] = useState<{ di: number; hi: number } | null>(null);
+  // Drag-to-select: hold and drag across segments to paint (or clear) a
+  // rectangle of availability at once. `di` is the day index into weekDates;
+  // `fi` is a fine segment index `hi * DIVISION[brush] + si` so a rectangle
+  // spans hours continuously. `mode` is decided by the anchor segment's state.
+  const [dragState, setDragState] = useState<{ anchor: { di: number; fi: number }; mode: "select" | "deselect" } | null>(null);
+  const [dragCurrent, setDragCurrent] = useState<{ di: number; fi: number } | null>(null);
+
+  // Segments per hour for the current brush; a drag fixes its division to this.
+  const div = DIVISION[brushDuration];
+
+  // Roll the selected segments up per hour: hourKey -> { duration, offsets }.
+  // Every segment in an hour shares one duration (enforced on paint), so the
+  // hour's split is well-defined. Used for rendering, diffing, and saving.
+  const fillsByHour = new Map<string, { duration: Duration; offsets: Set<number> }>();
+  for (const [k, dur] of selected) {
+    const hk = hourKeyOf(k);
+    const f = fillsByHour.get(hk) ?? { duration: dur, offsets: new Set<number>() };
+    f.offsets.add(new Date(k).getMinutes());
+    fillsByHour.set(hk, f);
+  }
 
   // Load the configured window once, then open on the week containing today.
   useEffect(() => {
@@ -197,9 +252,8 @@ export default function ManagerCoffeeChatsPage() {
 
     if (!rows.length) {
       setUpcomingSlots([]);
-      setDbTimes(new Set());
-      setDbDurations(new Map());
-      setBookedTimes(new Set());
+      setDbSlots(new Map());
+      setBookedHours(new Map());
       setSelected(new Map());
       setLoading(false);
       return;
@@ -250,23 +304,24 @@ export default function ManagerCoffeeChatsPage() {
     }
     setUpcomingSlots(upcoming);
 
-    // Pre-populate the availability grid at hour-tile granularity: every
-    // sub-slot within an hour rolls up into that hour's tile key, tagged
-    // with the duration shared by all its sub-slots, and locked (booked) if
-    // any sub-slot has a filled seat.
-    const dbSet = new Set<string>();
-    const bookedSet = new Set<string>();
-    const durMap = new Map<string, Duration>();
+    // Pre-populate the grid at sub-slot granularity. Pass 1: any hour with a
+    // booked seat is locked whole (so booked/new segments can't overlap),
+    // tagged with its stored duration for rendering. Pass 2: every unbooked
+    // sub-slot in an unlocked hour becomes an editable segment keyed by its
+    // exact meeting_time.
+    const booked = new Map<string, Duration>();
     for (const row of rows) {
-      const tileKey = hourKeyOf(row.meeting_time);
-      dbSet.add(tileKey);
-      if (!durMap.has(tileKey)) durMap.set(tileKey, row.duration_minutes as Duration);
-      if (row.applicant_id !== null) bookedSet.add(tileKey);
+      if (row.applicant_id !== null) booked.set(hourKeyOf(row.meeting_time), row.duration_minutes as Duration);
     }
-    setDbTimes(dbSet);
-    setDbDurations(durMap);
-    setBookedTimes(bookedSet);
-    setSelected(new Map([...dbSet].map((k) => [k, durMap.get(k)!])));
+    const dbMap = new Map<string, Duration>();
+    for (const row of rows) {
+      if (row.applicant_id !== null) continue;
+      if (booked.has(hourKeyOf(row.meeting_time))) continue;
+      dbMap.set(row.meeting_time, row.duration_minutes as Duration);
+    }
+    setDbSlots(dbMap);
+    setBookedHours(booked);
+    setSelected(new Map(dbMap));
     setLoading(false);
   }, [rangeStart, rangeEnd]);
 
@@ -317,25 +372,27 @@ export default function ManagerCoffeeChatsPage() {
     setSavingWindow(false);
   };
 
-  // A tile can have its availability changed only if it's inside the window,
-  // not in the past, and not already booked by an applicant.
-  const isEditable = (date: Date, hour: number, key: string) =>
-    inRange(date) && !isPast(date, hour) && !bookedTimes.has(key);
+  // An hour can have its availability changed only if it's inside the window,
+  // not in the past, and not locked by a booking.
+  const isEditable = (date: Date, hour: number) =>
+    inRange(date) && !isPast(date, hour) && !bookedHours.has(slotKey(date, hour));
 
-  // Begin a drag from a tile. The anchor's current state picks the mode: start
-  // on an empty tile to select the rectangle, on a filled one to clear it. A
-  // plain click is just a 1×1 drag, committed on pointer-up below.
-  const startDrag = (di: number, hi: number, date: Date, hour: number, key: string) => {
-    if (!isEditable(date, hour, key)) return;
-    setDragState({ anchor: { di, hi }, mode: selected.has(key) ? "deselect" : "select" });
-    setDragCurrent({ di, hi });
+  // Begin a drag from a segment. `bi` is the brush-segment index the pointer is
+  // over. The anchor's current state picks the mode: start on an empty segment
+  // to add, on a filled one to clear. A plain click is a 1×1 drag, committed on
+  // pointer-up below.
+  const startDrag = (di: number, hi: number, bi: number, date: Date, hour: number) => {
+    if (!isEditable(date, hour)) return;
+    const key = subKey(date, hour, bi * brushDuration);
+    setDragState({ anchor: { di, fi: hi * div + bi }, mode: selected.has(key) ? "deselect" : "select" });
+    setDragCurrent({ di, fi: hi * div + bi });
   };
 
   // Commit the drawn rectangle on pointer-up (listener on window so releasing
-  // outside the grid still finishes the drag). Newly-painted tiles are
-  // tagged with the current brush duration; tiles already in `selected` keep
-  // whatever duration they already have, even if a later rectangle re-covers
-  // them.
+  // outside the grid still finishes the drag). Segments toggle individually:
+  // painting into an empty or same-division hour just adds/removes the covered
+  // segments, leaving siblings intact. Only a foreign-division hour (its split
+  // differs from the current brush) is re-split, since its segments can't align.
   useEffect(() => {
     if (!dragState) return;
     const commit = () => {
@@ -343,19 +400,34 @@ export default function ManagerCoffeeChatsPage() {
         if (!dragCurrent) return prev;
         const d0 = Math.min(dragState.anchor.di, dragCurrent.di);
         const d1 = Math.max(dragState.anchor.di, dragCurrent.di);
-        const h0 = Math.min(dragState.anchor.hi, dragCurrent.hi);
-        const h1 = Math.max(dragState.anchor.hi, dragCurrent.hi);
+        const f0 = Math.min(dragState.anchor.fi, dragCurrent.fi);
+        const f1 = Math.max(dragState.anchor.fi, dragCurrent.fi);
         const next = new Map(prev);
         for (let di = d0; di <= d1; di++) {
-          for (let hi = h0; hi <= h1; hi++) {
-            const date = weekDates[di];
+          const date = weekDates[di];
+          // Group the covered fine-indices into the hours they fall in.
+          const coveredByHi = new Map<number, number[]>();
+          for (let fi = f0; fi <= f1; fi++) {
+            const hi = Math.floor(fi / div);
+            if (!coveredByHi.has(hi)) coveredByHi.set(hi, []);
+            coveredByHi.get(hi)!.push(fi - hi * div);
+          }
+          for (const [hi, coveredSi] of coveredByHi) {
             const hour = HOURS[hi];
-            const key = slotKey(date, hour);
-            if (!isEditable(date, hour, key)) continue;
+            if (hour === undefined || !isEditable(date, hour)) continue;
+            const hk = slotKey(date, hour);
+            const curDur = fillsByHour.get(hk)?.duration;
+            const foreign = curDur !== undefined && curDur !== brushDuration;
             if (dragState.mode === "select") {
-              if (!next.has(key)) next.set(key, brushDuration);
+              // Re-split only when converting a foreign-division hour; otherwise
+              // just add the covered segments alongside the existing ones.
+              if (foreign) for (const key of [...next.keys()]) if (hourKeyOf(key) === hk) next.delete(key);
+              for (const si of coveredSi) next.set(subKey(date, hour, si * brushDuration), brushDuration);
+            } else if (foreign) {
+              // Foreign-division erase can't align to the brush; clear the hour.
+              for (const key of [...next.keys()]) if (hourKeyOf(key) === hk) next.delete(key);
             } else {
-              next.delete(key);
+              for (const si of coveredSi) next.delete(subKey(date, hour, si * brushDuration));
             }
           }
         }
@@ -366,19 +438,7 @@ export default function ManagerCoffeeChatsPage() {
     };
     window.addEventListener("pointerup", commit);
     return () => window.removeEventListener("pointerup", commit);
-  }, [dragState, dragCurrent, weekDates, bookedTimes, brushDuration]);
-
-  // Cycle one already-placed, editable tile's duration 15 -> 20 -> 30 -> 15.
-  const cycleDuration = (key: string) => {
-    setSelected((prev) => {
-      const cur = prev.get(key);
-      if (cur === undefined) return prev;
-      const idx = DURATIONS.indexOf(cur);
-      const next = new Map(prev);
-      next.set(key, DURATIONS[(idx + 1) % DURATIONS.length]);
-      return next;
-    });
-  };
+  }, [dragState, dragCurrent, weekDates, bookedHours, brushDuration, div, fillsByHour]);
 
   // Tooltip data: every upcoming sub-slot, grouped by the hour tile it falls
   // inside (one hour tile can now contain several real sub-slot times).
@@ -394,27 +454,46 @@ export default function ManagerCoffeeChatsPage() {
   // the noise of every open hour.
   const bookedUpcoming = upcomingSlots.filter((s) => s.filled > 0);
 
-  const totalSelectedCount = selected.size;
+  // Total offered availability, in hours (sum of every segment's duration).
+  const totalHours = [...selected.values()].reduce((a, d) => a + d, 0) / 60;
 
-  // Normalized bounds of the in-progress drag rectangle, used to preview which
-  // tiles the current drag would affect.
+  // Normalized bounds of the in-progress drag rectangle (day range × fine
+  // segment range), used to preview which segments the drag would affect.
   const dragRect = dragState && dragCurrent
     ? {
         d0: Math.min(dragState.anchor.di, dragCurrent.di),
         d1: Math.max(dragState.anchor.di, dragCurrent.di),
-        h0: Math.min(dragState.anchor.hi, dragCurrent.hi),
-        h1: Math.max(dragState.anchor.hi, dragCurrent.hi),
+        f0: Math.min(dragState.anchor.fi, dragCurrent.fi),
+        f1: Math.max(dragState.anchor.fi, dragCurrent.fi),
       }
     : null;
 
-  const hasChanges = (() => {
-    for (const [k, d] of selected) {
-      if (!dbTimes.has(k)) return true;
-      if (d !== dbDurations.get(k)) return true;
+  // Per-hour signature ("dur:off,off,…") so a change in duration or in which
+  // segments are filled counts, keyed by hour. Compares `selected` vs `dbSlots`.
+  const hourSignatures = (m: Map<string, Duration>) => {
+    const g = new Map<string, { duration: Duration; offsets: number[] }>();
+    for (const [k, d] of m) {
+      const hk = hourKeyOf(k);
+      const e = g.get(hk) ?? { duration: d, offsets: [] };
+      e.offsets.push(new Date(k).getMinutes());
+      g.set(hk, e);
     }
-    for (const k of dbTimes) if (!selected.has(k) && !bookedTimes.has(k)) return true;
-    return false;
-  })();
+    const sig = new Map<string, string>();
+    for (const [hk, e] of g) sig.set(hk, `${e.duration}:${e.offsets.sort((a, b) => a - b).join(",")}`);
+    return sig;
+  };
+
+  // Hours whose persisted layout differs from the working set (either side).
+  const dirtyHours = (): Set<string> => {
+    const cur = hourSignatures(selected);
+    const db = hourSignatures(dbSlots);
+    const dirty = new Set<string>();
+    for (const [hk, s] of cur) if (db.get(hk) !== s) dirty.add(hk);
+    for (const [hk, s] of db) if (cur.get(hk) !== s) dirty.add(hk);
+    return dirty;
+  };
+
+  const hasChanges = dirtyHours().size > 0;
 
   const handleSave = async () => {
     setSaving(true);
@@ -422,15 +501,13 @@ export default function ManagerCoffeeChatsPage() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setSaving(false); return; }
 
-    const toInsert = [...selected.keys()].filter((k) => !dbTimes.has(k));
-    const toDelete = [...dbTimes].filter((k) => !selected.has(k) && !bookedTimes.has(k));
-    const toRetag = [...selected.keys()].filter(
-      (k) => dbTimes.has(k) && !bookedTimes.has(k) && selected.get(k) !== dbDurations.get(k),
-    );
+    // Writes stay hour-granular: for each hour whose layout changed, wipe its
+    // unbooked rows and rebuild from the current segments. This correctly
+    // handles a re-split (e.g. 20m → 30m rewrites the offset set and per-slot
+    // seat count) that a per-segment diff would miss.
+    const dirty = dirtyHours();
 
-    // Range-delete every row within an hour tile — used both for plain
-    // removal and for retagging, where the old sub-slot layout must be fully
-    // replaced by the new one.
+    // Range-delete every unbooked row within an hour.
     const deleteHour = (hourKeyIso: string) => {
       const start = new Date(hourKeyIso);
       const end = new Date(start.getTime() + 60 * 60 * 1000);
@@ -443,10 +520,11 @@ export default function ManagerCoffeeChatsPage() {
         .is("applicant_id", null);
     };
 
-    const buildRows = (hourKeyIso: string, duration: Duration) => {
+    // One row per seat, for only the offsets currently selected in the hour.
+    const buildRows = (hourKeyIso: string, duration: Duration, offsets: number[]) => {
       const start = new Date(hourKeyIso);
       const seats = SEATS_PER_SUBSLOT[duration];
-      return SUBSLOT_OFFSETS[duration].flatMap((offsetMin) => {
+      return offsets.flatMap((offsetMin) => {
         const d = new Date(start);
         d.setMinutes(offsetMin, 0, 0);
         const meeting_time = d.toISOString();
@@ -460,13 +538,12 @@ export default function ManagerCoffeeChatsPage() {
       });
     };
 
-    for (const key of toRetag) await deleteHour(key);
-    for (const key of toDelete) await deleteHour(key);
+    for (const hk of dirty) await deleteHour(hk);
 
-    const rowsToInsert = [
-      ...toInsert.flatMap((key) => buildRows(key, selected.get(key)!)),
-      ...toRetag.flatMap((key) => buildRows(key, selected.get(key)!)),
-    ];
+    const rowsToInsert = [...dirty].flatMap((hk) => {
+      const f = fillsByHour.get(hk);
+      return f ? buildRows(hk, f.duration, [...f.offsets]) : [];
+    });
     if (rowsToInsert.length > 0) {
       await supabase.from("coffee_chats").insert(rowsToInsert);
     }
@@ -490,8 +567,8 @@ export default function ManagerCoffeeChatsPage() {
   };
 
   // Pull the manager's Google Calendar free/busy across the whole window and
-  // auto-select every editable hour that has no overlapping event, tagging
-  // each newly-painted tile with the current brush duration. This only
+  // auto-fill every editable, currently-empty hour that has no overlapping
+  // event, splitting each into the current brush's segments. This only
   // paints the grid — the member reviews and clicks Save to persist. The
   // overlap check stays a conservative full hour regardless of the tagged
   // duration: a shorter appointment still needs a genuinely free hour to
@@ -509,14 +586,16 @@ export default function ManagerCoffeeChatsPage() {
         const next = new Map(prev);
         for (let date = new Date(rangeStart); date < rangeEndExclusive; date = addDays(date, 1)) {
           for (const hour of HOURS) {
-            const key = slotKey(date, hour);
-            if (!isEditable(date, hour, key) || next.has(key)) continue;
+            const hk = slotKey(date, hour);
+            // Skip locked/out-of-range/past hours and any hour already painted.
+            const alreadyFilled = [...next.keys()].some((k) => hourKeyOf(k) === hk);
+            if (!isEditable(date, hour) || alreadyFilled) continue;
             const slotStart = new Date(date);
             slotStart.setHours(hour, 0, 0, 0);
             const slotEnd = new Date(slotStart.getTime() + 60 * 60 * 1000);
             const overlaps = busy.some((b) => b.start < slotEnd && b.end > slotStart);
             if (!overlaps) {
-              next.set(key, brushDuration);
+              for (let si = 0; si < div; si++) next.set(subKey(date, hour, si * brushDuration), brushDuration);
               added++;
             }
           }
@@ -593,8 +672,8 @@ export default function ManagerCoffeeChatsPage() {
         <div className="flex items-center justify-between flex-wrap gap-2">
           <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Your Availability</h2>
           <div className="flex items-center gap-3">
-            <span className={`text-sm font-medium tabular-nums ${totalSelectedCount >= REQUIRED_TOTAL ? "text-green-600" : "text-amber-500"}`}>
-              {totalSelectedCount} / {REQUIRED_TOTAL} hrs total availability
+            <span className={`text-sm font-medium tabular-nums ${totalHours >= REQUIRED_TOTAL ? "text-green-600" : "text-amber-500"}`}>
+              {totalHours.toFixed(1)} / {REQUIRED_TOTAL} hrs total availability
             </span>
             {GOOGLE_CLIENT_ID && (
               <button
@@ -634,7 +713,7 @@ export default function ManagerCoffeeChatsPage() {
             ))}
           </div>
           <span className="text-xs text-muted-foreground">
-            (click the badge on a placed tile to change its duration)
+            (drag on the grid to paint {brushDuration}-minute segments)
           </span>
         </div>
 
@@ -680,105 +759,116 @@ export default function ManagerCoffeeChatsPage() {
               ))}
             </div>
 
-            {/* Hour rows */}
-            <div className="flex flex-col gap-0.5">
-              {HOURS.map((hour, hi) => (
+            {/* Hour rows — no vertical gap, so each day reads as one strip */}
+            <div className="flex flex-col">
+              {HOURS.map((hour, hi) => {
+                const firstHour = hi === 0;
+                const lastHour = hi === HOURS.length - 1;
+                return (
                 <div key={hour} className="grid grid-cols-[3.5rem_repeat(7,1fr)] gap-1">
-                  <div className="flex items-center justify-end pr-2">
-                    <span className="text-xs text-muted-foreground">{formatHour(hour)}</span>
+                  <div className="flex items-start justify-end pr-2 pt-0.5">
+                    <span className="text-xs text-muted-foreground leading-none">{formatHour(hour)}</span>
                   </div>
                   {weekDates.map((date, di) => {
-                    const key = slotKey(date, hour);
+                    const hk = slotKey(date, hour);
                     const outOfRange = !inRange(date);
                     const past = isPast(date, hour);
-                    const booked = bookedTimes.has(key);
-                    const infos = tileSlotInfos.get(key) ?? [];
-                    const tileDuration = selected.get(key);
+                    const booked = bookedHours.has(hk);
+                    const bookedDur = bookedHours.get(hk);
+                    const infos = tileSlotInfos.get(hk) ?? [];
+                    const fill = fillsByHour.get(hk);
 
-                    // While dragging, editable tiles inside the rectangle preview
-                    // the pending select/clear so the effect is visible live.
-                    const inDrag =
+                    // Continuous-column framing: full side borders, rounded only
+                    // at the very top/bottom, hairline separators between hours.
+                    const frame =
+                      `border-x border-foreground/50 ${firstHour ? "border-t rounded-t-md" : ""} ` +
+                      (lastHour ? "border-b rounded-b-md" : "border-b border-b-foreground/15");
+
+                    if (outOfRange) {
+                      return (
+                        <div key={di} className={`h-9 bg-foreground/5 opacity-10 ${frame}`} />
+                      );
+                    }
+
+                    if (booked) {
+                      return (
+                        <div key={di} className="relative group">
+                          <div className={`flex h-9 items-center justify-center bg-blue-600 text-white/80 cursor-not-allowed ${frame}`}>
+                            <Lock size={12} />
+                            {bookedDur !== undefined && (
+                              <span className="ml-1 text-[10px] font-semibold leading-none">{bookedDur}m</span>
+                            )}
+                          </div>
+                          {infos.length > 0 && <SlotTooltip infos={infos} />}
+                        </div>
+                      );
+                    }
+
+                    // Editable (future) or past cell — rendered as stacked
+                    // segments at the hour's own split (an empty hour previews
+                    // the brush split). Each own-segment maps to the brush
+                    // segment covering its start, so drag math (in brush space)
+                    // works regardless of how the cell is split, and existing
+                    // fills keep their own duration/color during a drag.
+                    const cellDur = fill ? fill.duration : brushDuration;
+                    const cellDiv = DIVISION[cellDur];
+                    const foreign = fill !== undefined && fill.duration !== brushDuration;
+                    const hourFineStart = hi * div;
+                    const cellInDrag =
                       !!dragRect &&
                       di >= dragRect.d0 && di <= dragRect.d1 &&
-                      hi >= dragRect.h0 && hi <= dragRect.h1 &&
-                      isEditable(date, hour, key);
-                    const sel = inDrag ? dragState!.mode === "select" : selected.has(key);
-                    const showEditableBadge = !inDrag && sel && !booked && !outOfRange && !past;
-                    const showBookedBadge = booked && tileDuration !== undefined;
+                      dragRect.f0 <= hourFineStart + div - 1 && dragRect.f1 >= hourFineStart &&
+                      isEditable(date, hour);
 
                     return (
                       <div key={di} className="relative group">
-                        <button
-                          disabled={outOfRange || past}
-                          onPointerDown={(e) => { e.preventDefault(); startDrag(di, hi, date, hour, key); }}
-                          onPointerEnter={() => { if (dragState) setDragCurrent({ di, hi }); }}
-                          className={`h-7 w-full touch-none rounded-sm border text-xs transition-colors ${
-                            inDrag ? "ring-2 ring-blue-400 " : ""
-                          }${
-                            booked
-                              ? "bg-blue-500 border-blue-600 cursor-not-allowed"
-                              : outOfRange
-                              ? "opacity-10 cursor-not-allowed bg-foreground/5 border-transparent"
-                              : past
-                              ? sel
-                                ? "bg-white/70 border-foreground/60 cursor-not-allowed"
-                                : "opacity-20 cursor-not-allowed bg-foreground/5 border-transparent"
-                              : sel
-                              ? "bg-white border-foreground"
-                              : "border-border hover:bg-accent"
-                          }`}
-                        />
-                        {showEditableBadge && (
-                          <button
-                            type="button"
-                            onPointerDown={(e) => e.stopPropagation()}
-                            onClick={(e) => { e.stopPropagation(); cycleDuration(key); }}
-                            title="Click to change this slot's duration"
-                            className="absolute -top-1.5 -right-1.5 z-10 rounded-full bg-foreground text-background text-[9px] font-semibold leading-none px-1.5 py-0.5 shadow hover:opacity-80"
-                          >
-                            {tileDuration}m
-                          </button>
-                        )}
-                        {showBookedBadge && (
-                          <span className="pointer-events-none absolute -top-1.5 -right-1.5 z-10 rounded-full bg-blue-700 text-white text-[9px] font-semibold leading-none px-1.5 py-0.5 shadow">
-                            {tileDuration}m
-                          </span>
-                        )}
-                        {infos.length > 0 && (
-                          <div className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1.5 hidden w-max max-w-[14rem] -translate-x-1/2 flex-col gap-1.5 rounded-md bg-foreground px-2.5 py-1.5 text-background shadow-lg group-hover:flex">
-                            {infos.map((info) => (
-                              <div key={info.meeting_time} className="flex flex-col gap-0.5">
-                                <span className="text-xs font-semibold tabular-nums">
-                                  {new Date(info.meeting_time).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
-                                  {" · "}
-                                  {info.filled}/{info.capacity}
-                                </span>
-                                {info.attendees.length > 0 ? (
-                                  <span className="text-[11px] leading-snug opacity-90">
-                                    {info.attendees.map((a) => a.name).join(", ")}
-                                  </span>
-                                ) : (
-                                  <span className="text-[11px] italic opacity-70">No attendees yet</span>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        )}
+                        <div className={`flex flex-col h-9 overflow-hidden ${past ? "opacity-40 cursor-not-allowed" : ""} ${frame}`}>
+                          {Array.from({ length: cellDiv }, (_, si) => {
+                            // Brush segment this own-segment's start falls in.
+                            const bi = Math.floor((si * cellDur) / brushDuration);
+                            const segInDrag = cellInDrag && dragRect!.f0 <= hourFineStart + bi && dragRect!.f1 >= hourFineStart + bi;
+                            const existing = !!fill && fill.offsets.has(si * cellDur);
+                            let filled: boolean;
+                            if (cellInDrag) {
+                              if (dragState!.mode === "select") filled = foreign ? segInDrag : (segInDrag || existing);
+                              else filled = foreign ? false : (existing && !segInDrag);
+                            } else {
+                              filled = existing;
+                            }
+                            const previewPaint = segInDrag && dragState!.mode === "select";
+                            return (
+                              <div
+                                key={si}
+                                onPointerDown={past ? undefined : (e) => { e.preventDefault(); startDrag(di, hi, bi, date, hour); }}
+                                onPointerEnter={past ? undefined : () => { if (dragState) setDragCurrent({ di, fi: hi * div + bi }); }}
+                                className={`flex-1 touch-none transition-colors ${si ? "border-t border-t-foreground/10" : ""} ${
+                                  segInDrag ? "ring-1 ring-inset ring-blue-400 " : ""
+                                }${filled ? (previewPaint ? DURATION_COLOR[brushDuration] : DURATION_COLOR[cellDur]) : past ? "" : "hover:bg-accent"}`}
+                              />
+                            );
+                          })}
+                        </div>
                       </div>
                     );
                   })}
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </ScrollArea>
 
-        <div className="flex gap-4 text-xs text-muted-foreground">
+        <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
+          {DURATIONS.map((d) => (
+            <span key={d} className="flex items-center gap-1.5">
+              <span className={`inline-block w-3 h-3 rounded-sm ${DURATION_COLOR[d]}`} /> {d}-min slots
+            </span>
+          ))}
           <span className="flex items-center gap-1.5">
-            <span className="inline-block w-3 h-3 rounded-sm bg-white border border-foreground" /> Available
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block w-3 h-3 rounded-sm bg-blue-500" /> Booked
+            <span className="inline-flex items-center justify-center w-3 h-3 rounded-sm bg-blue-600 text-white/80">
+              <Lock size={8} />
+            </span>{" "}
+            Booked
           </span>
         </div>
       </div>
