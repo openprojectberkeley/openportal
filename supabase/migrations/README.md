@@ -36,6 +36,7 @@ them in order in the Supabase SQL editor.
 | `0027_coffee_chats_host_release.sql` | Additive permissive `coffee_chats` UPDATE policy (`coffee_chats_host_release`) letting a host null out a booking on a slot they own (`using member_id = auth.uid()`, `with check applicant_id is null`) — the host-side mirror of 0024, enabling host cancellation. |
 | `0028_coffee_chats_location.sql` | Adds `coffee_chats.location` (per-seat meeting link/place) + `members.default_chat_location` (host default that new availability inherits) + explicit `coffee_chats_host_update_own` policy. |
 | `0029_coffee_chat_cancellations.sql` | `coffee_chat_cancellations` audit table (RLS insert/select own) backing the applicant cancel rate limit (5 per rolling 24h), since a released booking leaves no record of who cancelled. Includes an optional commented BEFORE-trigger for hard enforcement. |
+| `0030_coffee_chats_allow_repeat_bookings.sql` | Drops the all-time `coffee_chats_one_per_person` unique index from 0003 so a member can book another chat with someone after a past chat. "One upcoming chat per person" is still enforced by the app's future-only pre-check (Postgres can't express a future-only partial unique index). Supersedes the DB constraint added in 0003. |
 
 > Note: the Supabase CLI expects a `supabase/` directory at the repo root. These
 > live under `src/supabase/` for co-location; if you later adopt the CLI, move
