@@ -135,25 +135,34 @@ type UpcomingSlot = {
 };
 
 // Hover tooltip listing every booked sub-slot inside an hour cell.
-function SlotTooltip({ infos }: { infos: UpcomingSlot[] }) {
+function SlotTooltip({ infos, defaultLocation }: { infos: UpcomingSlot[]; defaultLocation: string }) {
   return (
     <div className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1.5 hidden w-max max-w-[14rem] -translate-x-1/2 flex-col gap-1.5 rounded-md bg-foreground px-2.5 py-1.5 text-background shadow-lg group-hover:flex">
-      {infos.map((info) => (
-        <div key={info.meeting_time} className="flex flex-col gap-0.5">
-          <span className="text-xs font-semibold tabular-nums">
-            {new Date(info.meeting_time).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
-            {" · "}
-            {info.filled}/{info.capacity}
-          </span>
-          {info.attendees.length > 0 ? (
-            <span className="text-[11px] leading-snug opacity-90">
-              {info.attendees.map((a) => a.name).join(", ")}
+      {infos.map((info) => {
+        const loc = info.location ?? (defaultLocation.trim() || null);
+        return (
+          <div key={info.meeting_time} className="flex flex-col gap-0.5">
+            <span className="text-xs font-semibold tabular-nums">
+              {new Date(info.meeting_time).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
+              {" · "}
+              {info.filled}/{info.capacity}
             </span>
-          ) : (
-            <span className="text-[11px] italic opacity-70">No attendees yet</span>
-          )}
-        </div>
-      ))}
+            {info.attendees.length > 0 ? (
+              <span className="text-[11px] leading-snug opacity-90">
+                {info.attendees.map((a) => a.name).join(", ")}
+              </span>
+            ) : (
+              <span className="text-[11px] italic opacity-70">No attendees yet</span>
+            )}
+            {loc && (
+              <span className="flex items-center gap-1 text-[11px] leading-snug opacity-90">
+                <MapPin size={9} className="flex-shrink-0" />
+                <span className="truncate max-w-[10rem]">{loc}</span>
+              </span>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -605,7 +614,6 @@ export default function ManagerCoffeeChatsPage() {
     if (!user) { setSaving(false); return; }
 
     const dirty = dirtyHours();
-    const loc = defaultLocation.trim() || null;
 
     // Range-delete every unbooked row within an hour (used only for "clean"
     // hours with no bookings — a partially-booked hour is diffed per sub-slot
@@ -630,13 +638,15 @@ export default function ManagerCoffeeChatsPage() {
         const d = new Date(start);
         d.setMinutes(offsetMin, 0, 0);
         const meeting_time = d.toISOString();
+        // location stays unset: open slots resolve against the host's live
+        // default_chat_location at display/booking time instead of freezing
+        // whatever the default was when the slot happened to be painted.
         return Array.from({ length: seats }, () => ({
           member_id: user.id,
           meeting_time,
           applicant_id: null,
           complete: false,
           duration_minutes: duration,
-          location: loc,
         }));
       });
     };
@@ -1026,6 +1036,12 @@ export default function ManagerCoffeeChatsPage() {
                     const outOfRange = !inRange(date);
                     const past = isPast(date, hour);
                     const bookedInfos = (tileSlotInfos.get(hk) ?? []).filter((i) => i.filled > 0);
+                    // A booked sub-slot whose location was explicitly set to
+                    // something other than the current default — flagged so a
+                    // PM/exec scanning the grid can spot exceptions at a glance.
+                    const hasLocationOverride = bookedInfos.some(
+                      (i) => i.location && i.location !== (defaultLocation.trim() || null),
+                    );
                     const fill = fillsByHour.get(hk);
                     const lockedDur = lockedDivByHour.get(hk);
                     const bookedOffsets = bookedOffsetsByHour.get(hk);
@@ -1116,7 +1132,12 @@ export default function ManagerCoffeeChatsPage() {
                             );
                           })}
                         </div>
-                        {bookedInfos.length > 0 && <SlotTooltip infos={bookedInfos} />}
+                        {hasLocationOverride && (
+                          <span className="pointer-events-none absolute top-0 right-0 z-[1] flex items-center justify-center w-3 h-3 rounded-bl bg-foreground/80 text-background">
+                            <MapPin size={7} />
+                          </span>
+                        )}
+                        {bookedInfos.length > 0 && <SlotTooltip infos={bookedInfos} defaultLocation={defaultLocation} />}
                       </div>
                     );
                   })}
@@ -1139,6 +1160,12 @@ export default function ManagerCoffeeChatsPage() {
             </span>{" "}
             Booked (darker + lock)
           </span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-flex items-center justify-center w-3 h-3 rounded-sm bg-foreground/80 text-background">
+              <MapPin size={8} />
+            </span>{" "}
+            Custom location (differs from default)
+          </span>
         </div>
       </div>
 
@@ -1153,6 +1180,7 @@ export default function ManagerCoffeeChatsPage() {
           <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Upcoming</h2>
           {bookedUpcoming.map((slot) => {
             const d = new Date(slot.meeting_time);
+            const resolvedLocation = slot.location || defaultLocation.trim() || null;
             return (
               <div key={slot.meeting_time} className="border rounded-xl p-4 flex flex-col gap-2">
                 <div className="flex items-center justify-between">
@@ -1172,8 +1200,8 @@ export default function ManagerCoffeeChatsPage() {
                 </div>
                 <div className="flex items-center gap-1.5 text-xs">
                   <MapPin size={12} className="text-muted-foreground flex-shrink-0" />
-                  <span className={`truncate ${slot.location ? "text-foreground" : "text-muted-foreground italic"}`}>
-                    {slot.location || "No location set"}
+                  <span className={`truncate ${resolvedLocation ? "text-foreground" : "text-muted-foreground italic"}`}>
+                    {resolvedLocation || "No location set"}
                   </span>
                   <button
                     type="button"

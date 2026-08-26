@@ -6,12 +6,14 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { useRefreshOnReturn } from "@/lib/use-refresh-on-return";
 import { AvailabilitySkeleton } from "@/components/skeletons";
+import { MapPin } from "lucide-react";
 
 type PersonInfo = {
   name: string;
   roles: { id: string; role_name: string }[];
   avatarUrl: string | null;
   interests: string | null;
+  defaultLocation: string | null;
 };
 
 type Attendee = { user_id: string; name: string };
@@ -154,7 +156,7 @@ function BookingPageInner() {
       const [{ data: profile }, { data: roleRows }] = await Promise.all([
         supabase
           .from("members")
-          .select("preferred_firstname, lastname, interests, avatar_url")
+          .select("preferred_firstname, lastname, interests, avatar_url, default_chat_location")
           .eq("user_id", id)
           .maybeSingle(),
         supabase
@@ -168,6 +170,7 @@ function BookingPageInner() {
         roles: (roleRows ?? []).flatMap((r: any) => (r.roles ? [r.roles] : [])),
         avatarUrl: profile?.avatar_url ?? null,
         interests: profile?.interests ?? null,
+        defaultLocation: profile?.default_chat_location ?? null,
       });
     };
 
@@ -208,7 +211,7 @@ function BookingPageInner() {
     // Grab one still-open row for this slot
     const { data: openRow } = await supabase
       .from("coffee_chats")
-      .select("id")
+      .select("id, location")
       .eq("member_id", id)
       .eq("meeting_time", selected)
       .is("applicant_id", null)
@@ -245,6 +248,14 @@ function BookingPageInner() {
       setSelected(null);
       setBooking(false);
       return;
+    }
+
+    // Open slots don't carry a location — freeze the host's current default
+    // onto the row now so it stays stable even if the host changes their
+    // default later. A row that already has an explicit location (a rare
+    // per-slot override set before booking) is left untouched.
+    if (!openRow.location && person?.defaultLocation) {
+      await supabase.from("coffee_chats").update({ location: person.defaultLocation }).eq("id", openRow.id);
     }
 
     // Notify the host of the new booking (row now binds applicant = caller).
@@ -297,6 +308,28 @@ function BookingPageInner() {
               ))}
             </div>
           </div>
+        </div>
+      )}
+
+      {person && (
+        <div className="flex items-center gap-1.5 text-sm text-muted-foreground -mt-4">
+          <MapPin size={14} className="flex-shrink-0" />
+          {person.defaultLocation ? (
+            /^https?:\/\//.test(person.defaultLocation) ? (
+              <a
+                href={person.defaultLocation}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline decoration-dotted underline-offset-2 hover:text-foreground truncate"
+              >
+                {person.defaultLocation}
+              </a>
+            ) : (
+              <span className="truncate">{person.defaultLocation}</span>
+            )
+          ) : (
+            <span className="italic">No location set yet — check with {person.name.split(" ")[0]}</span>
+          )}
         </div>
       )}
 
