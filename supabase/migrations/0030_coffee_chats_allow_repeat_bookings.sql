@@ -1,0 +1,16 @@
+-- Allow booking another coffee chat with someone you've chatted with before.
+--
+-- 0003 added a partial unique index `coffee_chats_one_per_person` on
+-- (member_id, applicant_id) where applicant_id is not null. Because it is not
+-- time-scoped, it blocked ANY repeat pairing — including after a past/completed
+-- chat — and, since the booking flow's atomic claim ignored the resulting
+-- unique violation, surfaced as a misleading "That time was just taken" error.
+--
+-- Drop it so repeat chats are allowed. "At most one UPCOMING chat per person"
+-- is still enforced in the app booking flow (a future-only pre-check in
+-- coffee-chat/book/[id]/page.tsx). Postgres can't express a future-only partial
+-- unique index (now() isn't immutable), so we can't keep the DB-level race
+-- backstop for concurrent double-submits; the residual risk is only a same-user
+-- double-click racing two upcoming bookings with one member — rare and
+-- low-impact here.
+drop index if exists public.coffee_chats_one_per_person;

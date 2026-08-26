@@ -14,15 +14,30 @@ type PersonInfo = {
   interests: string | null;
 };
 
+type Attendee = { user_id: string; name: string };
+
 type OpenSlot = {
   meeting_time: string;
   duration_minutes: number;
   openCount: number;
+  capacity: number;
+  filled: number;
+  attendees: Attendee[];
+};
+
+type SlotView = {
+  meeting_time: string;
+  timeLabel: string;
+  duration_minutes: number;
+  openCount: number;
+  capacity: number;
+  filled: number;
+  attendees: Attendee[];
 };
 
 type DayGroup = {
   label: string;
-  slots: { meeting_time: string; timeLabel: string; duration_minutes: number; openCount: number }[];
+  slots: SlotView[];
 };
 
 // useParams() reads uncached route data; cacheComponents requires it to sit
@@ -166,12 +181,20 @@ function BookingPageInner() {
     }
 
     // Atomic claim: only succeeds if the row is still unclaimed.
-    const { data: claimed } = await supabase
+    const { data: claimed, error: claimError } = await supabase
       .from("coffee_chats")
       .update({ applicant_id: user.id })
       .eq("id", openRow.id)
       .is("applicant_id", null)
       .select();
+
+    // A real DB error (RLS, constraint, etc.) is distinct from the row simply
+    // having been claimed by someone else in the meantime — don't mislabel it.
+    if (claimError) {
+      setError("Couldn't book that time. Please try again.");
+      setBooking(false);
+      return;
+    }
 
     if (!claimed || claimed.length === 0) {
       setError("That time was just taken. Please pick another.");
