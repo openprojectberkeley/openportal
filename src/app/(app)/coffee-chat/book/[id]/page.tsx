@@ -71,19 +71,54 @@ function BookingPageInner() {
       .gte("meeting_time", new Date().toISOString())
       .order("meeting_time", { ascending: true });
 
-    // Count open (unclaimed) rows per meeting_time
+    // Per meeting_time: count open (unclaimed) rows, total seats (capacity),
+    // and the ids of everyone who's already booked a seat.
     const openMap = new Map<string, number>();
+    const capacityMap = new Map<string, number>();
     const durationMap = new Map<string, number>();
+    const filledIdsMap = new Map<string, string[]>();
     for (const r of rows ?? []) {
       const key = new Date(r.meeting_time).toISOString();
       if (!openMap.has(key)) openMap.set(key, 0);
       if (!durationMap.has(key)) durationMap.set(key, r.duration_minutes);
-      if (r.applicant_id === null) openMap.set(key, openMap.get(key)! + 1);
+      capacityMap.set(key, (capacityMap.get(key) ?? 0) + 1);
+      if (r.applicant_id === null) {
+        openMap.set(key, openMap.get(key)! + 1);
+      } else {
+        if (!filledIdsMap.has(key)) filledIdsMap.set(key, []);
+        filledIdsMap.get(key)!.push(r.applicant_id);
+      }
+    }
+
+    // Resolve the ids of everyone already booked (across all slots) to names.
+    const allApplicantIds = [...new Set([...filledIdsMap.values()].flat())];
+    const nameMap = new Map<string, string>();
+    if (allApplicantIds.length > 0) {
+      const { data: members } = await supabase
+        .from("members")
+        .select("user_id, preferred_firstname, lastname")
+        .in("user_id", allApplicantIds);
+      for (const m of members ?? []) {
+        nameMap.set(m.user_id, [m.preferred_firstname, m.lastname].filter(Boolean).join(" ") || "Member");
+      }
     }
 
     const openSlots: OpenSlot[] = [...openMap.entries()]
       .filter(([, count]) => count > 0)
-      .map(([meeting_time, openCount]) => ({ meeting_time, duration_minutes: durationMap.get(meeting_time) ?? 30, openCount }));
+      .map(([meeting_time, openCount]) => {
+        const capacity = capacityMap.get(meeting_time) ?? openCount;
+        return {
+          meeting_time,
+          duration_minutes: durationMap.get(meeting_time) ?? 30,
+          openCount,
+          capacity,
+          filled: capacity - openCount,
+          attendees: (filledIdsMap.get(meeting_time) ?? []).map((uid) => ({
+            user_id: uid,
+            name: nameMap.get(uid) ?? "Member",
+          })),
+        };
+      });
 
     // Group by day
     const dayMap = new Map<string, DayGroup>();
@@ -92,7 +127,15 @@ function BookingPageInner() {
       const dayLabel = d.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
       const timeLabel = d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
       if (!dayMap.has(dayLabel)) dayMap.set(dayLabel, { label: dayLabel, slots: [] });
-      dayMap.get(dayLabel)!.slots.push({ meeting_time: slot.meeting_time, timeLabel, duration_minutes: slot.duration_minutes, openCount: slot.openCount });
+      dayMap.get(dayLabel)!.slots.push({
+        meeting_time: slot.meeting_time,
+        timeLabel,
+        duration_minutes: slot.duration_minutes,
+        openCount: slot.openCount,
+        capacity: slot.capacity,
+        filled: slot.filled,
+        attendees: slot.attendees,
+      });
     }
 
     setDays([...dayMap.values()]);
@@ -274,7 +317,7 @@ function BookingPageInner() {
                     <button
                       key={slot.meeting_time}
                       onClick={() => setSelected(slot.meeting_time)}
-                      className={`flex flex-col items-center px-4 py-2 rounded-md border text-sm font-medium transition-colors ${
+                      className={`group relative flex flex-col items-center px-4 py-2 rounded-md border text-sm font-medium transition-colors ${
                         isSelected
                           ? "bg-foreground text-background border-foreground"
                           : "hover:bg-accent"
@@ -284,6 +327,21 @@ function BookingPageInner() {
                       <span className={`text-[11px] font-normal ${isSelected ? "opacity-80" : "text-muted-foreground"}`}>
                         {slot.duration_minutes} min
                       </span>
+                      {slot.capacity > 1 && (
+                        <span className={`text-[11px] font-normal tabular-nums ${isSelected ? "opacity-80" : "text-muted-foreground"}`}>
+                          {slot.filled}/{slot.capacity} booked
+                        </span>
+                      )}
+                      {slot.attendees.length > 0 && (
+                        <span className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1.5 hidden w-max max-w-[14rem] -translate-x-1/2 flex-col gap-0.5 rounded-md bg-foreground px-2.5 py-1.5 text-background shadow-lg group-hover:flex">
+                          <span className="text-[11px] font-semibold">
+                            Booking with {slot.filled} other{slot.filled === 1 ? "" : "s"}
+                          </span>
+                          <span className="text-[11px] leading-snug opacity-90">
+                            {slot.attendees.map((a) => a.name).join(", ")}
+                          </span>
+                        </span>
+                      )}
                     </button>
                   );
                 })}
