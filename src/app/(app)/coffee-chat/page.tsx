@@ -64,7 +64,7 @@ export default function CoffeeChatPage() {
     const nowIso = new Date().toISOString();
 
     const [{ data: allRoles }, { data: profiles }, { data: myChats }] = await Promise.all([
-      supabase.from("members_roles").select("user_id, roles(id, role_name)").in("user_id", userIds),
+      supabase.from("members_roles").select("user_id, roles(id, role_name, access_level)").in("user_id", userIds),
       supabase.from("members").select("user_id, preferred_firstname, lastname, interests, avatar_url").in("user_id", userIds),
       user
         ? supabase
@@ -100,7 +100,7 @@ export default function CoffeeChatPage() {
       if (page.length < PAGE_SIZE) break;
     }
 
-    const rolesMap = new Map<string, { id: string; role_name: string }[]>();
+    const rolesMap = new Map<string, { id: string; role_name: string; access_level: string | null }[]>();
     for (const entry of allRoles ?? []) {
       if (!rolesMap.has(entry.user_id)) rolesMap.set(entry.user_id, []);
       if (entry.roles) rolesMap.get(entry.user_id)!.push(entry.roles as any);
@@ -114,18 +114,37 @@ export default function CoffeeChatPage() {
     // Members the current user has already booked — one chat per person max.
     const bookedMemberIds = new Set((myChats ?? []).map((c) => c.member_id));
 
-    setMembers(
-      (profiles ?? []).map((p) => ({
-        id: p.user_id,
-        user_id: p.user_id,
-        name: nameMap.get(p.user_id) ?? "Unknown",
-        roles: rolesMap.get(p.user_id) ?? [],
-        avatarUrl: p.avatar_url ?? null,
-        interests: p.interests ?? null,
-        bookable: bookableMemberIds.has(p.user_id),
-        booked: bookedMemberIds.has(p.user_id),
-      })),
-    );
+    // Ordering: President first, then the rest of exec (grouped by role name,
+    // alphabetically), then everyone else (board/PMs). Name breaks every tie.
+    const PRESIDENT_ROLE = "President";
+    const rankOf = (userId: string) => {
+      const roles = rolesMap.get(userId) ?? [];
+      if (roles.some((r) => r.role_name === PRESIDENT_ROLE)) return { tier: 0, execRole: "" };
+      const execRoleNames = roles.filter((r) => r.access_level === "exec").map((r) => r.role_name).sort();
+      if (execRoleNames.length > 0) return { tier: 1, execRole: execRoleNames[0] };
+      return { tier: 2, execRole: "" };
+    };
+
+    const memberCards = (profiles ?? []).map((p) => ({
+      id: p.user_id,
+      user_id: p.user_id,
+      name: nameMap.get(p.user_id) ?? "Unknown",
+      roles: (rolesMap.get(p.user_id) ?? []).map(({ id, role_name }) => ({ id, role_name })),
+      avatarUrl: p.avatar_url ?? null,
+      interests: p.interests ?? null,
+      bookable: bookableMemberIds.has(p.user_id),
+      booked: bookedMemberIds.has(p.user_id),
+    }));
+
+    memberCards.sort((a, b) => {
+      const ra = rankOf(a.user_id);
+      const rb = rankOf(b.user_id);
+      if (ra.tier !== rb.tier) return ra.tier - rb.tier;
+      if (ra.tier === 1 && ra.execRole !== rb.execRole) return ra.execRole.localeCompare(rb.execRole);
+      return a.name.localeCompare(b.name);
+    });
+
+    setMembers(memberCards);
 
     setBookings(
       (myChats ?? []).map((c: any) => ({
