@@ -9,6 +9,12 @@ import { PersonName } from "@/components/person-profile-provider";
 import { gcalUrl } from "@/lib/gcal";
 import { useRefreshOnReturn } from "@/lib/use-refresh-on-return";
 import { CoffeeTeamSkeleton } from "@/components/skeletons";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { MapPin } from "lucide-react";
+
+// At most this many cancellations per rolling 24h, to curb slot churn (there's
+// no reschedule — moving a chat means cancel + book again).
+const CANCEL_LIMIT_24H = 5;
 
 type MemberCard = CoffeeChatCardProps & { user_id: string; bookable: boolean; booked: boolean };
 
@@ -18,6 +24,7 @@ type Booking = {
   duration_minutes: number;
   memberName: string;
   memberUserId: string;
+  location: string | null;
 };
 
 export default function CoffeeChatPage() {
@@ -25,7 +32,7 @@ export default function CoffeeChatPage() {
   const [members, setMembers] = useState<MemberCard[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
-  const [cancelling, setCancelling] = useState<string | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<Booking | null>(null);
   const [cancelError, setCancelError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -62,7 +69,7 @@ export default function CoffeeChatPage() {
       user
         ? supabase
             .from("coffee_chats")
-            .select("id, member_id, meeting_time, duration_minutes")
+            .select("id, member_id, meeting_time, duration_minutes, location")
             .eq("applicant_id", user.id)
             .gte("meeting_time", nowIso)
             .order("meeting_time", { ascending: true })
@@ -127,6 +134,7 @@ export default function CoffeeChatPage() {
         duration_minutes: c.duration_minutes,
         memberName: nameMap.get(c.member_id) ?? "Unknown",
         memberUserId: c.member_id,
+        location: c.location ?? null,
       })),
     );
 
@@ -141,23 +149,34 @@ export default function CoffeeChatPage() {
   // a tab switch — otherwise a booking cancelled here can reappear stale.
   useRefreshOnReturn(load);
 
-  const handleCancel = async (bookingId: string) => {
-    const booking = bookings.find((b) => b.id === bookingId);
-    const when = booking
-      ? new Date(booking.meeting_time).toLocaleString("en-US", {
-          weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
-        })
-      : null;
-    const message = booking
-      ? `Cancel your coffee chat with ${booking.memberName} on ${when}? This frees the slot for someone else.`
-      : "Cancel this coffee chat? This frees the slot for someone else.";
-    if (!window.confirm(message)) return;
-
-    setCancelling(bookingId);
+  // Cancel is confirmed via the dialog; this runs the mutation. Returns false
+  // to keep the dialog open (rate-limited or errored).
+  const confirmCancel = async () => {
+    const booking = cancelTarget;
+    if (!booking) return false;
     setCancelError(null);
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { setCancelling(null); return; }
+    if (!user) return false;
+
+    // Rate limit: at most CANCEL_LIMIT_24H cancellations per rolling 24h.
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const { count } = await supabase
+      .from("coffee_chat_cancellations")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", user.id)
+      .gte("created_at", since);
+    if ((count ?? 0) >= CANCEL_LIMIT_24H) {
+      setCancelError(`You've hit the limit of ${CANCEL_LIMIT_24H} cancellations in 24 hours. Try again later.`);
+      return false;
+    }
+
+    // Notify the host first (the row still binds both parties), then release.
+    await supabase.rpc("notify_coffee_chat_counterparty", {
+      p_chat_id: booking.id,
+      p_type: "chat_cancelled_by_applicant",
+      p_message: null,
+    });
 
     // Free the slot back up — guard on applicant_id so we only clear our own.
     // Confirm via `error`, not the returned rows: the freed row (applicant_id
@@ -166,15 +185,23 @@ export default function CoffeeChatPage() {
     const { error } = await supabase
       .from("coffee_chats")
       .update({ applicant_id: null })
-      .eq("id", bookingId)
+      .eq("id", booking.id)
       .eq("applicant_id", user.id);
 
     if (error) {
       setCancelError("Couldn't cancel that chat. Please try again.");
-      setCancelling(null);
-      return;
+      return false;
     }
 
+    // Log the cancellation for the rate limit.
+    await supabase.from("coffee_chat_cancellations").insert({
+      user_id: user.id,
+      coffee_chat_id: booking.id,
+      member_id: booking.memberUserId,
+      meeting_time: booking.meeting_time,
+    });
+
+    setCancelTarget(null);
     // Reload so everything re-derives from the DB: the booking disappears,
     // the member's card flips from "Booked" back to bookable, and their freed
     // slot becomes available again.
@@ -192,13 +219,12 @@ export default function CoffeeChatPage() {
       {!loading && bookings.length > 0 && (
         <section className="flex flex-col gap-3">
           <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Your Coffee Chats</h2>
-          {cancelError && <p className="text-sm text-red-500">{cancelError}</p>}
           <div className="flex flex-col gap-3">
             {bookings.map((b) => {
               const d = new Date(b.meeting_time);
               return (
                 <div key={b.id} className="border rounded-xl p-4 flex items-center justify-between gap-4 flex-wrap">
-                  <div>
+                  <div className="flex flex-col gap-1">
                     <PersonName userId={b.memberUserId} name={b.memberName} className="text-sm font-medium" />
                     <p className="text-xs text-muted-foreground">
                       {d.toLocaleString("en-US", {
@@ -207,6 +233,18 @@ export default function CoffeeChatPage() {
                       {" · "}
                       {b.duration_minutes} min
                     </p>
+                    {b.location && (
+                      <p className="flex items-center gap-1 text-xs text-muted-foreground">
+                        <MapPin size={12} className="flex-shrink-0" />
+                        {/^https?:\/\//.test(b.location) ? (
+                          <a href={b.location} target="_blank" rel="noopener noreferrer" className="underline decoration-dotted underline-offset-2 hover:text-foreground truncate">
+                            {b.location}
+                          </a>
+                        ) : (
+                          <span className="truncate">{b.location}</span>
+                        )}
+                      </p>
+                    )}
                   </div>
                   <div className="flex items-center gap-2">
                     <a
@@ -215,6 +253,7 @@ export default function CoffeeChatPage() {
                         durationMs: b.duration_minutes * 60 * 1000,
                         title: `Coffee Chat with ${b.memberName}`,
                         details: "Open Project Berkeley coffee chat.",
+                        location: b.location ?? undefined,
                       })}
                       target="_blank"
                       rel="noopener noreferrer"
@@ -223,11 +262,10 @@ export default function CoffeeChatPage() {
                       Add to Google Calendar
                     </a>
                     <button
-                      onClick={() => handleCancel(b.id)}
-                      disabled={cancelling === b.id}
-                      className="inline-flex items-center rounded-md px-3 py-1.5 text-sm text-red-500 hover:bg-red-500/10 transition-colors disabled:opacity-40"
+                      onClick={() => { setCancelTarget(b); setCancelError(null); }}
+                      className="inline-flex items-center rounded-md px-3 py-1.5 text-sm text-red-500 hover:bg-red-500/10 transition-colors"
                     >
-                      {cancelling === b.id ? "Cancelling…" : "Cancel"}
+                      Cancel
                     </button>
                   </div>
                 </div>
@@ -266,6 +304,19 @@ export default function CoffeeChatPage() {
       ) : (
         <p className="text-sm text-muted-foreground">No team members available for coffee chats right now.</p>
       )}
+
+      <ConfirmDialog
+        open={cancelTarget !== null}
+        onOpenChange={(o) => { if (!o) setCancelTarget(null); }}
+        title="Cancel this coffee chat?"
+        description={cancelTarget
+          ? `Cancel your chat with ${cancelTarget.memberName} on ${new Date(cancelTarget.meeting_time).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}? This frees the slot for someone else. There's no reschedule — you'd book a new time yourself.`
+          : ""}
+        confirmLabel="Cancel chat"
+        onConfirm={confirmCancel}
+      >
+        {cancelError && <p className="text-sm text-red-500">{cancelError}</p>}
+      </ConfirmDialog>
     </div>
   );
 }

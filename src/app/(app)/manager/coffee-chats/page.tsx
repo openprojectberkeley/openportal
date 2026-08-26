@@ -5,11 +5,12 @@ import { fetchBusyIntervals, requestFreeBusyToken } from "@/lib/google-calendar"
 import Link from "next/link";
 import Script from "next/script";
 import { useCallback, useEffect, useState } from "react";
-import { CalendarCheck, Check, ChevronLeft, ChevronRight, Lock } from "lucide-react";
+import { CalendarCheck, Check, ChevronLeft, ChevronRight, Lock, MapPin, X } from "lucide-react";
 import { useRoleSim } from "@/components/role-simulation-provider";
 import { usePersonProfile } from "@/components/person-profile-provider";
 import { ScrollArea } from "@/components/overlay-scrollbar";
 import { SlotCardsSkeleton } from "@/components/skeletons";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
 
@@ -31,11 +32,19 @@ const DURATIONS: Duration[] = [15, 20, 30];
 // How many equal segments an hour is split into for each duration (60 / dur).
 const DIVISION: Record<Duration, number> = { 15: 4, 20: 3, 30: 2 };
 const SEATS_PER_SUBSLOT: Record<Duration, number> = { 15: 1, 20: 2, 30: 3 };
-// Fill color for a selected segment, by the duration its hour is split into.
+// Fill color for an open (bookable) segment, by the duration its hour is split
+// into — the bright, prominent palette.
 const DURATION_COLOR: Record<Duration, string> = {
-  30: "bg-green-500",
-  20: "bg-amber-400",
-  15: "bg-blue-400",
+  30: "bg-green-400",
+  20: "bg-amber-300",
+  15: "bg-blue-300",
+};
+// Booked segments use a darker shade of the same hue (plus a lock icon), so
+// they read as taken without competing with the open availability.
+const BOOKED_COLOR: Record<Duration, string> = {
+  30: "bg-green-700",
+  20: "bg-amber-600",
+  15: "bg-blue-600",
 };
 
 // Fallback window used only until VP Tech configures one (or the app_settings
@@ -111,6 +120,7 @@ type UpcomingSlot = {
   duration_minutes: number;
   capacity: number;
   filled: number;
+  location: string | null;
   attendees: { id: string; name: string; user_id: string; email: string | null; complete: boolean }[];
 };
 
@@ -161,12 +171,25 @@ export default function ManagerCoffeeChatsPage() {
   const [selected, setSelected] = useState<Map<string, Duration>>(new Map());
   // Snapshot of the unbooked sub-slots currently persisted, for change diffing.
   const [dbSlots, setDbSlots] = useState<Map<string, Duration>>(new Map());
-  // Hours locked because at least one seat in them is booked; value is the
-  // stored duration, used to render the locked block. Kept out of `selected`
-  // and `dbSlots` so they can never be range-deleted or enter the diff.
-  const [bookedHours, setBookedHours] = useState<Map<string, Duration>>(new Map());
+  // Sub-slots (exact meeting_time) that have at least one booked seat. These
+  // stay OUT of `selected`/`dbSlots` so they're never re-split or range-deleted;
+  // each locks only itself, not its whole hour — other sub-slots in the same
+  // hour stay editable at the hour's (now frozen) duration.
+  const [bookedSubSlots, setBookedSubSlots] = useState<Map<string, Duration>>(new Map());
   const [saving, setSaving] = useState(false);
   const { openProfile } = usePersonProfile();
+
+  // Host default meeting location / link, applied to newly-saved availability.
+  const [defaultLocation, setDefaultLocation] = useState("");
+  const [draftDefaultLocation, setDraftDefaultLocation] = useState("");
+  const [savingDefaultLocation, setSavingDefaultLocation] = useState(false);
+
+  // Destructive-action + editor dialogs.
+  const [clearOpen, setClearOpen] = useState(false);
+  const [cancelTarget, setCancelTarget] = useState<{ id: string; name: string; meeting_time: string } | null>(null);
+  const [cancelMessage, setCancelMessage] = useState("");
+  const [locationTarget, setLocationTarget] = useState<{ meeting_time: string; attendeeIds: string[]; hadLocation: boolean } | null>(null);
+  const [locationDraft, setLocationDraft] = useState("");
 
   // The duration "pen" — applied to any newly painted tile (drag, click, or
   // Google Calendar sync). Changing the brush never retags already-placed
@@ -199,6 +222,20 @@ export default function ManagerCoffeeChatsPage() {
     fillsByHour.set(hk, f);
   }
 
+  // Booking-derived locks. Once any sub-slot in an hour is booked, that hour's
+  // duration/division is frozen (can't re-split); the specific booked offsets
+  // render locked while the hour's other sub-slots stay editable at that
+  // duration. Both maps are keyed by hour.
+  const lockedDivByHour = new Map<string, Duration>();
+  const bookedOffsetsByHour = new Map<string, Set<number>>();
+  for (const [k, dur] of bookedSubSlots) {
+    const hk = hourKeyOf(k);
+    lockedDivByHour.set(hk, dur);
+    const set = bookedOffsetsByHour.get(hk) ?? new Set<number>();
+    set.add(new Date(k).getMinutes());
+    bookedOffsetsByHour.set(hk, set);
+  }
+
   // Load the configured window once, then open on the week containing today.
   useEffect(() => {
     const supabase = createClient();
@@ -228,17 +265,26 @@ export default function ManagerCoffeeChatsPage() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
+    // Host default meeting location (applied to newly-saved availability).
+    const { data: me } = await supabase
+      .from("members")
+      .select("default_chat_location")
+      .eq("user_id", user.id)
+      .maybeSingle();
+    setDefaultLocation(me?.default_chat_location ?? "");
+    setDraftDefaultLocation(me?.default_chat_location ?? "");
+
     // Each hour tile is stored as one or more sub-slot timestamps, each with
     // its own seat rows, so a full window easily exceeds Supabase's 1000-row
     // response cap. Page through with .range() until a short page so no
     // slots are silently dropped. meeting_time isn't unique across seats, so
     // add id as a stable tiebreaker to keep paging deterministic.
     const PAGE_SIZE = 1000;
-    const rows: { id: string; meeting_time: string; applicant_id: string | null; complete: boolean; duration_minutes: number }[] = [];
+    const rows: { id: string; meeting_time: string; applicant_id: string | null; complete: boolean; duration_minutes: number; location: string | null }[] = [];
     for (let from = 0; ; from += PAGE_SIZE) {
       const { data: page } = await supabase
         .from("coffee_chats")
-        .select("id, meeting_time, applicant_id, complete, duration_minutes")
+        .select("id, meeting_time, applicant_id, complete, duration_minutes, location")
         .eq("member_id", user.id)
         .gte("meeting_time", rangeStart.toISOString())
         .lt("meeting_time", addDays(rangeEnd, 1).toISOString())
@@ -253,7 +299,7 @@ export default function ManagerCoffeeChatsPage() {
     if (!rows.length) {
       setUpcomingSlots([]);
       setDbSlots(new Map());
-      setBookedHours(new Map());
+      setBookedSubSlots(new Map());
       setSelected(new Map());
       setLoading(false);
       return;
@@ -262,10 +308,12 @@ export default function ManagerCoffeeChatsPage() {
     // Build upcoming slots grouped by the exact sub-slot meeting_time.
     const grouped = new Map<string, { id: string; applicant_id: string | null; complete: boolean }[]>();
     const exactDuration = new Map<string, number>();
+    const exactLocation = new Map<string, string | null>();
     for (const row of rows) {
       if (!grouped.has(row.meeting_time)) grouped.set(row.meeting_time, []);
       grouped.get(row.meeting_time)!.push({ id: row.id, applicant_id: row.applicant_id, complete: row.complete });
       if (!exactDuration.has(row.meeting_time)) exactDuration.set(row.meeting_time, row.duration_minutes);
+      if (row.location) exactLocation.set(row.meeting_time, row.location);
     }
 
     const applicantIds = [...new Set(rows.map((r) => r.applicant_id).filter((id): id is string => id !== null))];
@@ -293,6 +341,7 @@ export default function ManagerCoffeeChatsPage() {
         duration_minutes: exactDuration.get(meeting_time) ?? 30,
         capacity: entries.length,
         filled: filled.length,
+        location: exactLocation.get(meeting_time) ?? null,
         attendees: filled.map((e) => ({
           id: e.id,
           user_id: e.applicant_id,
@@ -304,23 +353,28 @@ export default function ManagerCoffeeChatsPage() {
     }
     setUpcomingSlots(upcoming);
 
-    // Pre-populate the grid at sub-slot granularity. Pass 1: any hour with a
-    // booked seat is locked whole (so booked/new segments can't overlap),
-    // tagged with its stored duration for rendering. Pass 2: every unbooked
-    // sub-slot in an unlocked hour becomes an editable segment keyed by its
-    // exact meeting_time.
+    // Pre-populate the grid at sub-slot granularity. Pass 1: any sub-slot
+    // (exact meeting_time) with a booked seat is locked — but only itself, not
+    // its whole hour. Pass 2: every unbooked sub-slot that is NOT part of a
+    // booked sub-slot becomes an editable segment keyed by its meeting_time;
+    // unbooked sub-slots in an hour that also contains a booking are included
+    // too (they share that hour's frozen duration).
+    // Normalize meeting_time to the canonical ISO (…Z) form that subKey()
+    // produces, so drag/toggle key lookups match the loaded keys. (Postgres
+    // returns timestamptz as e.g. …+00:00, which is a different string.)
+    const norm = (iso: string) => new Date(iso).toISOString();
     const booked = new Map<string, Duration>();
     for (const row of rows) {
-      if (row.applicant_id !== null) booked.set(hourKeyOf(row.meeting_time), row.duration_minutes as Duration);
+      if (row.applicant_id !== null) booked.set(norm(row.meeting_time), row.duration_minutes as Duration);
     }
     const dbMap = new Map<string, Duration>();
     for (const row of rows) {
       if (row.applicant_id !== null) continue;
-      if (booked.has(hourKeyOf(row.meeting_time))) continue;
-      dbMap.set(row.meeting_time, row.duration_minutes as Duration);
+      if (booked.has(norm(row.meeting_time))) continue; // open companion seat of a booked sub-slot: locked with it
+      dbMap.set(norm(row.meeting_time), row.duration_minutes as Duration);
     }
     setDbSlots(dbMap);
-    setBookedHours(booked);
+    setBookedSubSlots(booked);
     setSelected(new Map(dbMap));
     setLoading(false);
   }, [rangeStart, rangeEnd]);
@@ -372,10 +426,25 @@ export default function ManagerCoffeeChatsPage() {
     setSavingWindow(false);
   };
 
-  // An hour can have its availability changed only if it's inside the window,
-  // not in the past, and not locked by a booking.
+  // An hour's availability can be edited if it's inside the window and not in
+  // the past. A booking no longer locks the whole hour — it only locks its own
+  // sub-slot (see bookedSubSlots / lockedDivByHour).
   const isEditable = (date: Date, hour: number) =>
-    inRange(date) && !isPast(date, hour) && !bookedHours.has(slotKey(date, hour));
+    inRange(date) && !isPast(date, hour);
+
+  // Toggle a single sub-slot on/off. Used to edit the open sub-slots of a
+  // partially-booked (frozen-duration) hour by clicking, independent of the
+  // current brush — the brush drag skips those hours.
+  const toggleSubSlot = (date: Date, hour: number, offsetMin: number, duration: Duration) => {
+    if (!isEditable(date, hour)) return;
+    const key = subKey(date, hour, offsetMin);
+    setSelected((prev) => {
+      const next = new Map(prev);
+      if (next.has(key)) next.delete(key);
+      else next.set(key, duration);
+      return next;
+    });
+  };
 
   // Begin a drag from a segment. `bi` is the brush-segment index the pointer is
   // over. The anchor's current state picks the mode: start on an empty segment
@@ -416,6 +485,10 @@ export default function ManagerCoffeeChatsPage() {
             const hour = HOURS[hi];
             if (hour === undefined || !isEditable(date, hour)) continue;
             const hk = slotKey(date, hour);
+            // Hours that contain a booking keep a frozen duration and are edited
+            // by clicking their individual sub-slots (toggleSubSlot), not by the
+            // brush drag — skip them here so the drag never re-splits them.
+            if (lockedDivByHour.has(hk)) continue;
             const curDur = fillsByHour.get(hk)?.duration;
             const foreign = curDur !== undefined && curDur !== brushDuration;
             if (dragState.mode === "select") {
@@ -438,7 +511,7 @@ export default function ManagerCoffeeChatsPage() {
     };
     window.addEventListener("pointerup", commit);
     return () => window.removeEventListener("pointerup", commit);
-  }, [dragState, dragCurrent, weekDates, bookedHours, brushDuration, div, fillsByHour]);
+  }, [dragState, dragCurrent, weekDates, bookedSubSlots, lockedDivByHour, brushDuration, div, fillsByHour]);
 
   // Tooltip data: every upcoming sub-slot, grouped by the hour tile it falls
   // inside (one hour tile can now contain several real sub-slot times).
@@ -501,13 +574,12 @@ export default function ManagerCoffeeChatsPage() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setSaving(false); return; }
 
-    // Writes stay hour-granular: for each hour whose layout changed, wipe its
-    // unbooked rows and rebuild from the current segments. This correctly
-    // handles a re-split (e.g. 20m → 30m rewrites the offset set and per-slot
-    // seat count) that a per-segment diff would miss.
     const dirty = dirtyHours();
+    const loc = defaultLocation.trim() || null;
 
-    // Range-delete every unbooked row within an hour.
+    // Range-delete every unbooked row within an hour (used only for "clean"
+    // hours with no bookings — a partially-booked hour is diffed per sub-slot
+    // instead so booked seats and their open companions survive).
     const deleteHour = (hourKeyIso: string) => {
       const start = new Date(hourKeyIso);
       const end = new Date(start.getTime() + 60 * 60 * 1000);
@@ -520,7 +592,7 @@ export default function ManagerCoffeeChatsPage() {
         .is("applicant_id", null);
     };
 
-    // One row per seat, for only the offsets currently selected in the hour.
+    // One row per seat for a single sub-slot offset.
     const buildRows = (hourKeyIso: string, duration: Duration, offsets: number[]) => {
       const start = new Date(hourKeyIso);
       const seats = SEATS_PER_SUBSLOT[duration];
@@ -534,16 +606,39 @@ export default function ManagerCoffeeChatsPage() {
           applicant_id: null,
           complete: false,
           duration_minutes: duration,
+          location: loc,
         }));
       });
     };
 
-    for (const hk of dirty) await deleteHour(hk);
+    // Delete the open seats of a single sub-slot (leaves any booked seat).
+    const removeSubSlot = (meetingTimeIso: string) =>
+      supabase.from("coffee_chats").delete()
+        .eq("member_id", user.id).eq("meeting_time", meetingTimeIso).is("applicant_id", null);
 
-    const rowsToInsert = [...dirty].flatMap((hk) => {
-      const f = fillsByHour.get(hk);
-      return f ? buildRows(hk, f.duration, [...f.offsets]) : [];
-    });
+    const rowsToInsert: Record<string, unknown>[] = [];
+    for (const hk of dirty) {
+      if (lockedDivByHour.has(hk)) {
+        // Partially-booked hour: diff unbooked offsets at the frozen duration.
+        // Never range-delete (would wipe booked seats' open companions).
+        const D = lockedDivByHour.get(hk)!;
+        const desired = fillsByHour.get(hk)?.offsets ?? new Set<number>();
+        const current = new Set<number>();
+        for (const k of dbSlots.keys()) if (hourKeyOf(k) === hk) current.add(new Date(k).getMinutes());
+        const subSlotIso = (off: number) => {
+          const d = new Date(hk);
+          d.setMinutes(off, 0, 0);
+          return d.toISOString();
+        };
+        for (const off of desired) if (!current.has(off)) rowsToInsert.push(...buildRows(hk, D, [off]));
+        for (const off of current) if (!desired.has(off)) await removeSubSlot(subSlotIso(off));
+      } else {
+        // Clean hour: wipe and rebuild from the current segments.
+        await deleteHour(hk);
+        const f = fillsByHour.get(hk);
+        if (f) rowsToInsert.push(...buildRows(hk, f.duration, [...f.offsets]));
+      }
+    }
     if (rowsToInsert.length > 0) {
       await supabase.from("coffee_chats").insert(rowsToInsert);
     }
@@ -587,9 +682,10 @@ export default function ManagerCoffeeChatsPage() {
         for (let date = new Date(rangeStart); date < rangeEndExclusive; date = addDays(date, 1)) {
           for (const hour of HOURS) {
             const hk = slotKey(date, hour);
-            // Skip locked/out-of-range/past hours and any hour already painted.
+            // Skip out-of-range/past hours, hours already painted, and any hour
+            // that contains a booking (its division is frozen).
             const alreadyFilled = [...next.keys()].some((k) => hourKeyOf(k) === hk);
-            if (!isEditable(date, hour) || alreadyFilled) continue;
+            if (!isEditable(date, hour) || alreadyFilled || lockedDivByHour.has(hk)) continue;
             const slotStart = new Date(date);
             slotStart.setHours(hour, 0, 0, 0);
             const slotEnd = new Date(slotStart.getTime() + 60 * 60 * 1000);
@@ -614,6 +710,81 @@ export default function ManagerCoffeeChatsPage() {
       setSyncing(false);
     }
   };
+
+  // Clear every open (unbooked) availability slot in the whole window. Booked
+  // sub-slots are left untouched.
+  const clearAvailability = async () => {
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return false;
+    const { error } = await supabase
+      .from("coffee_chats")
+      .delete()
+      .eq("member_id", user.id)
+      .is("applicant_id", null)
+      .gte("meeting_time", rangeStart.toISOString())
+      .lt("meeting_time", rangeEndExclusive.toISOString());
+    if (error) return false;
+    await load();
+  };
+
+  // Host cancels one booking: notify the applicant first (the row still binds
+  // both parties), then release the seat.
+  const cancelBooking = async () => {
+    if (!cancelTarget) return false;
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return false;
+    await supabase.rpc("notify_coffee_chat_counterparty", {
+      p_chat_id: cancelTarget.id,
+      p_type: "chat_cancelled_by_host",
+      p_message: cancelMessage.trim() || null,
+    });
+    const { error } = await supabase
+      .from("coffee_chats")
+      .update({ applicant_id: null })
+      .eq("id", cancelTarget.id)
+      .eq("member_id", user.id);
+    if (error) return false;
+    setCancelMessage("");
+    await load();
+  };
+
+  // Set / update the meeting location for one booked sub-slot (all its seats),
+  // then notify each attendee.
+  const saveSlotLocation = async () => {
+    if (!locationTarget) return false;
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return false;
+    const value = locationDraft.trim() || null;
+    const { error } = await supabase
+      .from("coffee_chats")
+      .update({ location: value })
+      .eq("member_id", user.id)
+      .eq("meeting_time", locationTarget.meeting_time);
+    if (error) return false;
+    if (value) {
+      const type = locationTarget.hadLocation ? "location_updated" : "location_added";
+      for (const id of locationTarget.attendeeIds) {
+        await supabase.rpc("notify_coffee_chat_counterparty", { p_chat_id: id, p_type: type });
+      }
+    }
+    await load();
+  };
+
+  const saveDefaultLocation = async () => {
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    setSavingDefaultLocation(true);
+    const value = draftDefaultLocation.trim() || null;
+    await supabase.from("members").update({ default_chat_location: value }).eq("user_id", user.id);
+    setDefaultLocation(value ?? "");
+    setSavingDefaultLocation(false);
+  };
+
+  const defaultLocationDirty = draftDefaultLocation.trim() !== defaultLocation.trim();
 
   return (
     <div className="w-full max-w-3xl mx-auto p-6 flex flex-col gap-10">
@@ -686,6 +857,13 @@ export default function ManagerCoffeeChatsPage() {
               </button>
             )}
             <button
+              onClick={() => setClearOpen(true)}
+              disabled={saving || (selected.size === 0 && dbSlots.size === 0)}
+              className="rounded-md border border-red-500/40 text-red-500 px-3 py-1.5 text-xs font-medium hover:bg-red-500/10 transition-colors disabled:opacity-30"
+            >
+              Clear all
+            </button>
+            <button
               onClick={handleSave}
               disabled={!hasChanges || saving}
               className="rounded-md bg-foreground text-background px-3 py-1.5 text-xs font-medium hover:opacity-80 transition-opacity disabled:opacity-30"
@@ -715,6 +893,25 @@ export default function ManagerCoffeeChatsPage() {
           <span className="text-xs text-muted-foreground">
             (drag on the grid to paint {brushDuration}-minute segments)
           </span>
+        </div>
+
+        {/* Default meeting location / link — inherited by newly-saved slots */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <MapPin size={14} className="text-muted-foreground" />
+          <input
+            type="text"
+            value={draftDefaultLocation}
+            onChange={(e) => setDraftDefaultLocation(e.target.value)}
+            placeholder="Default location or meeting link (e.g. Zoom URL)"
+            className="flex-1 min-w-[16rem] border rounded-md px-3 py-1.5 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+          <button
+            onClick={saveDefaultLocation}
+            disabled={savingDefaultLocation || !defaultLocationDirty}
+            className="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-accent transition-colors disabled:opacity-30"
+          >
+            {savingDefaultLocation ? "Saving…" : "Save default"}
+          </button>
         </div>
 
         {syncError && <p className="text-sm text-red-500">{syncError}</p>}
@@ -766,23 +963,23 @@ export default function ManagerCoffeeChatsPage() {
                 const lastHour = hi === HOURS.length - 1;
                 return (
                 <div key={hour} className="grid grid-cols-[3.5rem_repeat(7,1fr)] gap-1">
-                  <div className="flex items-start justify-end pr-2 pt-0.5">
-                    <span className="text-xs text-muted-foreground leading-none">{formatHour(hour)}</span>
+                  <div className="flex items-start justify-end pr-2">
+                    <span className="text-xs text-muted-foreground leading-none -translate-y-1/2">{formatHour(hour)}</span>
                   </div>
                   {weekDates.map((date, di) => {
                     const hk = slotKey(date, hour);
                     const outOfRange = !inRange(date);
                     const past = isPast(date, hour);
-                    const booked = bookedHours.has(hk);
-                    const bookedDur = bookedHours.get(hk);
-                    const infos = tileSlotInfos.get(hk) ?? [];
+                    const bookedInfos = (tileSlotInfos.get(hk) ?? []).filter((i) => i.filled > 0);
                     const fill = fillsByHour.get(hk);
+                    const lockedDur = lockedDivByHour.get(hk);
+                    const bookedOffsets = bookedOffsetsByHour.get(hk);
 
                     // Continuous-column framing: full side borders, rounded only
                     // at the very top/bottom, hairline separators between hours.
                     const frame =
                       `border-x border-foreground/50 ${firstHour ? "border-t rounded-t-md" : ""} ` +
-                      (lastHour ? "border-b rounded-b-md" : "border-b border-b-foreground/15");
+                      (lastHour ? "border-b rounded-b-md" : "border-b-2 border-b-foreground/30");
 
                     if (outOfRange) {
                       return (
@@ -790,44 +987,60 @@ export default function ManagerCoffeeChatsPage() {
                       );
                     }
 
-                    if (booked) {
-                      return (
-                        <div key={di} className="relative group">
-                          <div className={`flex h-9 items-center justify-center bg-blue-600 text-white/80 cursor-not-allowed ${frame}`}>
-                            <Lock size={12} />
-                            {bookedDur !== undefined && (
-                              <span className="ml-1 text-[10px] font-semibold leading-none">{bookedDur}m</span>
-                            )}
-                          </div>
-                          {infos.length > 0 && <SlotTooltip infos={infos} />}
-                        </div>
-                      );
-                    }
-
-                    // Editable (future) or past cell — rendered as stacked
-                    // segments at the hour's own split (an empty hour previews
-                    // the brush split). Each own-segment maps to the brush
-                    // segment covering its start, so drag math (in brush space)
-                    // works regardless of how the cell is split, and existing
-                    // fills keep their own duration/color during a drag.
-                    const cellDur = fill ? fill.duration : brushDuration;
+                    // A booked sub-slot freezes the hour's duration; otherwise
+                    // the cell renders at its own fill split (or the brush split
+                    // when empty). Each own-segment maps to the brush segment
+                    // covering its start, so drag math (in brush space) works
+                    // regardless of the cell's split.
+                    const cellDur = lockedDur ?? (fill ? fill.duration : brushDuration);
                     const cellDiv = DIVISION[cellDur];
                     const foreign = fill !== undefined && fill.duration !== brushDuration;
+                    // A booked hour keeps a frozen duration and is edited by
+                    // clicking its open sub-slots — the brush drag skips it.
+                    const hourLocked = lockedDur !== undefined;
                     const hourFineStart = hi * div;
                     const cellInDrag =
                       !!dragRect &&
                       di >= dragRect.d0 && di <= dragRect.d1 &&
                       dragRect.f0 <= hourFineStart + div - 1 && dragRect.f1 >= hourFineStart &&
-                      isEditable(date, hour);
+                      isEditable(date, hour) && !past && !hourLocked;
 
                     return (
                       <div key={di} className="relative group">
                         <div className={`flex flex-col h-9 overflow-hidden ${past ? "opacity-40 cursor-not-allowed" : ""} ${frame}`}>
                           {Array.from({ length: cellDiv }, (_, si) => {
+                            const offset = si * cellDur;
+                            const locked = !!bookedOffsets?.has(offset);
+                            if (locked) {
+                              // Booked sub-slot: locked, non-interactive.
+                              return (
+                                <div
+                                  key={si}
+                                  className={`flex-1 flex items-center justify-center ${BOOKED_COLOR[cellDur]} text-white/85 cursor-not-allowed ${si ? "border-t border-t-white/20" : ""}`}
+                                >
+                                  <Lock size={10} />
+                                </div>
+                              );
+                            }
+                            const existing = !!fill && fill.offsets.has(offset);
+
+                            // Open sub-slot inside a booked hour: click to toggle
+                            // at the hour's frozen duration (no brush drag here).
+                            if (hourLocked) {
+                              return (
+                                <div
+                                  key={si}
+                                  onClick={past ? undefined : () => toggleSubSlot(date, hour, offset, cellDur)}
+                                  className={`flex-1 touch-none transition-colors ${si ? "border-t border-t-foreground/10" : ""} ${
+                                    past ? "" : "cursor-pointer"
+                                  } ${existing ? DURATION_COLOR[cellDur] : past ? "" : "hover:bg-accent"}`}
+                                />
+                              );
+                            }
+
                             // Brush segment this own-segment's start falls in.
-                            const bi = Math.floor((si * cellDur) / brushDuration);
+                            const bi = Math.floor(offset / brushDuration);
                             const segInDrag = cellInDrag && dragRect!.f0 <= hourFineStart + bi && dragRect!.f1 >= hourFineStart + bi;
-                            const existing = !!fill && fill.offsets.has(si * cellDur);
                             let filled: boolean;
                             if (cellInDrag) {
                               if (dragState!.mode === "select") filled = foreign ? segInDrag : (segInDrag || existing);
@@ -848,6 +1061,7 @@ export default function ManagerCoffeeChatsPage() {
                             );
                           })}
                         </div>
+                        {bookedInfos.length > 0 && <SlotTooltip infos={bookedInfos} />}
                       </div>
                     );
                   })}
@@ -865,10 +1079,10 @@ export default function ManagerCoffeeChatsPage() {
             </span>
           ))}
           <span className="flex items-center gap-1.5">
-            <span className="inline-flex items-center justify-center w-3 h-3 rounded-sm bg-blue-600 text-white/80">
+            <span className="inline-flex items-center justify-center w-3 h-3 rounded-sm bg-green-700 text-white/85">
               <Lock size={8} />
             </span>{" "}
-            Booked
+            Booked (darker + lock)
           </span>
         </div>
       </div>
@@ -900,6 +1114,26 @@ export default function ManagerCoffeeChatsPage() {
                   <span className={`text-sm font-semibold tabular-nums ${slot.filled === slot.capacity ? "text-red-500" : "text-green-600"}`}>
                     {slot.filled}/{slot.capacity}
                   </span>
+                </div>
+                <div className="flex items-center gap-1.5 text-xs">
+                  <MapPin size={12} className="text-muted-foreground flex-shrink-0" />
+                  <span className={`truncate ${slot.location ? "text-foreground" : "text-muted-foreground italic"}`}>
+                    {slot.location || "No location set"}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLocationTarget({
+                        meeting_time: slot.meeting_time,
+                        attendeeIds: slot.attendees.map((a) => a.id),
+                        hadLocation: !!slot.location,
+                      });
+                      setLocationDraft(slot.location ?? defaultLocation);
+                    }}
+                    className="text-muted-foreground hover:text-foreground underline decoration-dotted underline-offset-2"
+                  >
+                    {slot.location ? "Edit" : "Add"}
+                  </button>
                 </div>
                 {slot.attendees.length > 0 ? (
                   <div className="flex flex-wrap gap-1.5 pt-1">
@@ -933,6 +1167,14 @@ export default function ManagerCoffeeChatsPage() {
                         >
                           <Check size={10} />
                         </button>
+                        <button
+                          type="button"
+                          onClick={() => { setCancelTarget({ id: a.id, name: a.name, meeting_time: slot.meeting_time }); setCancelMessage(""); }}
+                          title="Cancel this booking"
+                          className="flex items-center justify-center w-4 h-4 rounded-full text-red-500 hover:bg-red-500/15 transition-colors"
+                        >
+                          <X size={10} />
+                        </button>
                       </div>
                     ))}
                   </div>
@@ -944,6 +1186,52 @@ export default function ManagerCoffeeChatsPage() {
           })}
         </div>
       ) : null}
+
+      <ConfirmDialog
+        open={clearOpen}
+        onOpenChange={setClearOpen}
+        title="Clear all availability?"
+        description="This removes every open slot you've offered across the whole window. Booked chats are kept. This can't be undone."
+        confirmLabel="Clear availability"
+        onConfirm={clearAvailability}
+      />
+
+      <ConfirmDialog
+        open={cancelTarget !== null}
+        onOpenChange={(o) => { if (!o) setCancelTarget(null); }}
+        title="Cancel this booking?"
+        description={cancelTarget
+          ? `Cancel ${cancelTarget.name}'s coffee chat on ${new Date(cancelTarget.meeting_time).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}? They'll be notified and the slot frees up.`
+          : ""}
+        confirmLabel="Cancel booking"
+        onConfirm={cancelBooking}
+      >
+        <textarea
+          value={cancelMessage}
+          onChange={(e) => setCancelMessage(e.target.value)}
+          placeholder="Optional message to the applicant (e.g. a reason, or to suggest they rebook)…"
+          rows={3}
+          className="w-full border rounded-md px-3 py-2 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-ring resize-none"
+        />
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        open={locationTarget !== null}
+        onOpenChange={(o) => { if (!o) setLocationTarget(null); }}
+        title="Meeting location"
+        description="Set a location or meeting link for this chat. Attendees are notified and it shows on their booking."
+        confirmLabel="Save location"
+        destructive={false}
+        onConfirm={saveSlotLocation}
+      >
+        <input
+          type="text"
+          value={locationDraft}
+          onChange={(e) => setLocationDraft(e.target.value)}
+          placeholder="e.g. https://zoom.us/j/… or Soda Hall 3rd floor"
+          className="w-full border rounded-md px-3 py-2 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+        />
+      </ConfirmDialog>
     </div>
   );
 }

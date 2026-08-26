@@ -1,12 +1,14 @@
 import { AppNavbar } from "@/components/app-navbar";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { PortalMetaProvider } from "@/components/portal-meta-provider";
+import { NotificationsProvider } from "@/components/notifications-provider";
 
 // Shared shell for the authenticated app: home, portals, the applicant flow,
 // and the manager section. Replaces the old apply/ and protected/ layouts.
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <PortalMetaProvider>
+      <NotificationsProvider>
       <main className="flex min-h-svh flex-col">
         <AppNavbar />
         {/* Content region fills the space between the sticky header and the
@@ -20,6 +22,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </div>
         </footer>
       </main>
+      </NotificationsProvider>
     </PortalMetaProvider>
   );
 }

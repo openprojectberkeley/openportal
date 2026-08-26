@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ProfileDialog } from "@/components/profile-dialog";
 import { useRoleSim } from "@/components/role-simulation-provider";
+import { NotificationBell } from "@/components/notification-bell";
 
 type MemberInfo = {
   userId: string;
@@ -71,6 +72,8 @@ export function AppNavbar() {
             <Link href="/">Open Portal</Link>
           </div>
           {member && (
+            <div className="flex items-center gap-1.5">
+            <NotificationBell />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button className="h-9 w-9 rounded-full bg-foreground text-background flex items-center justify-center text-xs font-semibold hover:opacity-80 transition-opacity focus:outline-none overflow-hidden">
@@ -103,6 +106,7 @@ export function AppNavbar() {
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
+            </div>
           )}
         </div>
       </nav>

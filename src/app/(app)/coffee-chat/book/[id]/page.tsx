@@ -181,6 +181,13 @@ function BookingPageInner() {
       return;
     }
 
+    // Notify the host of the new booking (row now binds applicant = caller).
+    await supabase.rpc("notify_coffee_chat_counterparty", {
+      p_chat_id: openRow.id,
+      p_type: "chat_booked",
+      p_message: null,
+    });
+
     // Reset transient state before leaving. Next keeps this client page alive
     // in its Router Cache (cacheComponents), so if it's reused on a later visit
     // without these resets the button comes back stuck on "Booking…".
