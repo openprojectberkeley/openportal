@@ -5,6 +5,7 @@ import { Suspense, useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { useRefreshOnReturn } from "@/lib/use-refresh-on-return";
+import { loadCoffeeChatWindowBounds } from "@/lib/coffee-chat-window";
 import { AvailabilitySkeleton } from "@/components/skeletons";
 
 type PersonInfo = {
@@ -64,11 +65,20 @@ function BookingPageInner() {
   const loadSlots = useCallback(async () => {
     const supabase = createClient();
 
+    // Only offer slots that fall inside the current coffee-chat window.
+    // Availability created under an older, wider window stays stored but must
+    // not be bookable once the window is cut back. Lower bound is the later of
+    // "now" and the window start so past slots are still excluded.
+    const { startIso, endExclusiveIso } = await loadCoffeeChatWindowBounds(supabase);
+    const nowIso = new Date().toISOString();
+    const lowerIso = startIso > nowIso ? startIso : nowIso;
+
     const { data: rows } = await supabase
       .from("coffee_chats")
       .select("meeting_time, applicant_id, duration_minutes")
       .eq("member_id", id)
-      .gte("meeting_time", new Date().toISOString())
+      .gte("meeting_time", lowerIso)
+      .lt("meeting_time", endExclusiveIso)
       .order("meeting_time", { ascending: true });
 
     // Per meeting_time: count open (unclaimed) rows, total seats (capacity),
