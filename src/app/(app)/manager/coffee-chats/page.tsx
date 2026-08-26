@@ -16,7 +16,19 @@ const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
 
 const HOURS = Array.from({ length: 17 }, (_, i) => i + 7); // 7am–12am (last slot 11pm–midnight)
 const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-const REQUIRED_TOTAL = 30;
+const SATURDAY_INDEX = 5; // index into DAY_LABELS / weekDates
+
+// Formal coffee-chat availability requirements (replaces the old, informal
+// "30 hrs total" indicator):
+//  - any day a host opens up needs at least this many bookable seats
+//    (weighted by SEATS_PER_SUBSLOT, so e.g. 1×30min + 1×15min = 3+1 = 4)
+const MIN_SEATS_PER_DAY = 4;
+//  - hosts with fewer than this many booked chats in the current window
+//    should keep Saturdays open (soft warning, not enforced on Save)
+const SATURDAY_REQUIRED_BELOW = 10;
+//  - once a host reaches this many booked chats, they may close out any
+//    remaining unbooked availability
+const MAY_CLOSE_AT = 20;
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -177,6 +189,10 @@ export default function ManagerCoffeeChatsPage() {
   // hour stay editable at the hour's (now frozen) duration.
   const [bookedSubSlots, setBookedSubSlots] = useState<Map<string, Duration>>(new Map());
   const [saving, setSaving] = useState(false);
+  // Total coffee chats booked with this host in the current window (every row
+  // with an applicant, not just upcoming ones) — drives the Saturday/close
+  // warnings below.
+  const [bookedCount, setBookedCount] = useState(0);
   const { openProfile } = usePersonProfile();
 
   // Host default meeting location / link, applied to newly-saved availability.
@@ -295,6 +311,10 @@ export default function ManagerCoffeeChatsPage() {
       rows.push(...page);
       if (page.length < PAGE_SIZE) break;
     }
+
+    // Every row with an applicant is one booked coffee chat with this host,
+    // regardless of whether it's past or upcoming.
+    setBookedCount(rows.filter((r) => r.applicant_id !== null).length);
 
     if (!rows.length) {
       setUpcomingSlots([]);
@@ -527,8 +547,20 @@ export default function ManagerCoffeeChatsPage() {
   // the noise of every open hour.
   const bookedUpcoming = upcomingSlots.filter((s) => s.filled > 0);
 
-  // Total offered availability, in hours (sum of every segment's duration).
-  const totalHours = [...selected.values()].reduce((a, d) => a + d, 0) / 60;
+  // Total seats offered (booked + open) per local calendar day across the
+  // whole window — a sub-slot's seat count is fixed by its duration
+  // (SEATS_PER_SUBSLOT) regardless of how many of those seats are booked, so
+  // booked and open sub-slots are weighted the same way here. Drives the
+  // per-day minimum-seats badge in the grid header.
+  const seatsByDate = new Map<string, number>();
+  for (const [k, dur] of selected) {
+    const ds = toDateInputValue(new Date(k));
+    seatsByDate.set(ds, (seatsByDate.get(ds) ?? 0) + SEATS_PER_SUBSLOT[dur]);
+  }
+  for (const [k, dur] of bookedSubSlots) {
+    const ds = toDateInputValue(new Date(k));
+    seatsByDate.set(ds, (seatsByDate.get(ds) ?? 0) + SEATS_PER_SUBSLOT[dur]);
+  }
 
   // Normalized bounds of the in-progress drag rectangle (day range × fine
   // segment range), used to preview which segments the drag would affect.
@@ -843,9 +875,23 @@ export default function ManagerCoffeeChatsPage() {
         <div className="flex items-center justify-between flex-wrap gap-2">
           <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Your Availability</h2>
           <div className="flex items-center gap-3">
-            <span className={`text-sm font-medium tabular-nums ${totalHours >= REQUIRED_TOTAL ? "text-green-600" : "text-amber-500"}`}>
-              {totalHours.toFixed(1)} / {REQUIRED_TOTAL} hrs total availability
+            <span className="text-sm font-medium tabular-nums">
+              {bookedCount} coffee chat{bookedCount === 1 ? "" : "s"} booked this window
             </span>
+            {bookedCount < SATURDAY_REQUIRED_BELOW && (
+              <span className="text-xs text-amber-500">
+                Under {SATURDAY_REQUIRED_BELOW} booked — keep Saturdays open
+              </span>
+            )}
+            {bookedCount >= MAY_CLOSE_AT && (
+              <button
+                onClick={() => setClearOpen(true)}
+                disabled={saving || (selected.size === 0 && dbSlots.size === 0)}
+                className="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-accent transition-colors disabled:opacity-30"
+              >
+                Close remaining availability
+              </button>
+            )}
             {GOOGLE_CLIENT_ID && (
               <button
                 onClick={handleSync}
@@ -946,14 +992,30 @@ export default function ManagerCoffeeChatsPage() {
             {/* Day headers */}
             <div className="grid grid-cols-[3.5rem_repeat(7,1fr)] gap-1 mb-1">
               <div />
-              {weekDates.map((date, i) => (
-                <div key={i} className={`text-center transition-opacity ${inRange(date) ? "" : "opacity-30"}`}>
+              {weekDates.map((date, i) => {
+                const seats = seatsByDate.get(toDateInputValue(date)) ?? 0;
+                const belowMin = seats > 0 && seats < MIN_SEATS_PER_DAY;
+                const dayEnd = new Date(date);
+                dayEnd.setHours(23, 59, 59, 999);
+                const saturdayNeeded =
+                  i === SATURDAY_INDEX && seats === 0 && bookedCount < SATURDAY_REQUIRED_BELOW && dayEnd >= now;
+                return (
+                  <div key={i} className={`text-center transition-opacity ${inRange(date) ? "" : "opacity-30"}`}>
                     <p className="text-xs text-muted-foreground">{DAY_LABELS[i]}</p>
                     <p className={`text-sm font-semibold ${date.toDateString() === now.toDateString() ? "text-blue-500" : ""}`}>
                       {date.getDate()}
                     </p>
+                    {inRange(date) && seats > 0 && (
+                      <p className={`text-[10px] tabular-nums ${belowMin ? "text-amber-500" : "text-green-600"}`}>
+                        {seats}{belowMin ? `/${MIN_SEATS_PER_DAY}` : ""} seat{seats === 1 ? "" : "s"}
+                      </p>
+                    )}
+                    {inRange(date) && saturdayNeeded && (
+                      <p className="text-[10px] font-medium text-amber-500">Sat needed</p>
+                    )}
                   </div>
-              ))}
+                );
+              })}
             </div>
 
             {/* Hour rows — no vertical gap, so each day reads as one strip */}
