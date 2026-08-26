@@ -16,8 +16,6 @@ const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
 
 const HOURS = Array.from({ length: 17 }, (_, i) => i + 7); // 7am–12am (last slot 11pm–midnight)
 const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-const SATURDAY_INDEX = 5; // index into DAY_LABELS / weekDates
-
 // Formal coffee-chat availability requirements (replaces the old, informal
 // "30 hrs total" indicator):
 //  - any day a host opens up needs at least this many bookable seats
@@ -995,10 +993,6 @@ export default function ManagerCoffeeChatsPage() {
               {weekDates.map((date, i) => {
                 const seats = seatsByDate.get(toDateInputValue(date)) ?? 0;
                 const belowMin = seats > 0 && seats < MIN_SEATS_PER_DAY;
-                const dayEnd = new Date(date);
-                dayEnd.setHours(23, 59, 59, 999);
-                const saturdayNeeded =
-                  i === SATURDAY_INDEX && seats === 0 && bookedCount < SATURDAY_REQUIRED_BELOW && dayEnd >= now;
                 return (
                   <div key={i} className={`text-center transition-opacity ${inRange(date) ? "" : "opacity-30"}`}>
                     <p className="text-xs text-muted-foreground">{DAY_LABELS[i]}</p>
@@ -1009,9 +1003,6 @@ export default function ManagerCoffeeChatsPage() {
                       <p className={`text-[10px] tabular-nums ${belowMin ? "text-amber-500" : "text-green-600"}`}>
                         {seats}{belowMin ? `/${MIN_SEATS_PER_DAY}` : ""} seat{seats === 1 ? "" : "s"}
                       </p>
-                    )}
-                    {inRange(date) && saturdayNeeded && (
-                      <p className="text-[10px] font-medium text-amber-500">Sat needed</p>
                     )}
                   </div>
                 );
