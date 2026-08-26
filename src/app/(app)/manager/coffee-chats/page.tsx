@@ -1001,7 +1001,7 @@ export default function ManagerCoffeeChatsPage() {
                     </p>
                     {inRange(date) && seats > 0 && (
                       <p className={`text-[10px] tabular-nums ${belowMin ? "text-amber-500" : "text-green-600"}`}>
-                        {seats}{belowMin ? `/${MIN_SEATS_PER_DAY}` : ""} seat{seats === 1 ? "" : "s"}
+                        {seats}/{MIN_SEATS_PER_DAY} seats
                       </p>
                     )}
                   </div>
