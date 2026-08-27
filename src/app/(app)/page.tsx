@@ -122,14 +122,19 @@ export default function HomePage() {
         }
       }
 
-      // Load the portals this user can access (RLS scopes the select to their
-      // portals) plus enough to flag which ones they're an admin of.
-      const [{ data: portalRows }, { data: memberRows }, { data: roleRows }, { data: portalRoleRows }] =
+      // Load the portals this user can access plus enough to flag which ones
+      // they're an admin of. RLS scopes the select, but exec's see-everything
+      // access means the raw list ignores the simulated persona. So we also
+      // gather the user's GENUINE memberships (portal rows, mapped roles, linked
+      // projects) and — whenever the effective view isn't exec — filter the list
+      // to those, so "view as PM/member" faithfully hides portals only exec sees.
+      const [{ data: portalRows }, { data: memberRows }, { data: roleRows }, { data: portalRoleRows }, { data: myProjectRows }] =
         await Promise.all([
-          supabase.from("portals").select("id, name, description, icon, icon_url, color").order("name"),
+          supabase.from("portals").select("id, name, description, icon, icon_url, color, project_id").order("name"),
           supabase.from("portal_members").select("portal_id, is_admin, is_owner").eq("user_id", user.id),
           supabase.from("members_roles").select("role_id").eq("user_id", user.id),
           supabase.from("portal_roles").select("portal_id, role_id, is_admin"),
+          supabase.from("project_members").select("project_id").eq("user_id", user.id),
         ]);
 
       const myRoleIds = new Set((roleRows ?? []).map((r) => r.role_id));
@@ -145,12 +150,35 @@ export default function HomePage() {
         (memberRows ?? []).filter((m) => m.is_owner).map((m) => m.portal_id),
       );
 
+      // Portals the user belongs to independent of exec's blanket access: a
+      // portal_members row, a mapped role of any tier, or membership of the
+      // linked project (covers project portals even if a managed row is missing).
+      const myProjectIds = new Set((myProjectRows ?? []).map((r) => r.project_id));
+      const memberByRow = new Set((memberRows ?? []).map((m) => m.portal_id));
+      const memberByRole = new Set(
+        (portalRoleRows ?? []).filter((pr) => myRoleIds.has(pr.role_id)).map((pr) => pr.portal_id),
+      );
+      const genuineIds = new Set<string>([
+        ...memberByRow,
+        ...memberByRole,
+        ...(portalRows ?? [])
+          .filter((p) => p.project_id && myProjectIds.has(p.project_id))
+          .map((p) => p.id),
+      ]);
+
       setPortals(
-        (portalRows ?? []).map((p) => ({
-          ...p,
-          is_admin: isExec || adminByRow.has(p.id) || adminByRole.has(p.id),
-          is_owner: ownerByRow.has(p.id),
-        })),
+        (portalRows ?? [])
+          .filter((p) => isExec || genuineIds.has(p.id))
+          .map((p) => ({
+            id: p.id,
+            name: p.name,
+            description: p.description,
+            icon: p.icon,
+            icon_url: p.icon_url,
+            color: p.color,
+            is_admin: isExec || adminByRow.has(p.id) || adminByRole.has(p.id),
+            is_owner: ownerByRow.has(p.id),
+          })),
       );
     };
 

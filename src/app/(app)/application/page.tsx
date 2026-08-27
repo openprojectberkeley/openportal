@@ -23,6 +23,7 @@ import { ApplicationPageSkeleton } from "@/components/skeletons";
 import { ProjectApplicationModal } from "@/components/project-application-modal";
 import { useRoleSim } from "@/components/role-simulation-provider";
 import { type Difficulty, DIFFICULTY_LABELS } from "@/lib/projects";
+import { readableTextColor } from "@/lib/portal-color";
 
 type ProjectType = "studio" | "launch";
 
@@ -35,6 +36,9 @@ type Project = {
   difficulty: Difficulty | null;
   estimated_members: number | null;
   num_subteams: number | null;
+  icon: string | null;
+  icon_url: string | null;
+  color: string | null;
 };
 
 type Pm = { user_id: string; name: string };
@@ -120,7 +124,7 @@ export default function ApplicationPage() {
     const [{ data: projectRows }, { data: pmRows }, { data: chatRows }, { data: memberRow }] = await Promise.all([
       supabase
         .from("projects")
-        .select("id, name, type, client, description, difficulty, estimated_members, num_subteams")
+        .select("id, name, type, client, description, difficulty, estimated_members, num_subteams, icon, icon_url, color")
         .order("name"),
       supabase
         .from("project_members")
@@ -573,9 +577,10 @@ function AvailableCard({
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: `avail:${project.id}` });
   // The DragOverlay renders the moving copy; the source just dims in place.
-  const style = { opacity: isDragging ? 0.4 : 1 };
+  const style = { opacity: isDragging ? 0.4 : 1, "--hover-fg": readableTextColor(project.color) } as React.CSSProperties;
   const meta = metaLine(project);
   const met = project.type === "studio" ? studioMet(project.id) : true;
+  const pms = pmMap[project.id] ?? [];
 
   return (
     <div
@@ -584,23 +589,48 @@ function AvailableCard({
       {...attributes}
       {...listeners}
       onClick={() => !full && onAdd(project.id)}
-      className={`border rounded-xl p-3 flex flex-col gap-1.5 bg-background touch-none select-none ${
+      className={`group relative overflow-hidden border rounded-xl p-3 bg-background touch-none select-none ${
         full ? "opacity-50 cursor-not-allowed" : "cursor-grab hover:border-foreground/20 hover:shadow-sm"
       } transition-all`}
     >
-      <div className="flex items-center gap-2">
-        <GripVertical size={14} className="text-muted-foreground/50 flex-shrink-0" />
-        <span className="font-medium text-sm flex-1 min-w-0 truncate">{project.name}</span>
-        {project.client && <span className="text-xs text-muted-foreground">{project.client}</span>}
-      </div>
-      {project.description && <p className="text-xs text-muted-foreground line-clamp-2 pl-6">{project.description}</p>}
-      {meta && <p className="text-[11px] text-muted-foreground/80 pl-6">{meta}</p>}
-      {project.type === "studio" && (
-        <div className={`flex items-center gap-1.5 text-[11px] pl-6 ${met ? "text-green-700 dark:text-green-400" : "text-amber-600 dark:text-amber-500"}`}>
-          {met ? <Check size={12} /> : <Coffee size={12} />}
-          {met ? "Coffee chat complete" : `Coffee chat needed${(pmMap[project.id] ?? []).length ? `: ${(pmMap[project.id] ?? []).map((pm) => pm.name).join(", ")}` : ""}`}
+      {/* Accent swipe: the project's color wipes in from left to right on hover. */}
+      <div
+        className="absolute inset-0 z-0 origin-left scale-x-0 group-hover:scale-x-100 pointer-events-none transition-transform duration-300 ease-out"
+        style={{ backgroundColor: project.color || "hsl(var(--muted-foreground))" }}
+        aria-hidden
+      />
+
+      <div className="relative z-10 flex flex-col gap-1.5 group-hover:text-[var(--hover-fg)] transition-colors">
+        <div className="flex items-center gap-2">
+          <GripVertical size={14} className="text-muted-foreground/50 group-hover:text-[var(--hover-fg)] group-hover:opacity-70 flex-shrink-0" />
+          {project.icon_url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={project.icon_url} alt="" className="h-8 w-8 flex-shrink-0 rounded-lg object-cover" />
+          ) : project.icon ? (
+            <span
+              className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-lg bg-foreground/5"
+              style={{ backgroundColor: project.color || undefined, color: project.color ? readableTextColor(project.color) : undefined }}
+            >
+              {project.icon}
+            </span>
+          ) : null}
+          <span className="font-medium text-sm flex-1 min-w-0 truncate">{project.name}</span>
+          {project.client && <span className="text-xs text-muted-foreground group-hover:text-[var(--hover-fg)] group-hover:opacity-70">{project.client}</span>}
         </div>
-      )}
+        {project.description && <p className="text-xs text-muted-foreground group-hover:text-[var(--hover-fg)] group-hover:opacity-70 pl-6">{project.description}</p>}
+        {meta && <p className="text-[11px] text-muted-foreground/80 group-hover:text-[var(--hover-fg)] group-hover:opacity-70 pl-6">{meta}</p>}
+        {pms.length > 0 && (
+          <p className="text-[11px] text-muted-foreground/80 group-hover:text-[var(--hover-fg)] group-hover:opacity-70 pl-6">
+            PM{pms.length > 1 ? "s" : ""}: {pms.map((pm) => pm.name).join(", ")}
+          </p>
+        )}
+        {project.type === "studio" && (
+          <div className={`flex items-center gap-1.5 text-[11px] pl-6 ${met ? "text-green-700 dark:text-green-400" : "text-amber-600 dark:text-amber-500"}`}>
+            {met ? <Check size={12} /> : <Coffee size={12} />}
+            {met ? "Coffee chat complete" : "Coffee chat needed"}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

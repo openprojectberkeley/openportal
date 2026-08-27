@@ -166,6 +166,11 @@ export function CalendarPanel({ portalId }: Props) {
 
   // Portals the current user can manage events for (exec ⇒ all).
   const [manageablePortals, setManageablePortals] = useState<{ id: string; name: string }[]>([]);
+  // Portals the user genuinely belongs to (member row / role / linked project),
+  // used to filter the aggregate calendar so a simulated non-exec persona doesn't
+  // see events from every portal (RLS returns them all to the real exec user).
+  // null = not resolved yet.
+  const [visiblePortalIds, setVisiblePortalIds] = useState<Set<string> | null>(null);
 
   const [formOpen, setFormOpen] = useState(false);
   const [editingEvent, setEditingEvent] = useState<PortalEvent | null>(null);
@@ -193,12 +198,13 @@ export function CalendarPanel({ portalId }: Props) {
     (async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-      const [{ data: portalRows }, { data: memberRows }, { data: roleRows }, { data: portalRoleRows }] =
+      const [{ data: portalRows }, { data: memberRows }, { data: roleRows }, { data: portalRoleRows }, { data: myProjectRows }] =
         await Promise.all([
-          supabase.from("portals").select("id, name").order("name"),
+          supabase.from("portals").select("id, name, project_id").order("name"),
           supabase.from("portal_members").select("portal_id, is_admin").eq("user_id", user.id),
           supabase.from("members_roles").select("role_id").eq("user_id", user.id),
           supabase.from("portal_roles").select("portal_id, role_id, is_admin"),
+          supabase.from("project_members").select("project_id").eq("user_id", user.id),
         ]);
       const myRoleIds = new Set((roleRows ?? []).map((r) => r.role_id));
       const adminByRole = new Set(
@@ -210,6 +216,18 @@ export function CalendarPanel({ portalId }: Props) {
           .filter((p) => isExec || adminByRow.has(p.id) || adminByRole.has(p.id))
           .map((p) => ({ id: p.id, name: p.name })),
       );
+
+      // Genuine memberships (independent of exec's see-all) for the event filter.
+      const myProjectIds = new Set((myProjectRows ?? []).map((r) => r.project_id));
+      const memberByRow = new Set((memberRows ?? []).map((m) => m.portal_id));
+      const memberByRole = new Set(
+        (portalRoleRows ?? []).filter((pr) => myRoleIds.has(pr.role_id)).map((pr) => pr.portal_id),
+      );
+      setVisiblePortalIds(new Set<string>([
+        ...memberByRow,
+        ...memberByRole,
+        ...(portalRows ?? []).filter((p) => p.project_id && myProjectIds.has(p.project_id)).map((p) => p.id),
+      ]));
     })();
   }, [ready, isExec]);
 
@@ -230,25 +248,35 @@ export function CalendarPanel({ portalId }: Props) {
     [overrides],
   );
 
+  // On the aggregate (dashboard) calendar, hide events from portals the user
+  // doesn't genuinely belong to when viewing as a non-exec persona — RLS returns
+  // all of them to the real exec user, so we filter client-side. A per-portal
+  // calendar (portalId set) and a real/simulated exec view are unfiltered.
+  const visibleEvents = useMemo(() => {
+    if (portalId || isExec) return events;
+    if (visiblePortalIds === null) return [];
+    return events.filter((e) => visiblePortalIds.has(e.portal_id));
+  }, [events, portalId, isExec, visiblePortalIds]);
+
   // Bucket events by local day key for quick lookup while rendering the grid.
   const eventsByDay = useMemo(() => {
     const map = new Map<string, PortalEvent[]>();
-    for (const ev of events) {
+    for (const ev of visibleEvents) {
       const key = dayKey(new Date(ev.start_time));
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(ev);
     }
     return map;
-  }, [events]);
+  }, [visibleEvents]);
 
   // "Upcoming" = the next 5 events from now forward (includes later-today events).
   const upcoming = useMemo(
     () =>
-      events
+      visibleEvents
         .filter((e) => new Date(e.start_time).getTime() >= today.getTime())
         .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
         .slice(0, 5),
-    [events, today],
+    [visibleEvents, today],
   );
 
   const firstOfMonth = new Date(viewYear, viewMonth, 1);
