@@ -13,6 +13,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { IconPicker } from "@/components/icon-picker";
+import { ColorPicker } from "@/components/color-picker";
+import { uploadProjectIcon } from "@/lib/project-icon-upload";
 import { PanelListSkeleton } from "@/components/skeletons";
 import { PersonName } from "@/components/person-profile-provider";
 import { ProjectQuestionsDialog } from "@/components/project-questions-dialog";
@@ -36,6 +39,9 @@ type Project = {
   difficulty: Difficulty | null;
   estimated_members: number | null;
   num_subteams: number | null;
+  icon: string | null;
+  icon_url: string | null;
+  color: string | null;
   members: ProjectMember[];
 };
 
@@ -50,6 +56,9 @@ type ProjectFields = {
   difficulty: Difficulty | "";
   estimated_members: string;
   num_subteams: string;
+  icon: string;
+  iconUrl: string | null;
+  color: string;
 };
 const EMPTY_FIELDS: ProjectFields = {
   name: "",
@@ -59,6 +68,9 @@ const EMPTY_FIELDS: ProjectFields = {
   difficulty: "",
   estimated_members: "",
   num_subteams: "",
+  icon: "",
+  iconUrl: null,
+  color: "",
 };
 
 const toIntOrNull = (s: string) => {
@@ -77,6 +89,9 @@ export function ProjectsPanel({ members }: Props) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [fields, setFields] = useState<ProjectFields>(EMPTY_FIELDS);
+  // Deferred icon image (create flow only): preview URL lives in fields.iconUrl,
+  // the blob is uploaded once the project row — and thus its id — exists.
+  const [iconBlob, setIconBlob] = useState<Blob | null>(null);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [questionsOpen, setQuestionsOpen] = useState(false);
@@ -102,6 +117,7 @@ export function ProjectsPanel({ members }: Props) {
   const openCreate = () => {
     setEditingId(null);
     setFields(EMPTY_FIELDS);
+    setIconBlob(null);
     setFormError(null);
     setDialogOpen(true);
   };
@@ -116,7 +132,11 @@ export function ProjectsPanel({ members }: Props) {
       difficulty: p.difficulty ?? "",
       estimated_members: p.estimated_members != null ? String(p.estimated_members) : "",
       num_subteams: p.num_subteams != null ? String(p.num_subteams) : "",
+      icon: p.icon ?? "",
+      iconUrl: p.icon_url,
+      color: p.color ?? "",
     });
+    setIconBlob(null);
     setFormError(null);
     setDialogOpen(true);
   };
@@ -133,7 +153,7 @@ export function ProjectsPanel({ members }: Props) {
     setSaving(true);
     setFormError(null);
     const supabase = createClient();
-    const payload = {
+    const base = {
       name,
       client: client || null,
       description: fields.description.trim() || null,
@@ -141,9 +161,15 @@ export function ProjectsPanel({ members }: Props) {
       difficulty: fields.difficulty || null,
       estimated_members: toIntOrNull(fields.estimated_members),
       num_subteams: toIntOrNull(fields.num_subteams),
+      icon: fields.icon.trim() || null,
+      color: fields.color.trim() || null,
     };
+    const SELECT =
+      "id, name, client, description, type, difficulty, estimated_members, num_subteams, icon, icon_url, color";
 
     if (editingId) {
+      // Edit uses immediate icon upload, so fields.iconUrl is already a real URL.
+      const payload = { ...base, icon_url: fields.iconUrl || null };
       const { error: updateError } = await supabase
         .from("projects")
         .update({ ...payload, updated_at: new Date().toISOString() })
@@ -154,12 +180,26 @@ export function ProjectsPanel({ members }: Props) {
     } else {
       const { data, error: insertError } = await supabase
         .from("projects")
-        .insert(payload)
-        .select("id, name, client, description, type, difficulty, estimated_members, num_subteams")
+        .insert(base)
+        .select(SELECT)
         .single();
 
       if (insertError) { setFormError(insertError.message); setSaving(false); return; }
-      setProjects((prev) => [...prev, { ...data, members: [] }]);
+      let created = data;
+
+      // Deferred icon image: upload now that the project (and its id) exists.
+      if (iconBlob) {
+        try {
+          const url = await uploadProjectIcon(supabase, created.id, iconBlob);
+          await supabase.from("projects").update({ icon_url: url }).eq("id", created.id);
+          created = { ...created, icon_url: url };
+        } catch (uploadErr) {
+          setFormError(uploadErr instanceof Error ? uploadErr.message : "Icon upload failed. Try again.");
+          setSaving(false);
+          return;
+        }
+      }
+      setProjects((prev) => [...prev, { ...created, members: [] }]);
     }
 
     setSaving(false);
@@ -376,6 +416,23 @@ export function ProjectsPanel({ members }: Props) {
                 value={fields.name}
                 onChange={(e) => setFields((f) => ({ ...f, name: e.target.value }))}
               />
+            </div>
+            <div className="flex gap-3">
+              <div className="flex flex-col gap-1 w-28">
+                <Label>Icon</Label>
+                <IconPicker
+                  value={fields.icon}
+                  onChange={(v) => setFields((f) => ({ ...f, icon: v }))}
+                  imageUrl={fields.iconUrl}
+                  onImageChange={(url) => setFields((f) => ({ ...f, iconUrl: url }))}
+                  onImageBlob={setIconBlob}
+                  projectId={editingId ?? undefined}
+                />
+              </div>
+              <div className="flex flex-col gap-1 flex-1">
+                <Label>Accent color</Label>
+                <ColorPicker value={fields.color} onChange={(v) => setFields((f) => ({ ...f, color: v }))} />
+              </div>
             </div>
             <div className="flex flex-col gap-1">
               <Label>Type</Label>

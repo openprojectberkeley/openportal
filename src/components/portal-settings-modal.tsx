@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { IconPicker } from "@/components/icon-picker";
 import { ColorPicker } from "@/components/color-picker";
 import { ProjectEditDialog } from "@/components/project-edit-dialog";
+import { PortalDefaultIcon } from "@/components/portal-default-icon";
 import { usePortalMeta } from "@/components/portal-meta-provider";
 import { useRoleSim } from "@/components/role-simulation-provider";
 
@@ -46,9 +47,11 @@ export function PortalSettingsModal({ portalId, open, onOpenChange, initial, onM
   const [loading, setLoading] = useState(true);
 
   // Set only for project portals: the linked project's id, enabling the "Edit
-  // project" section below.
+  // project" section below. For project portals the name/icon/color/description
+  // are derived from (and locked to) the project — shown read-only here.
   const [projectId, setProjectId] = useState<string | null>(null);
   const [projectEditOpen, setProjectEditOpen] = useState(false);
+  const isProject = projectId !== null;
 
   // Reseed the form each time the dialog opens.
   useEffect(() => {
@@ -115,6 +118,35 @@ export function PortalSettingsModal({ portalId, open, onOpenChange, initial, onM
     onOpenChange(false);
   };
 
+  // After editing the linked project, re-read its projected fields and push them
+  // to the portal's live meta (cards/header) — the DB already synced the row.
+  const handleProjectSaved = async () => {
+    if (!projectId) return;
+    const supabase = createClient();
+    const { data } = await supabase
+      .from("projects")
+      .select("name, description, icon, icon_url, color")
+      .eq("id", projectId)
+      .maybeSingle();
+    if (!data) return;
+    const next: PortalMeta = {
+      name: data.name ?? "",
+      icon: data.icon ?? "",
+      iconUrl: (data.icon_url as string | null) ?? null,
+      color: data.color ?? "",
+      description: data.description ?? "",
+    };
+    setMeta(next);
+    setPortalMeta(portalId, {
+      name: next.name,
+      icon: next.icon || null,
+      icon_url: next.iconUrl,
+      color: next.color || null,
+      description: next.description || null,
+    });
+    onMetaSaved(next);
+  };
+
   const addRole = async (role: RoleOption) => {
     const supabase = createClient();
     const { error } = await supabase
@@ -156,45 +188,77 @@ export function PortalSettingsModal({ portalId, open, onOpenChange, initial, onM
           <DialogTitle>Portal settings</DialogTitle>
         </DialogHeader>
         <div className="flex flex-col gap-5">
-          {/* Metadata */}
-          <div className="flex flex-col gap-4">
-            <div className="flex flex-col gap-1">
-              <Label htmlFor="ps-name">Name</Label>
-              <Input id="ps-name" value={meta.name} onChange={(e) => setMeta((m) => ({ ...m, name: e.target.value }))} />
+          {/* Metadata. Project portals derive these from the linked project and
+              show them read-only; edit them via "Edit project" below. */}
+          {isProject ? (
+            <div className="flex flex-col gap-3">
+              <div className="flex items-start gap-3">
+                <div className="h-12 w-12 flex-shrink-0 rounded-md border flex items-center justify-center overflow-hidden bg-muted/30">
+                  {meta.iconUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={meta.iconUrl} alt="" className="h-full w-full object-cover" />
+                  ) : meta.icon ? (
+                    <span className="text-2xl leading-none">{meta.icon}</span>
+                  ) : (
+                    <PortalDefaultIcon className="h-6 w-6 text-muted-foreground" style={{ color: meta.color || undefined }} />
+                  )}
+                </div>
+                <div className="flex flex-col gap-1 min-w-0">
+                  <span className="font-medium text-sm">{meta.name}</span>
+                  {meta.description && <span className="text-xs text-muted-foreground">{meta.description}</span>}
+                  {meta.color && (
+                    <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground font-mono">
+                      <span className="h-3 w-3 rounded-full border" style={{ backgroundColor: meta.color }} />
+                      {meta.color}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Name, icon, colour and description are managed by the linked project. Use{" "}
+                <span className="font-medium">Edit project</span> below to change them.
+              </p>
             </div>
-            <div className="flex gap-3">
-              <div className="flex flex-col gap-1 w-28">
-                <Label>Icon</Label>
-                <IconPicker
-                  value={meta.icon}
-                  onChange={(v) => setMeta((m) => ({ ...m, icon: v }))}
-                  imageUrl={meta.iconUrl}
-                  onImageChange={(url) => setMeta((m) => ({ ...m, iconUrl: url }))}
-                  portalId={portalId}
+          ) : (
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="ps-name">Name</Label>
+                <Input id="ps-name" value={meta.name} onChange={(e) => setMeta((m) => ({ ...m, name: e.target.value }))} />
+              </div>
+              <div className="flex gap-3">
+                <div className="flex flex-col gap-1 w-28">
+                  <Label>Icon</Label>
+                  <IconPicker
+                    value={meta.icon}
+                    onChange={(v) => setMeta((m) => ({ ...m, icon: v }))}
+                    imageUrl={meta.iconUrl}
+                    onImageChange={(url) => setMeta((m) => ({ ...m, iconUrl: url }))}
+                    portalId={portalId}
+                  />
+                </div>
+                <div className="flex flex-col gap-1 flex-1">
+                  <Label>Accent color</Label>
+                  <ColorPicker value={meta.color} onChange={(v) => setMeta((m) => ({ ...m, color: v }))} />
+                </div>
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="ps-desc">Description</Label>
+                <textarea
+                  id="ps-desc"
+                  rows={3}
+                  value={meta.description}
+                  onChange={(e) => setMeta((m) => ({ ...m, description: e.target.value }))}
+                  className="border rounded-md px-3 py-2 text-sm w-full resize-none bg-background focus:outline-none focus:ring-1 focus:ring-ring"
                 />
               </div>
-              <div className="flex flex-col gap-1 flex-1">
-                <Label>Accent color</Label>
-                <ColorPicker value={meta.color} onChange={(v) => setMeta((m) => ({ ...m, color: v }))} />
+              {metaError && <p className="text-sm text-red-500">{metaError}</p>}
+              <div className="flex justify-end">
+                <Button size="sm" onClick={saveMeta} disabled={savingMeta}>
+                  {savingMeta ? "Saving..." : "Save details"}
+                </Button>
               </div>
             </div>
-            <div className="flex flex-col gap-1">
-              <Label htmlFor="ps-desc">Description</Label>
-              <textarea
-                id="ps-desc"
-                rows={3}
-                value={meta.description}
-                onChange={(e) => setMeta((m) => ({ ...m, description: e.target.value }))}
-                className="border rounded-md px-3 py-2 text-sm w-full resize-none bg-background focus:outline-none focus:ring-1 focus:ring-ring"
-              />
-            </div>
-            {metaError && <p className="text-sm text-red-500">{metaError}</p>}
-            <div className="flex justify-end">
-              <Button size="sm" onClick={saveMeta} disabled={savingMeta}>
-                {savingMeta ? "Saving..." : "Save details"}
-              </Button>
-            </div>
-          </div>
+          )}
 
           {/* Linked project — edit the underlying project's details. */}
           {projectId && (
@@ -271,6 +335,7 @@ export function PortalSettingsModal({ portalId, open, onOpenChange, initial, onM
             open={projectEditOpen}
             onOpenChange={setProjectEditOpen}
             canEditType={isExec}
+            onSaved={handleProjectSaved}
           />
         )}
       </DialogContent>

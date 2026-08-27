@@ -13,6 +13,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { IconPicker } from "@/components/icon-picker";
+import { ColorPicker } from "@/components/color-picker";
 import { ProjectQuestionsDialog } from "@/components/project-questions-dialog";
 import { type Difficulty, DIFFICULTIES, DIFFICULTY_LABELS } from "@/lib/projects";
 
@@ -32,6 +34,9 @@ type Fields = {
   difficulty: Difficulty | "";
   estimated_members: string;
   num_subteams: string;
+  icon: string;
+  iconUrl: string | null;
+  color: string;
 };
 
 const toIntOrNull = (s: string) => {
@@ -65,7 +70,7 @@ export function ProjectEditDialog({ projectId, open, onOpenChange, onSaved, canE
     const supabase = createClient();
     supabase
       .from("projects")
-      .select("name, client, description, type, difficulty, estimated_members, num_subteams")
+      .select("name, client, description, type, difficulty, estimated_members, num_subteams, icon, icon_url, color")
       .eq("id", projectId)
       .maybeSingle()
       .then(({ data }) => {
@@ -78,6 +83,9 @@ export function ProjectEditDialog({ projectId, open, onOpenChange, onSaved, canE
             difficulty: (data.difficulty as Difficulty | null) ?? "",
             estimated_members: data.estimated_members != null ? String(data.estimated_members) : "",
             num_subteams: data.num_subteams != null ? String(data.num_subteams) : "",
+            icon: data.icon ?? "",
+            iconUrl: (data.icon_url as string | null) ?? null,
+            color: data.color ?? "",
           });
         }
         setLoading(false);
@@ -106,6 +114,9 @@ export function ProjectEditDialog({ projectId, open, onOpenChange, onSaved, canE
         difficulty: fields.difficulty || null,
         estimated_members: toIntOrNull(fields.estimated_members),
         num_subteams: toIntOrNull(fields.num_subteams),
+        icon: fields.icon.trim() || null,
+        icon_url: fields.iconUrl || null,
+        color: fields.color.trim() || null,
         updated_at: new Date().toISOString(),
       })
       .eq("id", projectId);
@@ -132,6 +143,22 @@ export function ProjectEditDialog({ projectId, open, onOpenChange, onSaved, canE
                 value={fields.name}
                 onChange={(e) => setFields((f) => (f ? { ...f, name: e.target.value } : f))}
               />
+            </div>
+            <div className="flex gap-3">
+              <div className="flex flex-col gap-1 w-28">
+                <Label>Icon</Label>
+                <IconPicker
+                  value={fields.icon}
+                  onChange={(v) => setFields((f) => (f ? { ...f, icon: v } : f))}
+                  imageUrl={fields.iconUrl}
+                  onImageChange={(url) => setFields((f) => (f ? { ...f, iconUrl: url } : f))}
+                  projectId={projectId}
+                />
+              </div>
+              <div className="flex flex-col gap-1 flex-1">
+                <Label>Accent color</Label>
+                <ColorPicker value={fields.color} onChange={(v) => setFields((f) => (f ? { ...f, color: v } : f))} />
+              </div>
             </div>
             <div className="flex flex-col gap-1">
               <Label>Type</Label>

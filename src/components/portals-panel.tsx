@@ -17,7 +17,7 @@ import { IconPicker } from "@/components/icon-picker";
 import { ColorPicker } from "@/components/color-picker";
 import { PanelListSkeleton } from "@/components/skeletons";
 import { PersonName } from "@/components/person-profile-provider";
-import { PortalCreateDialog, type PortalType, type ProjectOption } from "@/components/portal-create-dialog";
+import { PortalCreateDialog, type PortalType } from "@/components/portal-create-dialog";
 import { ProjectEditDialog } from "@/components/project-edit-dialog";
 import { AdminCrown } from "@/components/admin-crown";
 import { PortalDefaultIcon } from "@/components/portal-default-icon";
@@ -51,7 +51,6 @@ type Props = { members: MemberOption[]; allRoles: RoleOption[] };
 
 export function PortalsPanel({ members, allRoles }: Props) {
   const [portals, setPortals] = useState<Portal[]>([]);
-  const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -74,14 +73,7 @@ export function PortalsPanel({ members, allRoles }: Props) {
   }, []);
 
   useEffect(() => {
-    const supabase = createClient();
-    Promise.all([
-      loadPortals(),
-      supabase.from("projects").select("id, name").order("name"),
-    ]).then(([, { data: projectRows }]) => {
-      setProjects(projectRows ?? []);
-      setLoading(false);
-    });
+    loadPortals().then(() => setLoading(false));
   }, [loadPortals]);
 
   const toggle = (id: string) =>
@@ -241,13 +233,15 @@ export function PortalsPanel({ members, allRoles }: Props) {
   if (error) return <div className="py-8 text-sm text-red-500">{error}</div>;
 
   const editingPortal = portals.find((p) => p.id === editingId);
+  // Project portals derive name/icon/color/description from the linked project
+  // (locked here); edit them via "Edit project".
+  const editingIsProject = editingPortal?.type === "project" && !!editingPortal.project_id;
 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex justify-end">
         <PortalCreateDialog
-          allowedTypes={["general", "project", "exec"]}
-          projectOptions={projects}
+          allowedTypes={["general", "exec"]}
           memberOptions={members}
           roleOptions={allRoles}
           onCreated={() => loadPortals()}
@@ -434,40 +428,73 @@ export function PortalsPanel({ members, allRoles }: Props) {
             <DialogTitle>Edit portal</DialogTitle>
           </DialogHeader>
           <div className="flex flex-col gap-4">
-            <div className="flex flex-col gap-1">
-              <Label htmlFor="portal-name">Name</Label>
-              <Input
-                id="portal-name"
-                value={fields.name}
-                onChange={(e) => setFields((f) => ({ ...f, name: e.target.value }))}
-              />
-            </div>
-            <div className="flex gap-3">
-              <div className="flex flex-col gap-1 w-28">
-                <Label>Icon</Label>
-                <IconPicker
-                  value={fields.icon}
-                  onChange={(v) => setFields((f) => ({ ...f, icon: v }))}
-                  imageUrl={fields.iconUrl}
-                  onImageChange={(url) => setFields((f) => ({ ...f, iconUrl: url }))}
-                  portalId={editingId ?? undefined}
-                />
+            {editingIsProject ? (
+              <div className="flex flex-col gap-3">
+                <div className="flex items-start gap-3">
+                  <div className="h-12 w-12 flex-shrink-0 rounded-md border flex items-center justify-center overflow-hidden bg-muted/30">
+                    {fields.iconUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={fields.iconUrl} alt="" className="h-full w-full object-cover" />
+                    ) : fields.icon ? (
+                      <span className="text-2xl leading-none">{fields.icon}</span>
+                    ) : (
+                      <PortalDefaultIcon className="h-6 w-6 text-muted-foreground" style={{ color: fields.color || undefined }} />
+                    )}
+                  </div>
+                  <div className="flex flex-col gap-1 min-w-0">
+                    <span className="font-medium text-sm">{fields.name}</span>
+                    {fields.description && <span className="text-xs text-muted-foreground">{fields.description}</span>}
+                    {fields.color && (
+                      <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground font-mono">
+                        <span className="h-3 w-3 rounded-full border" style={{ backgroundColor: fields.color }} />
+                        {fields.color}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Name, icon, colour and description are managed by the linked project. Use{" "}
+                  <span className="font-medium">Edit project</span> below to change them.
+                </p>
               </div>
-              <div className="flex flex-col gap-1 flex-1">
-                <Label>Accent color</Label>
-                <ColorPicker value={fields.color} onChange={(v) => setFields((f) => ({ ...f, color: v }))} />
-              </div>
-            </div>
-            <div className="flex flex-col gap-1">
-              <Label htmlFor="portal-description">Description</Label>
-              <textarea
-                id="portal-description"
-                value={fields.description}
-                onChange={(e) => setFields((f) => ({ ...f, description: e.target.value }))}
-                rows={3}
-                className="border rounded-md px-3 py-2 text-sm w-full resize-none bg-background focus:outline-none focus:ring-1 focus:ring-ring"
-              />
-            </div>
+            ) : (
+              <>
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="portal-name">Name</Label>
+                  <Input
+                    id="portal-name"
+                    value={fields.name}
+                    onChange={(e) => setFields((f) => ({ ...f, name: e.target.value }))}
+                  />
+                </div>
+                <div className="flex gap-3">
+                  <div className="flex flex-col gap-1 w-28">
+                    <Label>Icon</Label>
+                    <IconPicker
+                      value={fields.icon}
+                      onChange={(v) => setFields((f) => ({ ...f, icon: v }))}
+                      imageUrl={fields.iconUrl}
+                      onImageChange={(url) => setFields((f) => ({ ...f, iconUrl: url }))}
+                      portalId={editingId ?? undefined}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1 flex-1">
+                    <Label>Accent color</Label>
+                    <ColorPicker value={fields.color} onChange={(v) => setFields((f) => ({ ...f, color: v }))} />
+                  </div>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="portal-description">Description</Label>
+                  <textarea
+                    id="portal-description"
+                    value={fields.description}
+                    onChange={(e) => setFields((f) => ({ ...f, description: e.target.value }))}
+                    rows={3}
+                    className="border rounded-md px-3 py-2 text-sm w-full resize-none bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                </div>
+              </>
+            )}
             {/* Linked project — edit the underlying project's details. */}
             {editingPortal?.type === "project" && editingPortal.project_id && (
               <div className="flex items-center justify-between gap-2 border-t pt-4">
@@ -483,11 +510,13 @@ export function PortalsPanel({ members, allRoles }: Props) {
             {formError && <p className="text-sm text-red-500">{formError}</p>}
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setDialogOpen(false)}>
-                Cancel
+                {editingIsProject ? "Close" : "Cancel"}
               </Button>
-              <Button onClick={saveEdit} disabled={saving}>
-                {saving ? "Saving..." : "Save"}
-              </Button>
+              {!editingIsProject && (
+                <Button onClick={saveEdit} disabled={saving}>
+                  {saving ? "Saving..." : "Save"}
+                </Button>
+              )}
             </div>
           </div>
 

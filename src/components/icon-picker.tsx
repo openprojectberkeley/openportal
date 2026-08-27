@@ -10,6 +10,7 @@ import { ImageCropField } from "@/components/image-crop-field";
 import { PortalDefaultIcon } from "@/components/portal-default-icon";
 import { PORTAL_ICON_SIZE } from "@/lib/avatar-image";
 import { uploadPortalIcon } from "@/lib/portal-icon-upload";
+import { uploadProjectIcon } from "@/lib/project-icon-upload";
 
 // Curated emoji set for portal icons — no emoji library needed.
 const PORTAL_EMOJIS = [
@@ -39,9 +40,14 @@ type Props = {
    * via `onImageBlob`.
    */
   portalId?: string;
+  /**
+   * Like `portalId`, but uploads to the `projects` bucket keyed by this project
+   * id (project edit flow). Takes precedence over `portalId` when set.
+   */
+  projectId?: string;
 };
 
-export function IconPicker({ value, onChange, imageUrl, onImageChange, onImageBlob, portalId }: Props) {
+export function IconPicker({ value, onChange, imageUrl, onImageChange, onImageBlob, portalId, projectId }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [adding, setAdding] = useState(false);
   const [custom, setCustom] = useState("");
@@ -110,10 +116,12 @@ export function IconPicker({ value, onChange, imageUrl, onImageChange, onImageBl
   };
 
   const handleCropped = async (jpeg: Blob) => {
-    if (portalId) {
+    if (projectId || portalId) {
       // Immediate mode: upload now and hand back the public URL.
       const supabase = createClient();
-      const url = await uploadPortalIcon(supabase, portalId, jpeg);
+      const url = projectId
+        ? await uploadProjectIcon(supabase, projectId, jpeg)
+        : await uploadPortalIcon(supabase, portalId!, jpeg);
       onImageChange?.(url);
     } else {
       // Deferred mode: preview locally now, upload after the row is created.

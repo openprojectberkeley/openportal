@@ -16,7 +16,7 @@ export async function GET() {
   const [{ data: projects }, { data: projectMembers }] = await Promise.all([
     supabase
       .from("projects")
-      .select("id, name, client, description, type, difficulty, estimated_members, num_subteams")
+      .select("id, name, client, description, type, difficulty, estimated_members, num_subteams, icon, icon_url, color")
       .order("name"),
     supabase
       .from("project_members")

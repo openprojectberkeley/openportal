@@ -7,7 +7,6 @@ import Link from "next/link";
 import { ShieldCheck, ArrowRight, Check, Coffee, FileText, Users } from "lucide-react";
 import { useRoleSim } from "@/components/role-simulation-provider";
 import { PortalCard, type PortalSummary } from "@/components/portal-card";
-import { PortalCreateDialog, type ProjectOption, type CreatedPortal } from "@/components/portal-create-dialog";
 import { CalendarPanel } from "@/components/calendar-panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PortalGridSkeleton, CalendarSkeleton } from "@/components/skeletons";
@@ -20,7 +19,7 @@ type CompletionState = {
 
 export default function HomePage() {
   const router = useRouter();
-  const { ready, isExec, isBoardOrExec, isPm, simulating, persona } = useRoleSim();
+  const { ready, isExec, isBoardOrExec, simulating, persona } = useRoleSim();
 
   // "dashboard" for active members + board/exec, "checklist" for applicants.
   const [view, setView] = useState<"dashboard" | "checklist" | null>(null);
@@ -29,8 +28,6 @@ export default function HomePage() {
   // A returning member (active, non-staff) who hasn't re-applied to the currently
   // open period yet — drives the non-blocking re-apply banner on the dashboard.
   const [reapply, setReapply] = useState<{ periodName: string; infosessionDone: boolean } | null>(null);
-  // Projects the current user PMs — the create dialog links a project portal to one.
-  const [pmProjects, setPmProjects] = useState<ProjectOption[]>([]);
   const [completed, setCompleted] = useState<CompletionState>({
     coffeeChat: false,
     infosession: false,
@@ -155,41 +152,10 @@ export default function HomePage() {
           is_owner: ownerByRow.has(p.id),
         })),
       );
-
-      // Projects this user PMs, for the "New portal" → project-portal option.
-      const { data: pmRows } = await supabase
-        .from("project_members")
-        .select("projects(id, name)")
-        .eq("user_id", user.id)
-        .eq("is_pm", true);
-      setPmProjects(
-        (pmRows ?? []).flatMap((r) => {
-          const proj = r.projects as unknown as ProjectOption | null;
-          return proj ? [proj] : [];
-        }),
-      );
     };
 
     load();
   }, [router, ready, isExec, isBoardOrExec]);
-
-  const handlePortalCreated = (portal: CreatedPortal) => {
-    // The creator is always an admin of what they create (derived for project
-    // portals, explicit via trigger for general ones).
-    setPortals((prev) => [
-      ...(prev ?? []),
-      {
-        id: portal.id,
-        name: portal.name,
-        description: portal.description,
-        icon: portal.icon,
-        icon_url: portal.icon_url,
-        color: portal.color,
-        is_admin: true,
-        is_owner: true,
-      },
-    ]);
-  };
 
   if (view === "checklist") {
     return <ApplicantChecklist completed={completed} simulating={simulating} persona={persona} />;
@@ -246,13 +212,6 @@ export default function HomePage() {
               <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
                 Portals
               </h2>
-              {isPm && (
-                <PortalCreateDialog
-                  allowedTypes={["general", "project"]}
-                  projectOptions={pmProjects}
-                  onCreated={handlePortalCreated}
-                />
-              )}
             </div>
             {portals === null ? (
               <PortalGridSkeleton />

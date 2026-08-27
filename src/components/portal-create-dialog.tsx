@@ -6,7 +6,6 @@ import { PlusCircle, ChevronDown } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuCheckboxItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -21,7 +20,6 @@ import { uploadPortalIcon } from "@/lib/portal-icon-upload";
 export type PortalType = "general" | "project" | "exec";
 export type MemberOption = { user_id: string; name: string };
 export type RoleOption = { id: string; role_name: string };
-export type ProjectOption = { id: string; name: string };
 
 // The row returned after insert, handed back so the caller can update its list.
 export type CreatedPortal = {
@@ -43,7 +41,6 @@ const TYPE_LABELS: Record<PortalType, string> = {
 
 type Props = {
   allowedTypes: PortalType[];
-  projectOptions: ProjectOption[];
   /** When provided, an optional "admins" picker is shown. */
   memberOptions?: MemberOption[];
   /** When provided, an optional "admin roles" picker is shown. */
@@ -53,9 +50,10 @@ type Props = {
   label?: string;
 };
 
+// Project portals are created automatically when a project is created (never
+// from here), so this dialog only creates general/exec portals.
 export function PortalCreateDialog({
   allowedTypes,
-  projectOptions,
   memberOptions,
   roleOptions,
   onCreated,
@@ -63,7 +61,6 @@ export function PortalCreateDialog({
 }: Props) {
   const [open, setOpen] = useState(false);
   const [type, setType] = useState<PortalType>(allowedTypes[0] ?? "general");
-  const [projectId, setProjectId] = useState<string>("");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [icon, setIcon] = useState("");
@@ -82,7 +79,6 @@ export function PortalCreateDialog({
 
   const reset = () => {
     setType(allowedTypes[0] ?? "general");
-    setProjectId("");
     setName("");
     setDescription("");
     setIcon("");
@@ -116,7 +112,6 @@ export function PortalCreateDialog({
   const save = async () => {
     const trimmed = name.trim();
     if (!trimmed) { setError("Name is required."); return; }
-    if (type === "project" && !projectId) { setError("Select a project."); return; }
 
     setSaving(true);
     setError(null);
@@ -132,7 +127,7 @@ export function PortalCreateDialog({
         icon: icon.trim() || null,
         color: color.trim() || null,
         type,
-        project_id: type === "project" ? projectId : null,
+        project_id: null,
       };
 
       const { data, error: insertError } = await supabase
@@ -183,8 +178,6 @@ export function PortalCreateDialog({
     setOpen(false);
   };
 
-  const selectedProject = projectOptions.find((p) => p.id === projectId);
-
   return (
     <>
       <Button size="sm" onClick={openDialog}>
@@ -217,39 +210,6 @@ export function PortalCreateDialog({
                     </button>
                   ))}
                 </div>
-              </div>
-            )}
-
-            {/* Project selector (project type only) */}
-            {type === "project" && (
-              <div className="flex flex-col gap-1">
-                <Label>Project</Label>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button className="flex items-center justify-between gap-2 border rounded-md px-3 py-2 text-sm hover:bg-accent transition-colors w-full text-left">
-                      <span className={selectedProject ? "" : "text-muted-foreground"}>
-                        {selectedProject ? selectedProject.name : "Select a project"}
-                      </span>
-                      <ChevronDown size={15} className="text-muted-foreground flex-shrink-0" />
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start">
-                    {projectOptions.length === 0 ? (
-                      <div className="px-2 py-1.5 text-xs text-muted-foreground">
-                        No projects available
-                      </div>
-                    ) : (
-                      projectOptions.map((p) => (
-                        <DropdownMenuItem key={p.id} onSelect={() => setProjectId(p.id)}>
-                          {p.name}
-                        </DropdownMenuItem>
-                      ))
-                    )}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-                <p className="text-xs text-muted-foreground">
-                  Project members join automatically; PMs become admins.
-                </p>
               </div>
             )}
 
