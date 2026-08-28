@@ -5,7 +5,7 @@ import { Suspense, useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { useRefreshOnReturn } from "@/lib/use-refresh-on-return";
-import { loadCoffeeChatWindowBounds } from "@/lib/coffee-chat-window";
+import { loadCoffeeChatWindowBounds, earliestBookableIso, COFFEE_CHAT_MIN_NOTICE_MS } from "@/lib/coffee-chat-window";
 import { AvailabilitySkeleton } from "@/components/skeletons";
 import { MapPin } from "lucide-react";
 
@@ -70,10 +70,11 @@ function BookingPageInner() {
     // Only offer slots that fall inside the current coffee-chat window.
     // Availability created under an older, wider window stays stored but must
     // not be bookable once the window is cut back. Lower bound is the later of
-    // "now" and the window start so past slots are still excluded.
+    // the window start and "now + 6h" — the minimum notice required to book —
+    // so both past slots and short-notice slots are excluded.
     const { startIso, endExclusiveIso } = await loadCoffeeChatWindowBounds(supabase);
-    const nowIso = new Date().toISOString();
-    const lowerIso = startIso > nowIso ? startIso : nowIso;
+    const earliestIso = earliestBookableIso();
+    const lowerIso = startIso > earliestIso ? startIso : earliestIso;
 
     const { data: rows } = await supabase
       .from("coffee_chats")
@@ -200,6 +201,17 @@ function BookingPageInner() {
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setError("You must be signed in to book."); setBooking(false); return; }
+
+    // Minimum notice: reject a slot that has aged within 6 hours of now while
+    // the page sat open (the listing filter hides these, but a stale render or
+    // the clock crossing the threshold could still surface one).
+    if (new Date(selected).getTime() - Date.now() < COFFEE_CHAT_MIN_NOTICE_MS) {
+      setError("Coffee chats must be booked at least 6 hours in advance.");
+      await loadSlots();
+      setSelected(null);
+      setBooking(false);
+      return;
+    }
 
     // One chat per person: bail if the user already has an upcoming booking
     // with this member (guards against a stale card or direct navigation).

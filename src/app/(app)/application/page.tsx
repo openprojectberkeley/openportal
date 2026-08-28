@@ -742,7 +742,15 @@ function RankedCard({
             {TYPE_LABELS[project.type]}
           </span>
         </button>
-        <button onClick={onOpen} className="text-muted-foreground hover:text-foreground transition-colors flex-shrink-0" aria-label="Edit answers">
+        <button
+          onClick={onOpen}
+          className={`flex-shrink-0 transition-colors ${
+            completed
+              ? "text-muted-foreground hover:text-foreground"
+              : "flex h-7 w-7 items-center justify-center rounded-md bg-white text-neutral-800 border border-black/10 shadow-sm hover:bg-white/90"
+          }`}
+          aria-label="Edit answers"
+        >
           <Pencil size={14} />
         </button>
         <button onClick={onRemove} className="text-muted-foreground hover:text-red-500 transition-colors flex-shrink-0" aria-label="Remove">

@@ -8,7 +8,7 @@ import { CoffeeChatCard, type CoffeeChatCardProps } from "@/components/coffee-ch
 import { PersonName } from "@/components/person-profile-provider";
 import { gcalUrl } from "@/lib/gcal";
 import { useRefreshOnReturn } from "@/lib/use-refresh-on-return";
-import { loadCoffeeChatWindowBounds } from "@/lib/coffee-chat-window";
+import { loadCoffeeChatWindowBounds, earliestBookableIso } from "@/lib/coffee-chat-window";
 import { CoffeeTeamSkeleton } from "@/components/skeletons";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { MapPin } from "lucide-react";
@@ -81,7 +81,8 @@ export default function CoffeeChatPage() {
     // coffee-chat window. Availability created under an older, wider window
     // stays stored but must not make a host look bookable once the window is cut
     // back (that would link to an empty booking page). Lower bound is the later
-    // of "now" and the window start so past slots stay excluded.
+    // of the window start and "now + 6h" (the minimum notice to book) so both
+    // past and short-notice slots stay excluded.
     //
     // Each member's availability is stored one row per seat, so across the whole
     // team this easily exceeds Supabase's 1000-row response cap — a single
@@ -90,7 +91,8 @@ export default function CoffeeChatPage() {
     // .range() (open slots only) so every member is represented. member_id isn't
     // unique, so add id as a stable tiebreaker to keep paging deterministic.
     const { startIso, endExclusiveIso } = await loadCoffeeChatWindowBounds(supabase);
-    const lowerIso = startIso > nowIso ? startIso : nowIso;
+    const earliestIso = earliestBookableIso();
+    const lowerIso = startIso > earliestIso ? startIso : earliestIso;
     const PAGE_SIZE = 1000;
     const bookableMemberIds = new Set<string>();
     for (let from = 0; ; from += PAGE_SIZE) {

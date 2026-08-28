@@ -21,6 +21,16 @@ function addDays(date: Date, n: number): Date {
   return d;
 }
 
+// Members must book at least this far in advance; slots inside this window
+// are hidden from the listings and rejected by the book action.
+export const COFFEE_CHAT_MIN_NOTICE_MS = 6 * 60 * 60 * 1000;
+
+// The earliest meeting_time a member may book right now (now + min notice),
+// as an ISO string — used as the lower bound when listing bookable slots.
+export function earliestBookableIso(): string {
+  return new Date(Date.now() + COFFEE_CHAT_MIN_NOTICE_MS).toISOString();
+}
+
 // Load the app-wide coffee-chat window from app_settings and return it as an
 // inclusive-start / exclusive-end ISO pair: [startIso, endExclusiveIso). The
 // stored end date is inclusive, so the exclusive bound is end + 1 day — the
