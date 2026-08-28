@@ -12,7 +12,8 @@
 //   SUPABASE_SERVICE_ROLE_KEY=<service_role key> \
 //   npx vitest run src/lib/__tests__/booking.db.test.ts
 //
-// The migration (0035) must already be applied to that database.
+// The migrations (0035 + 0038, which adds the optional booker message) must
+// already be applied to that database.
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
@@ -173,6 +174,33 @@ describe.skipIf(!RUN)("book_coffee_chat RPC", () => {
     createdUserIds.push(carol.id);
     const c = await carol.client.rpc("book_coffee_chat", { p_member_id: host.id, p_meeting_time: iso(HOST_TIME) });
     expect(c.error?.message).toContain("slot_taken");
+    await admin.from("coffee_chats").delete().eq("member_id", host.id);
+  });
+
+  it("stores an optional booker message on the claimed row, trimmed", async () => {
+    const [rowId] = await seedSeats(host.id, HOST_TIME, 1);
+    const { data, error } = await alice.client.rpc("book_coffee_chat", {
+      p_member_id: host.id,
+      p_meeting_time: iso(HOST_TIME),
+      p_message: "  Excited to talk about the infra track!  ",
+    });
+    expect(error).toBeNull();
+    expect(data).toBe(rowId);
+    const { data: row } = await admin.from("coffee_chats").select("message").eq("id", rowId).single();
+    expect(row?.message).toBe("Excited to talk about the infra track!");
+    await admin.from("coffee_chats").delete().eq("member_id", host.id);
+  });
+
+  it("leaves message null when omitted or blank", async () => {
+    const [rowId] = await seedSeats(host.id, HOST_TIME, 1);
+    // Omitted entirely (2-arg call still valid via the parameter default).
+    const { error } = await alice.client.rpc("book_coffee_chat", {
+      p_member_id: host.id,
+      p_meeting_time: iso(HOST_TIME),
+    });
+    expect(error).toBeNull();
+    const { data: row } = await admin.from("coffee_chats").select("message").eq("id", rowId).single();
+    expect(row?.message).toBeNull();
     await admin.from("coffee_chats").delete().eq("member_id", host.id);
   });
 

@@ -131,7 +131,7 @@ type UpcomingSlot = {
   capacity: number;
   filled: number;
   location: string | null;
-  attendees: { id: string; name: string; user_id: string; email: string | null; avatarUrl: string | null; complete: boolean }[];
+  attendees: { id: string; name: string; user_id: string; email: string | null; avatarUrl: string | null; complete: boolean; message: string | null }[];
 };
 
 // Hover tooltip listing every booked sub-slot inside an hour cell.
@@ -303,11 +303,11 @@ export default function ManagerCoffeeChatsPage() {
     // slots are silently dropped. meeting_time isn't unique across seats, so
     // add id as a stable tiebreaker to keep paging deterministic.
     const PAGE_SIZE = 1000;
-    const rows: { id: string; meeting_time: string; applicant_id: string | null; complete: boolean; duration_minutes: number; location: string | null }[] = [];
+    const rows: { id: string; meeting_time: string; applicant_id: string | null; complete: boolean; duration_minutes: number; location: string | null; message: string | null }[] = [];
     for (let from = 0; ; from += PAGE_SIZE) {
       const { data: page } = await supabase
         .from("coffee_chats")
-        .select("id, meeting_time, applicant_id, complete, duration_minutes, location")
+        .select("id, meeting_time, applicant_id, complete, duration_minutes, location, message")
         .eq("member_id", user.id)
         .gte("meeting_time", rangeStart.toISOString())
         .lt("meeting_time", addDays(rangeEnd, 1).toISOString())
@@ -333,12 +333,12 @@ export default function ManagerCoffeeChatsPage() {
     }
 
     // Build upcoming slots grouped by the exact sub-slot meeting_time.
-    const grouped = new Map<string, { id: string; applicant_id: string | null; complete: boolean }[]>();
+    const grouped = new Map<string, { id: string; applicant_id: string | null; complete: boolean; message: string | null }[]>();
     const exactDuration = new Map<string, number>();
     const exactLocation = new Map<string, string | null>();
     for (const row of rows) {
       if (!grouped.has(row.meeting_time)) grouped.set(row.meeting_time, []);
-      grouped.get(row.meeting_time)!.push({ id: row.id, applicant_id: row.applicant_id, complete: row.complete });
+      grouped.get(row.meeting_time)!.push({ id: row.id, applicant_id: row.applicant_id, complete: row.complete, message: row.message });
       if (!exactDuration.has(row.meeting_time)) exactDuration.set(row.meeting_time, row.duration_minutes);
       if (row.location) exactLocation.set(row.meeting_time, row.location);
     }
@@ -364,7 +364,7 @@ export default function ManagerCoffeeChatsPage() {
     for (const [meeting_time, entries] of grouped) {
       // Past meetings stay visible in the grid but drop off the "Upcoming" list.
       if (new Date(meeting_time).getTime() < nowMs) continue;
-      const filled = entries.filter((e): e is { id: string; applicant_id: string; complete: boolean } => e.applicant_id !== null);
+      const filled = entries.filter((e): e is { id: string; applicant_id: string; complete: boolean; message: string | null } => e.applicant_id !== null);
       upcoming.push({
         meeting_time,
         duration_minutes: exactDuration.get(meeting_time) ?? 30,
@@ -378,6 +378,7 @@ export default function ManagerCoffeeChatsPage() {
           email: emailMap.get(e.applicant_id) ?? null,
           avatarUrl: avatarMap.get(e.applicant_id) ?? null,
           complete: e.complete,
+          message: e.message,
         })),
       });
     }
@@ -1228,6 +1229,7 @@ export default function ManagerCoffeeChatsPage() {
                   </button>
                 </div>
                 {slot.attendees.length > 0 ? (
+                  <>
                   <div className="flex flex-wrap gap-1.5 pt-1">
                     {slot.attendees.map((a) => (
                       <div
@@ -1277,6 +1279,17 @@ export default function ManagerCoffeeChatsPage() {
                       </div>
                     ))}
                   </div>
+                  {slot.attendees.some((a) => a.message) && (
+                    <div className="flex flex-col gap-1 pt-1.5">
+                      {slot.attendees.filter((a) => a.message).map((a) => (
+                        <p key={a.user_id} className="text-xs text-muted-foreground">
+                          <span className="font-medium text-foreground">{a.name}:</span>{" "}
+                          <span className="italic">&ldquo;{a.message}&rdquo;</span>
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                  </>
                 ) : (
                   <p className="text-xs text-muted-foreground">No attendees yet.</p>
                 )}

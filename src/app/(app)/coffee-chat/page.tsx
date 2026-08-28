@@ -27,6 +27,7 @@ type Booking = {
   memberUserId: string;
   memberAvatarUrl: string | null;
   location: string | null;
+  message: string | null;
 };
 
 export default function CoffeeChatPage() {
@@ -71,7 +72,7 @@ export default function CoffeeChatPage() {
       user
         ? supabase
             .from("coffee_chats")
-            .select("id, member_id, meeting_time, duration_minutes, location")
+            .select("id, member_id, meeting_time, duration_minutes, location, message")
             .eq("applicant_id", user.id)
             .gte("meeting_time", nowIso)
             .order("meeting_time", { ascending: true })
@@ -169,6 +170,7 @@ export default function CoffeeChatPage() {
         memberUserId: c.member_id,
         memberAvatarUrl: avatarMap.get(c.member_id) ?? null,
         location: c.location ?? null,
+        message: c.message ?? null,
       })),
     );
 
@@ -285,6 +287,12 @@ export default function CoffeeChatPage() {
                         ) : (
                           <span className="truncate">{b.location}</span>
                         )}
+                      </p>
+                    )}
+                    {b.message && (
+                      <p className="text-xs text-muted-foreground">
+                        <span className="font-medium text-foreground">Your message:</span>{" "}
+                        <span className="italic">&ldquo;{b.message}&rdquo;</span>
                       </p>
                     )}
                     </div>

@@ -36,6 +36,7 @@ function BookingPageInner() {
   const [person, setPerson] = useState<PersonInfo | null>(null);
   const [days, setDays] = useState<DayGroup[]>([]);
   const [selected, setSelected] = useState<string | null>(null); // meeting_time ISO
+  const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [booking, setBooking] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -137,6 +138,7 @@ function BookingPageInner() {
     const { data: chatId, error: bookError } = await supabase.rpc("book_coffee_chat", {
       p_member_id: id,
       p_meeting_time: selected,
+      p_message: message.trim() || null,
     });
 
     if (bookError) {
@@ -172,6 +174,7 @@ function BookingPageInner() {
     // without these resets the button comes back stuck on "Booking…".
     setBooking(false);
     setSelected(null);
+    setMessage("");
     // Invalidate the Router Cache so the list — and this page on a later visit —
     // remount and refetch instead of reusing a stale cached instance.
     router.refresh();
@@ -305,6 +308,22 @@ function BookingPageInner() {
                 {days.flatMap((d) => d.slots).find((s) => s.meeting_time === selected)?.duration_minutes ?? 30} min
               </span>
             </p>
+          )}
+          {selected && (
+            <div className="flex flex-col gap-1">
+              <label htmlFor="book-message" className="text-sm font-medium">
+                Add a message <span className="font-normal text-muted-foreground">(optional)</span>
+              </label>
+              <textarea
+                id="book-message"
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+                maxLength={500}
+                rows={3}
+                placeholder={`Anything you'd like ${person?.name.split(" ")[0] ?? "them"} to know before the chat?`}
+                className="border bg-transparent rounded-md px-3 py-2 text-sm w-full resize-none"
+              />
+            </div>
           )}
           {error && <p className="text-sm text-red-500">{error}</p>}
           <button
