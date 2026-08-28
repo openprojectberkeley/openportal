@@ -15,6 +15,7 @@ import { ChevronDown } from "lucide-react";
 
 const CLASS_YEARS = ["Freshman", "Sophomore", "Junior", "Senior", "Postgrad"] as const;
 import { AvatarPicker } from "@/components/avatar-picker";
+import { Checkbox } from "@/components/ui/checkbox";
 
 // Progressively formats digits as (xxx) xxx-xxxx while typing.
 function formatPhoneNumber(value: string): string {
@@ -42,6 +43,7 @@ export default function OnboardingPage() {
   const [linkedin, setLinkedin] = useState("");
   const [github, setGithub] = useState("");
   const [interests, setInterests] = useState("");
+  const [emailNotifications, setEmailNotifications] = useState(true);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -75,7 +77,7 @@ export default function OnboardingPage() {
       // pre-fill so re-submitting doesn't blank out their existing data.
       const { data: existing } = await supabase
         .from("members")
-        .select("preferred_firstname, lastname, major, grad_year, phone, linkedin, github, interests, avatar_url")
+        .select("preferred_firstname, lastname, major, grad_year, phone, linkedin, github, interests, email_notifications, avatar_url")
         .eq("user_id", user.id)
         .maybeSingle();
 
@@ -93,6 +95,7 @@ export default function OnboardingPage() {
         setLinkedin(existing.linkedin ?? "");
         setGithub(existing.github ?? "");
         setInterests(existing.interests ?? "");
+        setEmailNotifications(existing.email_notifications ?? true);
         setAvatarUrl(existing.avatar_url ?? null);
       }
     };
@@ -122,6 +125,7 @@ export default function OnboardingPage() {
           linkedin: linkedin.trim(),
           github: github.trim(),
           interests: interests.trim(),
+          email_notifications: emailNotifications,
           avatar_url: avatarUrl,
         },
         { onConflict: "user_id" },
@@ -260,6 +264,19 @@ export default function OnboardingPage() {
               className="border bg-transparent rounded-md px-3 py-2 text-sm w-full resize-none"
             />
           </div>
+          <label className="flex items-start gap-2 text-sm">
+            <Checkbox
+              className="mt-0.5"
+              checked={emailNotifications}
+              onCheckedChange={(v) => setEmailNotifications(v === true)}
+            />
+            <span>
+              Email me about important coffee-chat updates
+              <span className="block text-xs text-muted-foreground">
+                Bookings, cancellations, and location changes. In-app notifications stay on either way.
+              </span>
+            </span>
+          </label>
           {phone.length > 0 && !phoneValid && (
             <p className="text-sm text-red-500">Please enter a valid 10-digit phone number.</p>
           )}

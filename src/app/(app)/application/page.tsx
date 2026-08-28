@@ -91,6 +91,10 @@ export default function ApplicationPage() {
   // For an incoming available card, the index in `ranked` it would drop into, so
   // the slot preview appears between cards rather than always at the end.
   const [overIndex, setOverIndex] = useState<number | null>(null);
+  // Pointer Y where the drag started; + the drag delta gives the live pointer Y,
+  // which decides before/after a hovered card far more reliably than the (tall)
+  // dragged card's own center — so the very top and bottom slots stay reachable.
+  const dragStartYRef = useRef<number | null>(null);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
@@ -290,17 +294,25 @@ export default function ApplicationPage() {
   };
 
   // Where an incoming available card would land in `ranked`, based on the card it
-  // is hovering: before it if the dragged card's center sits above the hovered
-  // card's center, otherwise after. Over the empty zone → the end.
+  // is hovering: before it if the pointer sits above the hovered card's middle,
+  // otherwise after. Over the empty zone → the end. Using the live pointer Y
+  // (drag start + delta) rather than the dragged card's center keeps the very
+  // top and bottom slots reachable even for a tall dragged card.
   const insertIndexFor = (event: DragOverEvent | DragEndEvent): number => {
     const over = event.over;
     if (!over) return ranked.length;
     const idx = ranked.indexOf(String(over.id));
     if (idx === -1) return ranked.length;
+    const startY = dragStartYRef.current;
     const activeRect = event.active.rect.current.translated;
-    const activeCenterY = activeRect ? activeRect.top + activeRect.height / 2 : 0;
-    const overCenterY = over.rect.top + over.rect.height / 2;
-    return activeCenterY < overCenterY ? idx : idx + 1;
+    const pointerY =
+      startY != null
+        ? startY + event.delta.y
+        : activeRect
+          ? activeRect.top + activeRect.height / 2
+          : 0;
+    const overMidY = over.rect.top + over.rect.height / 2;
+    return pointerY < overMidY ? idx : idx + 1;
   };
 
   const onDragOver = (event: DragOverEvent) => {
@@ -331,8 +343,12 @@ export default function ApplicationPage() {
     // ranking it reorders.
     if (ranked.includes(activeId)) {
       if (area === "available") { removeProject(activeId); return; }
-      if (ranked.includes(overId) && activeId !== overId) {
-        reorder(arrayMove(ranked, ranked.indexOf(activeId), ranked.indexOf(overId)));
+      if (area === "ranking") {
+        const from = ranked.indexOf(activeId);
+        // Over another card → that card's slot; over the empty zone below the
+        // last card → the bottom, so a card can be dragged to become last.
+        const to = ranked.includes(overId) ? ranked.indexOf(overId) : ranked.length - 1;
+        if (to !== from) reorder(arrayMove(ranked, from, to));
       }
     }
   };
@@ -431,7 +447,16 @@ export default function ApplicationPage() {
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}
-        onDragStart={(e) => setActiveId(String(e.active.id))}
+        onDragStart={(e) => {
+          setActiveId(String(e.active.id));
+          const ae = e.activatorEvent;
+          dragStartYRef.current =
+            typeof PointerEvent !== "undefined" && ae instanceof PointerEvent
+              ? ae.clientY
+              : ae instanceof MouseEvent
+                ? ae.clientY
+                : null;
+        }}
         onDragOver={onDragOver}
         onDragEnd={(e) => { setActiveId(null); onDragEnd(e); }}
         onDragCancel={() => { setActiveId(null); setOverArea(null); setOverIndex(null); }}

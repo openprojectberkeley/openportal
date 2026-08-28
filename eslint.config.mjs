@@ -10,6 +10,9 @@ const compat = new FlatCompat({
 });
 
 const eslintConfig = [
+  // Supabase Edge Functions run on Deno (jsr: imports, Deno globals), not under
+  // the Next/Node lint config — keep them out of `eslint .`.
+  { ignores: ["supabase/functions/**"] },
   ...compat.extends("next/core-web-vitals", "next/typescript"),
 ];
 

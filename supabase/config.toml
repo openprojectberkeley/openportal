@@ -1,0 +1,10 @@
+# Minimal Supabase CLI config. This repo has historically applied migrations via
+# the dashboard/MCP rather than the CLI (see supabase/migrations/README.md), so
+# this file exists mainly to configure the Edge Function below. `project_id` is
+# the project ref from the API URL (https://<ref>.supabase.co).
+project_id = "yplpbzjdawynnrqdcmpt"
+
+# Auth for this function is the shared x-webhook-secret header checked in code,
+# not a Supabase JWT — the Postgres trigger that calls it has no user JWT.
+[functions.send-notification-email]
+verify_jwt = false
