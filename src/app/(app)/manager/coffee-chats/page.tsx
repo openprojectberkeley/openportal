@@ -172,6 +172,11 @@ export default function ManagerCoffeeChatsPage() {
   const canEditWindow = canSimulate && persona === "exec";
 
   const [upcomingSlots, setUpcomingSlots] = useState<UpcomingSlot[]>([]);
+  // Booked slots whose time has already passed. Kept separate from
+  // upcomingSlots so the "Upcoming" list stays upcoming-only, but still shown
+  // (grayed out) in a "Past" section below, and folded back in for the grid's
+  // hover tooltips so a past booking's attendees stay visible.
+  const [pastSlots, setPastSlots] = useState<UpcomingSlot[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Bookable window (loaded from app_settings; falls back to the defaults).
@@ -325,6 +330,7 @@ export default function ManagerCoffeeChatsPage() {
 
     if (!rows.length) {
       setUpcomingSlots([]);
+      setPastSlots([]);
       setDbSlots(new Map());
       setBookedSubSlots(new Map());
       setSelected(new Map());
@@ -361,11 +367,10 @@ export default function ManagerCoffeeChatsPage() {
 
     const nowMs = Date.now();
     const upcoming: UpcomingSlot[] = [];
+    const past: UpcomingSlot[] = [];
     for (const [meeting_time, entries] of grouped) {
-      // Past meetings stay visible in the grid but drop off the "Upcoming" list.
-      if (new Date(meeting_time).getTime() < nowMs) continue;
       const filled = entries.filter((e): e is { id: string; applicant_id: string; complete: boolean; message: string | null } => e.applicant_id !== null);
-      upcoming.push({
+      const slot: UpcomingSlot = {
         meeting_time,
         duration_minutes: exactDuration.get(meeting_time) ?? 30,
         capacity: entries.length,
@@ -380,9 +385,13 @@ export default function ManagerCoffeeChatsPage() {
           complete: e.complete,
           message: e.message,
         })),
-      });
+      };
+      // Past meetings stay visible in the grid and fold into the "Past"
+      // list below, but drop off the "Upcoming" list.
+      (new Date(meeting_time).getTime() < nowMs ? past : upcoming).push(slot);
     }
     setUpcomingSlots(upcoming);
+    setPastSlots(past);
 
     // Pre-populate the grid at sub-slot granularity. Pass 1: any sub-slot
     // (exact meeting_time) with a booked seat is locked — but only itself, not
@@ -544,14 +553,19 @@ export default function ManagerCoffeeChatsPage() {
     return () => window.removeEventListener("pointerup", commit);
   }, [dragState, dragCurrent, weekDates, bookedSubSlots, lockedDivByHour, brushDuration, div, fillsByHour]);
 
-  // Tooltip data: every upcoming sub-slot, grouped by the hour tile it falls
-  // inside (one hour tile can now contain several real sub-slot times).
+  // Tooltip data: every sub-slot (past or upcoming), grouped by the hour tile
+  // it falls inside (one hour tile can now contain several real sub-slot
+  // times) — includes past slots so a past booking still shows its attendees
+  // on hover in the grid, instead of going silent once it's passed.
   const tileSlotInfos = new Map<string, UpcomingSlot[]>();
-  for (const s of upcomingSlots) {
+  for (const s of [...upcomingSlots, ...pastSlots]) {
     const tk = hourKeyOf(s.meeting_time);
     if (!tileSlotInfos.has(tk)) tileSlotInfos.set(tk, []);
     tileSlotInfos.get(tk)!.push(s);
   }
+
+  // Past booked slots, most recent first, for the "Past" list below Upcoming.
+  const bookedPast = pastSlots.filter((s) => s.filled > 0).sort((a, b) => b.meeting_time.localeCompare(a.meeting_time));
 
   // The Upcoming list only surfaces slots someone has actually booked; empty
   // availability still lives in the grid above, so hiding it here just removes
@@ -696,13 +710,14 @@ export default function ManagerCoffeeChatsPage() {
     const supabase = createClient();
     const { error } = await supabase.from("coffee_chats").update({ complete: next }).eq("id", rowId);
     if (error) return;
-    setUpcomingSlots((prev) =>
+    const patch = (prev: UpcomingSlot[]) =>
       prev.map((slot) =>
         slot.meeting_time !== meetingTime
           ? slot
           : { ...slot, attendees: slot.attendees.map((a) => (a.id === rowId ? { ...a, complete: next } : a)) },
-      ),
-    );
+      );
+    setUpcomingSlots(patch);
+    setPastSlots(patch);
   };
 
   // Pull the manager's Google Calendar free/busy across the whole window and
@@ -835,6 +850,122 @@ export default function ManagerCoffeeChatsPage() {
   };
 
   const defaultLocationDirty = draftDefaultLocation.trim() !== defaultLocation.trim();
+
+  // Shared card for both the Upcoming and Past lists. Past slots gray out and
+  // drop location-editing / cancel (nothing to prep or cancel after the
+  // fact) — but keep the complete toggle, so attendance can still be recorded.
+  const renderBookedSlot = (slot: UpcomingSlot, isPast: boolean) => {
+    const d = new Date(slot.meeting_time);
+    const resolvedLocation = slot.location || defaultLocation.trim() || null;
+    return (
+      <div key={slot.meeting_time} className={`border rounded-xl p-4 flex flex-col gap-2 ${isPast ? "opacity-50" : ""}`}>
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium">
+              {d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
+              {" · "}
+              {slot.duration_minutes} min
+            </p>
+          </div>
+          <span className={`text-sm font-semibold tabular-nums ${slot.filled === slot.capacity ? "text-red-500" : "text-green-600"}`}>
+            {slot.filled}/{slot.capacity}
+          </span>
+        </div>
+        <div className="flex items-center gap-1.5 text-xs">
+          <MapPin size={12} className="text-muted-foreground flex-shrink-0" />
+          <span className={`truncate ${resolvedLocation ? "text-foreground" : "text-muted-foreground italic"}`}>
+            {resolvedLocation || "No location set"}
+          </span>
+          {!isPast && (
+            <button
+              type="button"
+              onClick={() => {
+                setLocationTarget({
+                  meeting_time: slot.meeting_time,
+                  attendeeIds: slot.attendees.map((a) => a.id),
+                  hadLocation: !!slot.location,
+                });
+                setLocationDraft(slot.location ?? defaultLocation);
+              }}
+              className="text-muted-foreground hover:text-foreground underline decoration-dotted underline-offset-2"
+            >
+              {slot.location ? "Edit" : "Add"}
+            </button>
+          )}
+        </div>
+        {slot.attendees.length > 0 ? (
+          <>
+          <div className="flex flex-wrap gap-1.5 pt-1">
+            {slot.attendees.map((a) => (
+              <div
+                key={a.user_id}
+                className="flex items-center gap-1 pl-1 pr-1 py-0.5 rounded-full bg-foreground/10 hover:bg-foreground/20 transition-colors"
+              >
+                <button
+                  type="button"
+                  onClick={() =>
+                    openProfile({ userId: a.user_id, name: a.name, preloaded: { email: a.email, avatar_url: a.avatarUrl } })
+                  }
+                  title={a.email ?? undefined}
+                  className="group relative flex items-center gap-1.5 text-xs font-medium"
+                >
+                  {a.avatarUrl ? (
+                    <img src={a.avatarUrl} alt={a.name} className="h-5 w-5 rounded-full object-cover flex-shrink-0" />
+                  ) : (
+                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-foreground/15 text-[9px] font-semibold flex-shrink-0">
+                      {initials(a.name)}
+                    </span>
+                  )}
+                  {a.name}
+                  <span className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1.5 hidden w-max max-w-[16rem] -translate-x-1/2 rounded-md bg-foreground px-2.5 py-1.5 text-[11px] text-background shadow-lg group-hover:block">
+                    {a.email ?? "No email on file"}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => toggleComplete(a.id, slot.meeting_time, !a.complete)}
+                  title={a.complete ? "Mark as not complete" : "Mark complete"}
+                  className={`flex items-center justify-center w-4 h-4 rounded-full transition-colors ${
+                    a.complete
+                      ? "bg-green-500 text-white"
+                      : "border border-foreground/30 text-transparent hover:border-foreground/60"
+                  }`}
+                >
+                  <Check size={10} />
+                </button>
+                {!isPast && (
+                  <button
+                    type="button"
+                    onClick={() => { setCancelTarget({ id: a.id, name: a.name, meeting_time: slot.meeting_time }); setCancelMessage(""); }}
+                    title="Cancel this booking"
+                    className="flex items-center justify-center w-4 h-4 rounded-full text-red-500 hover:bg-red-500/15 transition-colors"
+                  >
+                    <X size={10} />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+          {slot.attendees.some((a) => a.message) && (
+            <div className="flex flex-col gap-1 pt-1.5">
+              {slot.attendees.filter((a) => a.message).map((a) => (
+                <p key={a.user_id} className="text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground">{a.name}:</span>{" "}
+                  <span className="italic">&ldquo;{a.message}&rdquo;</span>
+                </p>
+              ))}
+            </div>
+          )}
+          </>
+        ) : (
+          <p className="text-xs text-muted-foreground">No attendees yet.</p>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="w-full max-w-3xl mx-auto p-6 flex flex-col gap-10">
@@ -1179,125 +1310,28 @@ export default function ManagerCoffeeChatsPage() {
         </div>
       </div>
 
-      {/* Upcoming coffee chats */}
+      {/* Booked coffee chats — upcoming, then past (grayed out) below */}
       {loading ? (
         <div className="flex flex-col gap-3">
           <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Upcoming</h2>
           <SlotCardsSkeleton />
         </div>
-      ) : bookedUpcoming.length > 0 ? (
-        <div className="flex flex-col gap-3">
-          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Upcoming</h2>
-          {bookedUpcoming.map((slot) => {
-            const d = new Date(slot.meeting_time);
-            const resolvedLocation = slot.location || defaultLocation.trim() || null;
-            return (
-              <div key={slot.meeting_time} className="border rounded-xl p-4 flex flex-col gap-2">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium">
-                      {d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
-                      {" · "}
-                      {slot.duration_minutes} min
-                    </p>
-                  </div>
-                  <span className={`text-sm font-semibold tabular-nums ${slot.filled === slot.capacity ? "text-red-500" : "text-green-600"}`}>
-                    {slot.filled}/{slot.capacity}
-                  </span>
-                </div>
-                <div className="flex items-center gap-1.5 text-xs">
-                  <MapPin size={12} className="text-muted-foreground flex-shrink-0" />
-                  <span className={`truncate ${resolvedLocation ? "text-foreground" : "text-muted-foreground italic"}`}>
-                    {resolvedLocation || "No location set"}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setLocationTarget({
-                        meeting_time: slot.meeting_time,
-                        attendeeIds: slot.attendees.map((a) => a.id),
-                        hadLocation: !!slot.location,
-                      });
-                      setLocationDraft(slot.location ?? defaultLocation);
-                    }}
-                    className="text-muted-foreground hover:text-foreground underline decoration-dotted underline-offset-2"
-                  >
-                    {slot.location ? "Edit" : "Add"}
-                  </button>
-                </div>
-                {slot.attendees.length > 0 ? (
-                  <>
-                  <div className="flex flex-wrap gap-1.5 pt-1">
-                    {slot.attendees.map((a) => (
-                      <div
-                        key={a.user_id}
-                        className="flex items-center gap-1 pl-1 pr-1 py-0.5 rounded-full bg-foreground/10 hover:bg-foreground/20 transition-colors"
-                      >
-                        <button
-                          type="button"
-                          onClick={() =>
-                            openProfile({ userId: a.user_id, name: a.name, preloaded: { email: a.email, avatar_url: a.avatarUrl } })
-                          }
-                          title={a.email ?? undefined}
-                          className="group relative flex items-center gap-1.5 text-xs font-medium"
-                        >
-                          {a.avatarUrl ? (
-                            <img src={a.avatarUrl} alt={a.name} className="h-5 w-5 rounded-full object-cover flex-shrink-0" />
-                          ) : (
-                            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-foreground/15 text-[9px] font-semibold flex-shrink-0">
-                              {initials(a.name)}
-                            </span>
-                          )}
-                          {a.name}
-                          <span className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1.5 hidden w-max max-w-[16rem] -translate-x-1/2 rounded-md bg-foreground px-2.5 py-1.5 text-[11px] text-background shadow-lg group-hover:block">
-                            {a.email ?? "No email on file"}
-                          </span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => toggleComplete(a.id, slot.meeting_time, !a.complete)}
-                          title={a.complete ? "Mark as not complete" : "Mark complete"}
-                          className={`flex items-center justify-center w-4 h-4 rounded-full transition-colors ${
-                            a.complete
-                              ? "bg-green-500 text-white"
-                              : "border border-foreground/30 text-transparent hover:border-foreground/60"
-                          }`}
-                        >
-                          <Check size={10} />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => { setCancelTarget({ id: a.id, name: a.name, meeting_time: slot.meeting_time }); setCancelMessage(""); }}
-                          title="Cancel this booking"
-                          className="flex items-center justify-center w-4 h-4 rounded-full text-red-500 hover:bg-red-500/15 transition-colors"
-                        >
-                          <X size={10} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                  {slot.attendees.some((a) => a.message) && (
-                    <div className="flex flex-col gap-1 pt-1.5">
-                      {slot.attendees.filter((a) => a.message).map((a) => (
-                        <p key={a.user_id} className="text-xs text-muted-foreground">
-                          <span className="font-medium text-foreground">{a.name}:</span>{" "}
-                          <span className="italic">&ldquo;{a.message}&rdquo;</span>
-                        </p>
-                      ))}
-                    </div>
-                  )}
-                  </>
-                ) : (
-                  <p className="text-xs text-muted-foreground">No attendees yet.</p>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      ) : null}
+      ) : (
+        <>
+          {bookedUpcoming.length > 0 && (
+            <div className="flex flex-col gap-3">
+              <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Upcoming</h2>
+              {bookedUpcoming.map((slot) => renderBookedSlot(slot, false))}
+            </div>
+          )}
+          {bookedPast.length > 0 && (
+            <div className="flex flex-col gap-3">
+              <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Past</h2>
+              {bookedPast.map((slot) => renderBookedSlot(slot, true))}
+            </div>
+          )}
+        </>
+      )}
 
       <ConfirmDialog
         open={clearOpen}
