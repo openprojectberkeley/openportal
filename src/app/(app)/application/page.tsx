@@ -3,7 +3,7 @@
 import { createClient } from "@/lib/supabase/client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Check, Pencil, X, AlertTriangle, Coffee, GripVertical } from "lucide-react";
+import { Check, Pencil, X, AlertTriangle, Coffee, GripVertical, ChevronDown, Plus } from "lucide-react";
 import {
   DndContext,
   DragOverlay,
@@ -23,7 +23,7 @@ import { ApplicationPageSkeleton } from "@/components/skeletons";
 import { ProjectApplicationModal } from "@/components/project-application-modal";
 import { useRoleSim } from "@/components/role-simulation-provider";
 import { type Difficulty, DIFFICULTY_LABELS } from "@/lib/projects";
-import { readableTextColor } from "@/lib/portal-color";
+import { readableTextColor, DEFAULT_ACCENT } from "@/lib/portal-color";
 
 type ProjectType = "studio" | "launch";
 
@@ -88,6 +88,9 @@ export default function ApplicationPage() {
   const [activeId, setActiveId] = useState<string | null>(null);
   // Which zone the pointer is currently over, so we can show a slot preview there.
   const [overArea, setOverArea] = useState<"ranking" | "available" | null>(null);
+  // For an incoming available card, the index in `ranked` it would drop into, so
+  // the slot preview appears between cards rather than always at the end.
+  const [overIndex, setOverIndex] = useState<number | null>(null);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
@@ -286,12 +289,30 @@ export default function ApplicationPage() {
     return null;
   };
 
+  // Where an incoming available card would land in `ranked`, based on the card it
+  // is hovering: before it if the dragged card's center sits above the hovered
+  // card's center, otherwise after. Over the empty zone → the end.
+  const insertIndexFor = (event: DragOverEvent | DragEndEvent): number => {
+    const over = event.over;
+    if (!over) return ranked.length;
+    const idx = ranked.indexOf(String(over.id));
+    if (idx === -1) return ranked.length;
+    const activeRect = event.active.rect.current.translated;
+    const activeCenterY = activeRect ? activeRect.top + activeRect.height / 2 : 0;
+    const overCenterY = over.rect.top + over.rect.height / 2;
+    return activeCenterY < overCenterY ? idx : idx + 1;
+  };
+
   const onDragOver = (event: DragOverEvent) => {
-    setOverArea(areaOf(event.over ? String(event.over.id) : null));
+    const area = areaOf(event.over ? String(event.over.id) : null);
+    setOverArea(area);
+    const activeIsAvail = String(event.active.id).startsWith("avail:");
+    setOverIndex(activeIsAvail && area === "ranking" ? insertIndexFor(event) : null);
   };
 
   const onDragEnd = (event: DragEndEvent) => {
     setOverArea(null);
+    setOverIndex(null);
     const { active, over } = event;
     if (!over) return;
     const activeId = String(active.id);
@@ -300,9 +321,9 @@ export default function ApplicationPage() {
 
     if (activeId.startsWith("avail:")) {
       // Only a drop onto the ranking adds it — dropping back over the projects
-      // list (or its own area) does nothing. Appended at the end, matching the
-      // slot preview.
-      if (area === "ranking") addProject(activeId.slice(6));
+      // list (or its own area) does nothing. Inserted at the hovered slot,
+      // matching the slot preview (falls back to the end).
+      if (area === "ranking") addProject(activeId.slice(6), insertIndexFor(event));
       return;
     }
 
@@ -576,8 +597,10 @@ function AvailableCard({
   onAdd: (id: string) => void;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: `avail:${project.id}` });
+  // Click toggles this detail dropdown; the + button and drag handle adding.
+  const [open, setOpen] = useState(false);
   // The DragOverlay renders the moving copy; the source just dims in place.
-  const style = { opacity: isDragging ? 0.4 : 1, "--hover-fg": readableTextColor(project.color) } as React.CSSProperties;
+  const style = { opacity: isDragging ? 0.4 : 1 } as React.CSSProperties;
   const meta = metaLine(project);
   const met = project.type === "studio" ? studioMet(project.id) : true;
   const pms = pmMap[project.id] ?? [];
@@ -588,21 +611,22 @@ function AvailableCard({
       style={style}
       {...attributes}
       {...listeners}
-      onClick={() => !full && onAdd(project.id)}
-      className={`group relative overflow-hidden border rounded-xl p-3 bg-background touch-none select-none ${
-        full ? "opacity-50 cursor-not-allowed" : "cursor-grab hover:border-foreground/20 hover:shadow-sm"
-      } transition-all`}
+      onClick={() => setOpen((o) => !o)}
+      className="group relative overflow-hidden border rounded-xl p-3 pl-4 bg-background touch-none select-none cursor-grab hover:bg-accent transition-colors"
     >
-      {/* Accent swipe: the project's color wipes in from left to right on hover. */}
+      {/* Accent color as a slim tab on the card's left edge. */}
       <div
-        className="absolute inset-0 z-0 origin-left scale-x-0 group-hover:scale-x-100 pointer-events-none transition-transform duration-300 ease-out"
-        style={{ backgroundColor: project.color || "hsl(var(--muted-foreground))" }}
+        className="absolute inset-y-0 left-0 w-1.5 pointer-events-none"
+        style={{ backgroundColor: project.color || DEFAULT_ACCENT }}
         aria-hidden
       />
 
-      <div className="relative z-10 flex flex-col gap-1.5 group-hover:text-[var(--hover-fg)] transition-colors">
+      <div className="relative z-10 flex flex-col gap-1.5">
         <div className="flex items-center gap-2">
-          <GripVertical size={14} className="text-muted-foreground/50 group-hover:text-[var(--hover-fg)] group-hover:opacity-70 flex-shrink-0" />
+          <ChevronDown
+            size={14}
+            className={`text-muted-foreground/50 flex-shrink-0 transition-transform ${open ? "" : "-rotate-90"}`}
+          />
           {project.icon_url ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={project.icon_url} alt="" className="h-8 w-8 flex-shrink-0 rounded-lg object-cover" />
@@ -615,14 +639,29 @@ function AvailableCard({
             </span>
           ) : null}
           <span className="font-medium text-sm flex-1 min-w-0 truncate">{project.name}</span>
-          {project.client && <span className="text-xs text-muted-foreground group-hover:text-[var(--hover-fg)] group-hover:opacity-70">{project.client}</span>}
+          {project.client && <span className="text-xs text-muted-foreground">{project.client}</span>}
+          <button
+            type="button"
+            disabled={full}
+            onClick={(e) => { e.stopPropagation(); if (!full) onAdd(project.id); }}
+            onPointerDown={(e) => e.stopPropagation()}
+            aria-label={`Add ${project.name}`}
+            title={full ? `You can rank up to ${RANK_COUNT} projects` : `Add ${project.name}`}
+            className="flex h-7 w-7 items-center justify-center rounded-md border bg-background text-foreground hover:bg-foreground hover:text-background hover:border-foreground disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-background disabled:hover:text-foreground flex-shrink-0 transition-colors"
+          >
+            <Plus size={16} />
+          </button>
         </div>
-        {project.description && <p className="text-xs text-muted-foreground group-hover:text-[var(--hover-fg)] group-hover:opacity-70 pl-6">{project.description}</p>}
-        {meta && <p className="text-[11px] text-muted-foreground/80 group-hover:text-[var(--hover-fg)] group-hover:opacity-70 pl-6">{meta}</p>}
-        {pms.length > 0 && (
-          <p className="text-[11px] text-muted-foreground/80 group-hover:text-[var(--hover-fg)] group-hover:opacity-70 pl-6">
-            PM{pms.length > 1 ? "s" : ""}: {pms.map((pm) => pm.name).join(", ")}
-          </p>
+        {open && (
+          <>
+            {project.description && <p className="text-sm text-muted-foreground pl-6">{project.description}</p>}
+            {meta && <p className="text-[11px] text-muted-foreground/80 pl-6">{meta}</p>}
+            {pms.length > 0 && (
+              <p className="text-xs text-muted-foreground/80 pl-6">
+                PM{pms.length > 1 ? "s" : ""}: {pms.map((pm) => pm.name).join(", ")}
+              </p>
+            )}
+          </>
         )}
         {project.type === "studio" && (
           <div className={`flex items-center gap-1.5 text-[11px] pl-6 ${met ? "text-green-700 dark:text-green-400" : "text-amber-600 dark:text-amber-500"}`}>

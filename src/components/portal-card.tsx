@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { ClipboardCheck, Cog, Users } from "lucide-react";
-import { accentTint, readableTextColor } from "@/lib/portal-color";
+import { accentTint, hoverForeground, readableTextColor, DEFAULT_ACCENT } from "@/lib/portal-color";
 import { PortalSettingsModal } from "@/components/portal-settings-modal";
 import { PortalMembersModal } from "@/components/portal-members-modal";
 import { PortalAttendanceModal } from "@/components/portal-attendance-modal";
@@ -41,7 +41,7 @@ export function PortalCard({ portal }: { portal: PortalSummary }) {
     <>
       <div
         className="group relative overflow-hidden border rounded-xl bg-muted p-5 transition-[transform,box-shadow] duration-200 ease-out hover:scale-[1.02] hover:shadow-sm"
-        style={{ "--hover-fg": readableTextColor(color) } as React.CSSProperties}
+        style={{ "--hover-fg": hoverForeground(color) } as React.CSSProperties}
       >
         {/* Full-card click target (a button can't nest in an <a>, so the link is
             an overlay and the controls sit above it). */}
@@ -49,7 +49,7 @@ export function PortalCard({ portal }: { portal: PortalSummary }) {
         {/* Accent swipe: the chosen color wipes in from left to right on hover. */}
         <div
           className="absolute inset-0 z-0 origin-left scale-x-0 group-hover:scale-x-100 pointer-events-none transition-transform duration-300 ease-out"
-          style={{ backgroundColor: color || "hsl(var(--muted-foreground))" }}
+          style={{ backgroundColor: color || DEFAULT_ACCENT }}
           aria-hidden
         />
 

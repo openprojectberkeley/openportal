@@ -1,3 +1,8 @@
+// Fallback accent for portals/projects with no color set: a soft, faintly cool
+// light gray so a colorless card still reads as intentional rather than a flat
+// mid gray. Light in both themes, so `readableTextColor` picks dark text over it.
+export const DEFAULT_ACCENT = "#c2c5cf";
+
 // A readable tint of a portal's accent color, mixed toward the current theme
 // background so it stays legible in light and dark mode. Returns a CSS
 // `color-mix(...)` string for an inline `style`, or undefined when there's no
@@ -21,4 +26,12 @@ export function readableTextColor(color: string | null | undefined): string {
   };
   const luminance = 0.2126 * channel(0) + 0.7152 * channel(2) + 0.0722 * channel(4);
   return luminance > 0.179 ? "#000000" : "#ffffff";
+}
+
+// Text/icon color to lay over a card's hover swipe — the higher-contrast of
+// black/white against whichever accent backs the swipe. With no color the swipe
+// falls back to `DEFAULT_ACCENT` (a light gray in both themes), so this resolves
+// to dark text that stays legible over it.
+export function hoverForeground(color: string | null | undefined): string {
+  return readableTextColor(color || DEFAULT_ACCENT);
 }

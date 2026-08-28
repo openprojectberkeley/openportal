@@ -7,7 +7,7 @@ import Script from "next/script";
 import { useCallback, useEffect, useState } from "react";
 import { CalendarCheck, Check, ChevronLeft, ChevronRight, Lock, MapPin, X } from "lucide-react";
 import { useRoleSim } from "@/components/role-simulation-provider";
-import { usePersonProfile } from "@/components/person-profile-provider";
+import { usePersonProfile, initials } from "@/components/person-profile-provider";
 import { ScrollArea } from "@/components/overlay-scrollbar";
 import { SlotCardsSkeleton } from "@/components/skeletons";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -131,7 +131,7 @@ type UpcomingSlot = {
   capacity: number;
   filled: number;
   location: string | null;
-  attendees: { id: string; name: string; user_id: string; email: string | null; complete: boolean }[];
+  attendees: { id: string; name: string; user_id: string; email: string | null; avatarUrl: string | null; complete: boolean }[];
 };
 
 // Hover tooltip listing every booked sub-slot inside an hour cell.
@@ -346,14 +346,16 @@ export default function ManagerCoffeeChatsPage() {
     const applicantIds = [...new Set(rows.map((r) => r.applicant_id).filter((id): id is string => id !== null))];
     const nameMap = new Map<string, string>();
     const emailMap = new Map<string, string | null>();
+    const avatarMap = new Map<string, string | null>();
     if (applicantIds.length > 0) {
       const { data: members } = await supabase
         .from("members")
-        .select("user_id, preferred_firstname, lastname, email")
+        .select("user_id, preferred_firstname, lastname, email, avatar_url")
         .in("user_id", applicantIds);
       for (const m of members ?? []) {
         nameMap.set(m.user_id, [m.preferred_firstname, m.lastname].filter(Boolean).join(" ") || "Unknown");
         emailMap.set(m.user_id, m.email ?? null);
+        avatarMap.set(m.user_id, m.avatar_url ?? null);
       }
     }
 
@@ -374,6 +376,7 @@ export default function ManagerCoffeeChatsPage() {
           user_id: e.applicant_id,
           name: nameMap.get(e.applicant_id) ?? "Unknown",
           email: emailMap.get(e.applicant_id) ?? null,
+          avatarUrl: avatarMap.get(e.applicant_id) ?? null,
           complete: e.complete,
         })),
       });
@@ -819,9 +822,15 @@ export default function ManagerCoffeeChatsPage() {
     if (!user) return;
     setSavingDefaultLocation(true);
     const value = draftDefaultLocation.trim() || null;
-    await supabase.from("members").update({ default_chat_location: value }).eq("user_id", user.id);
+    // Sets the host default AND propagates it to existing upcoming booked chats
+    // that have no location or still match the old default (custom per-slot
+    // locations are preserved), notifying affected attendees. See migration
+    // 0036_apply_default_chat_location.sql.
+    await supabase.rpc("set_default_chat_location", { p_location: value });
     setDefaultLocation(value ?? "");
     setSavingDefaultLocation(false);
+    // Reload so booked-slot cards reflect the rewritten locations.
+    await load();
   };
 
   const defaultLocationDirty = draftDefaultLocation.trim() !== defaultLocation.trim();
@@ -1223,16 +1232,23 @@ export default function ManagerCoffeeChatsPage() {
                     {slot.attendees.map((a) => (
                       <div
                         key={a.user_id}
-                        className="flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-full bg-foreground/10 hover:bg-foreground/20 transition-colors"
+                        className="flex items-center gap-1 pl-1 pr-1 py-0.5 rounded-full bg-foreground/10 hover:bg-foreground/20 transition-colors"
                       >
                         <button
                           type="button"
                           onClick={() =>
-                            openProfile({ userId: a.user_id, name: a.name, preloaded: { email: a.email } })
+                            openProfile({ userId: a.user_id, name: a.name, preloaded: { email: a.email, avatar_url: a.avatarUrl } })
                           }
                           title={a.email ?? undefined}
-                          className="group relative text-xs font-medium"
+                          className="group relative flex items-center gap-1.5 text-xs font-medium"
                         >
+                          {a.avatarUrl ? (
+                            <img src={a.avatarUrl} alt={a.name} className="h-5 w-5 rounded-full object-cover flex-shrink-0" />
+                          ) : (
+                            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-foreground/15 text-[9px] font-semibold flex-shrink-0">
+                              {initials(a.name)}
+                            </span>
+                          )}
                           {a.name}
                           <span className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1.5 hidden w-max max-w-[16rem] -translate-x-1/2 rounded-md bg-foreground px-2.5 py-1.5 text-[11px] text-background shadow-lg group-hover:block">
                             {a.email ?? "No email on file"}

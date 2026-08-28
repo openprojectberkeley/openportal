@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { CoffeeChatCard, type CoffeeChatCardProps } from "@/components/coffee-chat-card";
-import { PersonName } from "@/components/person-profile-provider";
+import { PersonName, initials } from "@/components/person-profile-provider";
 import { gcalUrl } from "@/lib/gcal";
 import { useRefreshOnReturn } from "@/lib/use-refresh-on-return";
 import { loadCoffeeChatWindowBounds, earliestBookableIso } from "@/lib/coffee-chat-window";
@@ -25,6 +25,7 @@ type Booking = {
   duration_minutes: number;
   memberName: string;
   memberUserId: string;
+  memberAvatarUrl: string | null;
   location: string | null;
 };
 
@@ -118,8 +119,10 @@ export default function CoffeeChatPage() {
     }
 
     const nameMap = new Map<string, string>();
+    const avatarMap = new Map<string, string | null>();
     for (const p of profiles ?? []) {
       nameMap.set(p.user_id, [p.preferred_firstname, p.lastname].filter(Boolean).join(" ") || "Unknown");
+      avatarMap.set(p.user_id, p.avatar_url ?? null);
     }
 
     // Members the current user has already booked — one chat per person max.
@@ -164,6 +167,7 @@ export default function CoffeeChatPage() {
         duration_minutes: c.duration_minutes,
         memberName: nameMap.get(c.member_id) ?? "Unknown",
         memberUserId: c.member_id,
+        memberAvatarUrl: avatarMap.get(c.member_id) ?? null,
         location: c.location ?? null,
       })),
     );
@@ -254,7 +258,15 @@ export default function CoffeeChatPage() {
               const d = new Date(b.meeting_time);
               return (
                 <div key={b.id} className="border rounded-xl p-4 flex items-center justify-between gap-4 flex-wrap">
-                  <div className="flex flex-col gap-1">
+                  <div className="flex items-center gap-3 min-w-0">
+                    {b.memberAvatarUrl ? (
+                      <img src={b.memberAvatarUrl} alt={b.memberName} className="h-10 w-10 rounded-full object-cover flex-shrink-0" />
+                    ) : (
+                      <div className="h-10 w-10 rounded-full bg-foreground/10 flex items-center justify-center text-xs font-semibold flex-shrink-0">
+                        {initials(b.memberName)}
+                      </div>
+                    )}
+                    <div className="flex flex-col gap-1 min-w-0">
                     <PersonName userId={b.memberUserId} name={b.memberName} className="text-sm font-medium" />
                     <p className="text-xs text-muted-foreground">
                       {d.toLocaleString("en-US", {
@@ -275,6 +287,7 @@ export default function CoffeeChatPage() {
                         )}
                       </p>
                     )}
+                    </div>
                   </div>
                   <div className="flex items-center gap-2">
                     <a

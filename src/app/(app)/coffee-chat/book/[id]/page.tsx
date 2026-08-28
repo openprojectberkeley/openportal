@@ -5,8 +5,10 @@ import { Suspense, useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { useRefreshOnReturn } from "@/lib/use-refresh-on-return";
-import { loadCoffeeChatWindowBounds, earliestBookableIso, COFFEE_CHAT_MIN_NOTICE_MS } from "@/lib/coffee-chat-window";
+import { loadCoffeeChatWindowBounds, earliestBookableIso } from "@/lib/coffee-chat-window";
+import { bucketOpenSlots, groupSlotsByDay, keepSelectionIfOpen, type DayGroup } from "@/lib/coffee-chat-slots";
 import { AvailabilitySkeleton } from "@/components/skeletons";
+import { PersonName } from "@/components/person-profile-provider";
 import { MapPin } from "lucide-react";
 
 type PersonInfo = {
@@ -15,32 +17,6 @@ type PersonInfo = {
   avatarUrl: string | null;
   interests: string | null;
   defaultLocation: string | null;
-};
-
-type Attendee = { user_id: string; name: string };
-
-type OpenSlot = {
-  meeting_time: string;
-  duration_minutes: number;
-  openCount: number;
-  capacity: number;
-  filled: number;
-  attendees: Attendee[];
-};
-
-type SlotView = {
-  meeting_time: string;
-  timeLabel: string;
-  duration_minutes: number;
-  openCount: number;
-  capacity: number;
-  filled: number;
-  attendees: Attendee[];
-};
-
-type DayGroup = {
-  label: string;
-  slots: SlotView[];
 };
 
 // useParams() reads uncached route data; cacheComponents requires it to sit
@@ -84,27 +60,11 @@ function BookingPageInner() {
       .lt("meeting_time", endExclusiveIso)
       .order("meeting_time", { ascending: true });
 
-    // Per meeting_time: count open (unclaimed) rows, total seats (capacity),
-    // and the ids of everyone who's already booked a seat.
-    const openMap = new Map<string, number>();
-    const capacityMap = new Map<string, number>();
-    const durationMap = new Map<string, number>();
-    const filledIdsMap = new Map<string, string[]>();
-    for (const r of rows ?? []) {
-      const key = new Date(r.meeting_time).toISOString();
-      if (!openMap.has(key)) openMap.set(key, 0);
-      if (!durationMap.has(key)) durationMap.set(key, r.duration_minutes);
-      capacityMap.set(key, (capacityMap.get(key) ?? 0) + 1);
-      if (r.applicant_id === null) {
-        openMap.set(key, openMap.get(key)! + 1);
-      } else {
-        if (!filledIdsMap.has(key)) filledIdsMap.set(key, []);
-        filledIdsMap.get(key)!.push(r.applicant_id);
-      }
-    }
-
-    // Resolve the ids of everyone already booked (across all slots) to names.
-    const allApplicantIds = [...new Set([...filledIdsMap.values()].flat())];
+    // Resolve the ids of everyone already booked (across all slots) to names
+    // first, so the pure bucketing can label attendees.
+    const allApplicantIds = [
+      ...new Set((rows ?? []).map((r) => r.applicant_id).filter((x): x is string => x !== null)),
+    ];
     const nameMap = new Map<string, string>();
     if (allApplicantIds.length > 0) {
       const { data: members } = await supabase
@@ -116,47 +76,13 @@ function BookingPageInner() {
       }
     }
 
-    const openSlots: OpenSlot[] = [...openMap.entries()]
-      .filter(([, count]) => count > 0)
-      .map(([meeting_time, openCount]) => {
-        const capacity = capacityMap.get(meeting_time) ?? openCount;
-        return {
-          meeting_time,
-          duration_minutes: durationMap.get(meeting_time) ?? 30,
-          openCount,
-          capacity,
-          filled: capacity - openCount,
-          attendees: (filledIdsMap.get(meeting_time) ?? []).map((uid) => ({
-            user_id: uid,
-            name: nameMap.get(uid) ?? "Member",
-          })),
-        };
-      });
-
-    // Group by day
-    const dayMap = new Map<string, DayGroup>();
-    for (const slot of openSlots) {
-      const d = new Date(slot.meeting_time);
-      const dayLabel = d.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" });
-      const timeLabel = d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-      if (!dayMap.has(dayLabel)) dayMap.set(dayLabel, { label: dayLabel, slots: [] });
-      dayMap.get(dayLabel)!.slots.push({
-        meeting_time: slot.meeting_time,
-        timeLabel,
-        duration_minutes: slot.duration_minutes,
-        openCount: slot.openCount,
-        capacity: slot.capacity,
-        filled: slot.filled,
-        attendees: slot.attendees,
-      });
-    }
-
-    setDays([...dayMap.values()]);
+    // Bucket seat rows into open slots, then group by day (both pure/tested).
+    const openSlots = bucketOpenSlots(rows ?? [], (uid) => nameMap.get(uid) ?? "Member");
+    setDays(groupSlotsByDay(openSlots));
     // Drop a stale selection: if the time we had picked is no longer open
     // (freed/re-taken elsewhere, or a restored-from-cache render), clear it so
     // we can't try to book a slot that isn't actually available anymore.
-    const openKeys = new Set(openSlots.map((s) => s.meeting_time));
-    setSelected((cur) => (cur && openKeys.has(cur) ? cur : null));
+    setSelected((cur) => keepSelectionIfOpen(cur, openSlots));
     setLoading(false);
   }, [id]);
 
@@ -202,87 +128,41 @@ function BookingPageInner() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setError("You must be signed in to book."); setBooking(false); return; }
 
-    // Minimum notice: reject a slot that has aged within 6 hours of now while
-    // the page sat open (the listing filter hides these, but a stale render or
-    // the clock crossing the threshold could still surface one).
-    if (new Date(selected).getTime() - Date.now() < COFFEE_CHAT_MIN_NOTICE_MS) {
-      setError("Coffee chats must be booked at least 6 hours in advance.");
-      await loadSlots();
-      setSelected(null);
+    // Claim a seat atomically on the server. book_coffee_chat re-checks every
+    // rule (minimum notice, in-window, not self, one-upcoming-per-person) and
+    // claims one open row in a single transaction, closing the races the old
+    // client-side pre-check + conditional UPDATE couldn't (stale page,
+    // double-click, two tabs). It returns the booked row id, or raises a known
+    // error message we map to copy below.
+    const { data: chatId, error: bookError } = await supabase.rpc("book_coffee_chat", {
+      p_member_id: id,
+      p_meeting_time: selected,
+    });
+
+    if (bookError) {
+      const msg = bookError.message ?? "";
+      if (msg.includes("already_booked")) {
+        setError("You already have a coffee chat booked with this person.");
+      } else if (msg.includes("self_book")) {
+        setError("You can't book a coffee chat with yourself.");
+      } else if (msg.includes("too_soon")) {
+        setError("Coffee chats must be booked at least 6 hours in advance.");
+        await loadSlots();
+        setSelected(null);
+      } else if (msg.includes("slot_taken") || msg.includes("past_or_out_of_window")) {
+        setError("That time is no longer available. Please pick another.");
+        await loadSlots();
+        setSelected(null);
+      } else {
+        setError("Couldn't book that time. Please try again.");
+      }
       setBooking(false);
       return;
-    }
-
-    // One chat per person: bail if the user already has an upcoming booking
-    // with this member (guards against a stale card or direct navigation).
-    const { data: existing } = await supabase
-      .from("coffee_chats")
-      .select("id")
-      .eq("member_id", id)
-      .eq("applicant_id", user.id)
-      .gte("meeting_time", new Date().toISOString())
-      .limit(1)
-      .maybeSingle();
-
-    if (existing) {
-      setError("You already have a coffee chat booked with this person.");
-      setBooking(false);
-      return;
-    }
-
-    // Grab one still-open row for this slot
-    const { data: openRow } = await supabase
-      .from("coffee_chats")
-      .select("id, location")
-      .eq("member_id", id)
-      .eq("meeting_time", selected)
-      .is("applicant_id", null)
-      .limit(1)
-      .maybeSingle();
-
-    if (!openRow) {
-      setError("That time was just taken. Please pick another.");
-      await loadSlots();
-      setSelected(null);
-      setBooking(false);
-      return;
-    }
-
-    // Atomic claim: only succeeds if the row is still unclaimed.
-    const { data: claimed, error: claimError } = await supabase
-      .from("coffee_chats")
-      .update({ applicant_id: user.id })
-      .eq("id", openRow.id)
-      .is("applicant_id", null)
-      .select();
-
-    // A real DB error (RLS, constraint, etc.) is distinct from the row simply
-    // having been claimed by someone else in the meantime — don't mislabel it.
-    if (claimError) {
-      setError("Couldn't book that time. Please try again.");
-      setBooking(false);
-      return;
-    }
-
-    if (!claimed || claimed.length === 0) {
-      setError("That time was just taken. Please pick another.");
-      await loadSlots();
-      setSelected(null);
-      setBooking(false);
-      return;
-    }
-
-    // Open slots don't carry a location — freeze the host's current default
-    // onto the row now so it stays stable even if the host changes their
-    // default later. A row that already has an explicit location (a rare
-    // per-slot override set before booking) is left untouched.
-    if (!openRow.location && person?.defaultLocation) {
-      await supabase.from("coffee_chats").update({ location: person.defaultLocation }).eq("id", openRow.id);
     }
 
     // Notify the host of the new booking (row now binds applicant = caller).
     await supabase.rpc("notify_coffee_chat_counterparty", {
-      p_chat_id: openRow.id,
+      p_chat_id: chatId,
       p_type: "chat_booked",
       p_message: null,
     });
@@ -321,7 +201,12 @@ function BookingPageInner() {
             </div>
           )}
           <div className="flex flex-col gap-1.5">
-            <span className="font-semibold">{person.name}</span>
+            <PersonName
+              userId={id}
+              name={person.name}
+              preloaded={{ roles: person.roles, avatar_url: person.avatarUrl, interests: person.interests }}
+              className="font-semibold"
+            />
             <div className="flex flex-wrap gap-1">
               {person.roles.map((r) => (
                 <span key={r.id} className="px-2 py-0.5 rounded-full bg-foreground/10 text-xs font-medium">
