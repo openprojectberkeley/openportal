@@ -28,6 +28,7 @@ type Booking = {
   memberAvatarUrl: string | null;
   location: string | null;
   message: string | null;
+  isPast: boolean;
 };
 
 export default function CoffeeChatPage() {
@@ -64,17 +65,16 @@ export default function CoffeeChatPage() {
 
     if (userIds.length === 0) { setLoading(false); return; }
 
-    const nowIso = new Date().toISOString();
-
     const [{ data: allRoles }, { data: profiles }, { data: myChats }] = await Promise.all([
       supabase.from("members_roles").select("user_id, roles(id, role_name, access_level)").in("user_id", userIds),
       supabase.from("members").select("user_id, preferred_firstname, lastname, interests, avatar_url").in("user_id", userIds),
+      // Past chats are fetched too (not just `.gte(meeting_time, now)`) so they
+      // can still be shown, grayed out, under a "Past" section below.
       user
         ? supabase
             .from("coffee_chats")
             .select("id, member_id, meeting_time, duration_minutes, location, message")
             .eq("applicant_id", user.id)
-            .gte("meeting_time", nowIso)
             .order("meeting_time", { ascending: true })
         : Promise.resolve({ data: [] as any[] }),
     ]);
@@ -126,8 +126,12 @@ export default function CoffeeChatPage() {
       avatarMap.set(p.user_id, p.avatar_url ?? null);
     }
 
-    // Members the current user has already booked — one chat per person max.
-    const bookedMemberIds = new Set((myChats ?? []).map((c) => c.member_id));
+    // Members the current user has already booked — one *upcoming* chat per
+    // person max. A past chat with someone doesn't block booking a new one.
+    const nowMs = Date.now();
+    const bookedMemberIds = new Set(
+      (myChats ?? []).filter((c) => new Date(c.meeting_time).getTime() >= nowMs).map((c) => c.member_id),
+    );
 
     // Ordering: President first, then the rest of exec (grouped by role name,
     // alphabetically), then everyone else (board/PMs). Name breaks every tie.
@@ -171,6 +175,7 @@ export default function CoffeeChatPage() {
         memberAvatarUrl: avatarMap.get(c.member_id) ?? null,
         location: c.location ?? null,
         message: c.message ?? null,
+        isPast: new Date(c.meeting_time).getTime() < nowMs,
       })),
     );
 
@@ -252,79 +257,100 @@ export default function CoffeeChatPage() {
         <p className="text-sm text-muted-foreground">Book a 1:1 with a member of our team.</p>
       </div>
 
-      {!loading && bookings.length > 0 && (
-        <section className="flex flex-col gap-3">
-          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Your Coffee Chats</h2>
-          <div className="flex flex-col gap-3">
-            {bookings.map((b) => {
-              const d = new Date(b.meeting_time);
-              return (
-                <div key={b.id} className="border rounded-xl p-4 flex items-center justify-between gap-4 flex-wrap">
-                  <div className="flex items-center gap-3 min-w-0">
-                    {b.memberAvatarUrl ? (
-                      <img src={b.memberAvatarUrl} alt={b.memberName} className="h-10 w-10 rounded-full object-cover flex-shrink-0" />
+      {!loading && bookings.length > 0 && (() => {
+        const upcomingBookings = bookings.filter((b) => !b.isPast);
+        // Fetched oldest-first overall; show most recent past chat first.
+        const pastBookings = bookings.filter((b) => b.isPast).slice().reverse();
+
+        const renderBooking = (b: Booking) => {
+          const d = new Date(b.meeting_time);
+          return (
+            <div
+              key={b.id}
+              className={`border rounded-xl p-4 flex items-center justify-between gap-4 flex-wrap ${b.isPast ? "opacity-50" : ""}`}
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                {b.memberAvatarUrl ? (
+                  <img src={b.memberAvatarUrl} alt={b.memberName} className="h-10 w-10 rounded-full object-cover flex-shrink-0" />
+                ) : (
+                  <div className="h-10 w-10 rounded-full bg-foreground/10 flex items-center justify-center text-xs font-semibold flex-shrink-0">
+                    {initials(b.memberName)}
+                  </div>
+                )}
+                <div className="flex flex-col gap-1 min-w-0">
+                <PersonName userId={b.memberUserId} name={b.memberName} className="text-sm font-medium" />
+                <p className="text-xs text-muted-foreground">
+                  {d.toLocaleString("en-US", {
+                    weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+                  })}
+                  {" · "}
+                  {b.duration_minutes} min
+                </p>
+                {b.location && (
+                  <p className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <MapPin size={12} className="flex-shrink-0" />
+                    {/^https?:\/\//.test(b.location) ? (
+                      <a href={b.location} target="_blank" rel="noopener noreferrer" className="underline decoration-dotted underline-offset-2 hover:text-foreground truncate">
+                        {b.location}
+                      </a>
                     ) : (
-                      <div className="h-10 w-10 rounded-full bg-foreground/10 flex items-center justify-center text-xs font-semibold flex-shrink-0">
-                        {initials(b.memberName)}
-                      </div>
+                      <span className="truncate">{b.location}</span>
                     )}
-                    <div className="flex flex-col gap-1 min-w-0">
-                    <PersonName userId={b.memberUserId} name={b.memberName} className="text-sm font-medium" />
-                    <p className="text-xs text-muted-foreground">
-                      {d.toLocaleString("en-US", {
-                        weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
-                      })}
-                      {" · "}
-                      {b.duration_minutes} min
-                    </p>
-                    {b.location && (
-                      <p className="flex items-center gap-1 text-xs text-muted-foreground">
-                        <MapPin size={12} className="flex-shrink-0" />
-                        {/^https?:\/\//.test(b.location) ? (
-                          <a href={b.location} target="_blank" rel="noopener noreferrer" className="underline decoration-dotted underline-offset-2 hover:text-foreground truncate">
-                            {b.location}
-                          </a>
-                        ) : (
-                          <span className="truncate">{b.location}</span>
-                        )}
-                      </p>
-                    )}
-                    {b.message && (
-                      <p className="text-xs text-muted-foreground">
-                        <span className="font-medium text-foreground">Your message:</span>{" "}
-                        <span className="italic">&ldquo;{b.message}&rdquo;</span>
-                      </p>
-                    )}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <a
-                      href={gcalUrl({
-                        start: d,
-                        durationMs: b.duration_minutes * 60 * 1000,
-                        title: `Coffee Chat with ${b.memberName}`,
-                        details: "Open Project Berkeley coffee chat.",
-                        location: b.location ?? undefined,
-                      })}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center border rounded-md px-3 py-1.5 text-sm hover:bg-accent transition-colors"
-                    >
-                      Add to Google Calendar
-                    </a>
-                    <button
-                      onClick={() => { setCancelTarget(b); setCancelError(null); }}
-                      className="inline-flex items-center rounded-md px-3 py-1.5 text-sm text-red-500 hover:bg-red-500/10 transition-colors"
-                    >
-                      Cancel
-                    </button>
-                  </div>
+                  </p>
+                )}
+                {b.message && (
+                  <p className="text-xs text-muted-foreground">
+                    <span className="font-medium text-foreground">Your message:</span>{" "}
+                    <span className="italic">&ldquo;{b.message}&rdquo;</span>
+                  </p>
+                )}
                 </div>
-              );
-            })}
-          </div>
-        </section>
-      )}
+              </div>
+              {!b.isPast && (
+                <div className="flex items-center gap-2">
+                  <a
+                    href={gcalUrl({
+                      start: d,
+                      durationMs: b.duration_minutes * 60 * 1000,
+                      title: `Coffee Chat with ${b.memberName}`,
+                      details: "Open Project Berkeley coffee chat.",
+                      location: b.location ?? undefined,
+                    })}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center border rounded-md px-3 py-1.5 text-sm hover:bg-accent transition-colors"
+                  >
+                    Add to Google Calendar
+                  </a>
+                  <button
+                    onClick={() => { setCancelTarget(b); setCancelError(null); }}
+                    className="inline-flex items-center rounded-md px-3 py-1.5 text-sm text-red-500 hover:bg-red-500/10 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        };
+
+        return (
+          <>
+            {upcomingBookings.length > 0 && (
+              <section className="flex flex-col gap-3">
+                <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Upcoming Coffee Chats</h2>
+                <div className="flex flex-col gap-3">{upcomingBookings.map(renderBooking)}</div>
+              </section>
+            )}
+            {pastBookings.length > 0 && (
+              <section className="flex flex-col gap-3">
+                <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Past Coffee Chats</h2>
+                <div className="flex flex-col gap-3">{pastBookings.map(renderBooking)}</div>
+              </section>
+            )}
+          </>
+        );
+      })()}
 
       {loading ? (
         <section className="flex flex-col gap-3">
