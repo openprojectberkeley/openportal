@@ -1,7 +1,7 @@
 "use client";
 
 import { createClient } from "@/lib/supabase/client";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Check, Pencil, X, AlertTriangle, Coffee, GripVertical, ChevronDown, Plus } from "lucide-react";
 import {
@@ -434,7 +434,7 @@ export default function ApplicationPage() {
         onDragStart={(e) => setActiveId(String(e.active.id))}
         onDragOver={onDragOver}
         onDragEnd={(e) => { setActiveId(null); onDragEnd(e); }}
-        onDragCancel={() => { setActiveId(null); setOverArea(null); }}
+        onDragCancel={() => { setActiveId(null); setOverArea(null); setOverIndex(null); }}
       >
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Available projects */}
@@ -464,6 +464,7 @@ export default function ApplicationPage() {
               onOpen={(pid) => setModalProject(pid)}
               onRemove={removeProject}
               ghost={rankingGhost}
+              ghostIndex={overIndex ?? ranked.length}
             />
           </div>
         </div>
@@ -683,6 +684,7 @@ function RankZone({
   onOpen,
   onRemove,
   ghost,
+  ghostIndex,
 }: {
   ranked: string[];
   projectById: (id: string) => Project | undefined;
@@ -692,6 +694,7 @@ function RankZone({
   onOpen: (id: string) => void;
   onRemove: (id: string) => void;
   ghost: Project | null;
+  ghostIndex: number;
 }) {
   const { setNodeRef } = useDroppable({ id: "ranked-zone" });
   return (
@@ -707,20 +710,22 @@ function RankZone({
               const p = projectById(id);
               if (!p) return null;
               return (
-                <RankedCard
-                  key={id}
-                  project={p}
-                  rankNumber={i + 1}
-                  completed={!!completedByProject[id]}
-                  studioNeedsChat={p.type === "studio" && !studioMet(id)}
-                  pms={pmMap[id] ?? []}
-                  onOpen={() => onOpen(id)}
-                  onRemove={() => onRemove(id)}
-                />
+                <Fragment key={id}>
+                  {ghost && ghostIndex === i && <GhostCard project={ghost} rankNumber={i + 1} />}
+                  <RankedCard
+                    project={p}
+                    rankNumber={i + 1}
+                    completed={!!completedByProject[id]}
+                    studioNeedsChat={p.type === "studio" && !studioMet(id)}
+                    pms={pmMap[id] ?? []}
+                    onOpen={() => onOpen(id)}
+                    onRemove={() => onRemove(id)}
+                  />
+                </Fragment>
               );
             })}
           </SortableContext>
-          {ghost && <GhostCard project={ghost} rankNumber={ranked.length + 1} />}
+          {ghost && ghostIndex >= ranked.length && <GhostCard project={ghost} rankNumber={ranked.length + 1} />}
         </>
       )}
     </div>
