@@ -50,6 +50,10 @@ const TYPE_LABELS: Record<ProjectType, string> = {
 
 const RANK_COUNT = 7;
 
+// TEMPORARY: application submissions are manually disabled while we prep the
+// next cycle. Remove this to fall back to the application_periods-driven gate.
+const APPLICATIONS_DISABLED = true;
+
 const metaLine = (p: Project) =>
   [
     p.difficulty ? DIFFICULTY_LABELS[p.difficulty] : null,
@@ -103,6 +107,8 @@ export default function ApplicationPage() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setLoading(false); return; }
     userIdRef.current = user.id;
+
+    if (APPLICATIONS_DISABLED) { setClosed(true); setLoading(false); return; }
 
     // Applications can only be built/submitted while a period's status is 'open'
     // (the explicit switch — the start/end window is just an informational
@@ -388,10 +394,9 @@ export default function ApplicationPage() {
           <div className="h-12 w-12 rounded-full bg-foreground/5 text-foreground/70 flex items-center justify-center">
             <X size={24} />
           </div>
-          <h1 className="text-2xl font-bold">Applications are closed</h1>
+          <h1 className="text-2xl font-bold">Application submissions are closed</h1>
           <p className="text-sm text-muted-foreground">
-            There&apos;s no application period open right now. Check back when the next
-            one opens.
+            We&apos;re not accepting written applications right now. Check back again soon.
           </p>
           <Link href="/" className="text-sm text-muted-foreground hover:text-foreground">← Back home</Link>
         </div>

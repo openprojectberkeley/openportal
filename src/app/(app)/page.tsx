@@ -229,7 +229,7 @@ export default function HomePage() {
             </div>
             <div className="flex flex-wrap gap-2">
               <ReapplyStep label="Infosession" href="/infosession" done={reapply.infosessionDone} icon={Users} />
-              <ReapplyStep label="Application" href="/application" done={false} icon={FileText} />
+              <ReapplyStep label="Application" href="/application" done={false} icon={FileText} disabled />
             </div>
           </div>
         )}
@@ -290,12 +290,29 @@ function ReapplyStep({
   href,
   done,
   icon: Icon,
+  disabled,
 }: {
   label: string;
   href: string;
   done: boolean;
   icon: React.ElementType;
+  disabled?: boolean;
 }) {
+  if (disabled) {
+    return (
+      <span
+        aria-disabled
+        className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm bg-background opacity-50 cursor-not-allowed"
+      >
+        <span className="h-6 w-6 rounded-full flex items-center justify-center flex-shrink-0 bg-foreground/5 text-foreground/70">
+          <Icon size={14} />
+        </span>
+        <span className="font-medium">{label}</span>
+        <span className="text-xs text-muted-foreground">(closed)</span>
+      </span>
+    );
+  }
+
   return (
     <Link
       href={href}
@@ -328,7 +345,7 @@ function ApplicantChecklist({
   const items = [
     { label: "Coffee Chat", description: "Meet a member and chat about the club.", href: "/coffee-chat", done: completed.coffeeChat, icon: Coffee },
     { label: "Infosession", description: "Attend an infosession to learn more.", href: "/infosession", done: completed.infosession, icon: Users },
-    { label: "Application", description: "Submit your written application.", href: "/application", done: completed.application, icon: FileText },
+    { label: "Application", description: "Submissions closed — check back soon.", href: "/application", done: completed.application, icon: FileText, disabled: !completed.application },
   ];
 
   const doneCount = items.filter((i) => i.done).length;
@@ -357,11 +374,15 @@ function ApplicantChecklist({
           </div>
 
           <div className="flex flex-col gap-3">
-            {items.map(({ label, description, href, done, icon: Icon }) => (
+            {items.map(({ label, description, href, done, icon: Icon, disabled }) => (
               <button
                 key={href}
-                onClick={() => router.push(href)}
-                className="group border rounded-xl px-4 py-3.5 flex items-center gap-3.5 text-left bg-background hover:border-foreground/20 hover:shadow-sm transition-all"
+                onClick={disabled ? undefined : () => router.push(href)}
+                disabled={disabled}
+                aria-disabled={disabled}
+                className={`group border rounded-xl px-4 py-3.5 flex items-center gap-3.5 text-left bg-background transition-all ${
+                  disabled ? "opacity-50 cursor-not-allowed" : "hover:border-foreground/20 hover:shadow-sm"
+                }`}
               >
                 <div
                   className={`h-10 w-10 rounded-full flex items-center justify-center flex-shrink-0 transition-colors ${
