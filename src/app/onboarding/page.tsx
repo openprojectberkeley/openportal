@@ -51,7 +51,14 @@ export default function OnboardingPage() {
   // A phone is only valid once all 10 digits are present.
   const phoneValid = phone.replace(/\D/g, "").length === 10;
   const canSubmit =
-    !!preferredFirstname.trim() && !!lastname.trim() && phoneValid;
+    !!preferredFirstname.trim() &&
+    !!lastname.trim() &&
+    !!major.trim() &&
+    !!gradYear.trim() &&
+    phoneValid &&
+    !!linkedin.trim() &&
+    !!github.trim() &&
+    !!interests.trim();
 
   useEffect(() => {
     // Wait for roles to resolve before deciding whether an already-onboarded
@@ -193,6 +200,7 @@ export default function OnboardingPage() {
                 value={major}
                 onChange={(e) => setMajor(e.target.value)}
                 placeholder="Major(s)"
+                required
                 className="border bg-transparent rounded-md px-3 py-2 text-sm w-full"
               />
             </div>
@@ -239,6 +247,7 @@ export default function OnboardingPage() {
               value={linkedin}
               onChange={(e) => setLinkedin(e.target.value)}
               placeholder="linkedin.com/in/your-name"
+              required
               className="border bg-transparent rounded-md px-3 py-2 text-sm w-full"
             />
             <p className="text-xs text-muted-foreground">Don&apos;t have one? Make one — it takes two minutes.</p>
@@ -250,6 +259,7 @@ export default function OnboardingPage() {
               value={github}
               onChange={(e) => setGithub(e.target.value)}
               placeholder="github.com/your-username"
+              required
               className="border bg-transparent rounded-md px-3 py-2 text-sm w-full"
             />
             <p className="text-xs text-muted-foreground">Don&apos;t have one? Make one — it takes two minutes.</p>
@@ -261,6 +271,7 @@ export default function OnboardingPage() {
               onChange={(e) => setInterests(e.target.value)}
               placeholder="Interests"
               rows={2}
+              required
               className="border bg-transparent rounded-md px-3 py-2 text-sm w-full resize-none"
             />
           </div>

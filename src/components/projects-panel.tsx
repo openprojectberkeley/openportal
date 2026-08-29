@@ -20,6 +20,7 @@ import { PanelListSkeleton } from "@/components/skeletons";
 import { PersonName } from "@/components/person-profile-provider";
 import { ProjectQuestionsDialog } from "@/components/project-questions-dialog";
 import { type Difficulty, DIFFICULTIES, DIFFICULTY_LABELS } from "@/lib/projects";
+import { AddMemberPicker, useAddMemberFilters } from "@/components/add-member-picker";
 
 type ProjectMember = { user_id: string; name: string; is_pm: boolean };
 
@@ -85,6 +86,7 @@ export function ProjectsPanel({ members }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const memberFilters = useAddMemberFilters(true);
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -319,26 +321,16 @@ export function ProjectsPanel({ members }: Props) {
                   Members
                 </span>
                 <span className="text-[10px] font-normal text-muted-foreground/60">({p.members.length})</span>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
+                <AddMemberPicker
+                  options={available}
+                  onAdd={(m) => addMember(p, m)}
+                  filters={memberFilters}
+                  trigger={
                     <button className="text-muted-foreground hover:text-foreground transition-colors">
                       <PlusCircle size={14} />
                     </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start">
-                    {available.length === 0 ? (
-                      <div className="px-2 py-1.5 text-xs text-muted-foreground">
-                        No members left to add
-                      </div>
-                    ) : (
-                      available.map((m) => (
-                        <DropdownMenuItem key={m.user_id} onSelect={() => addMember(p, m)}>
-                          {m.name}
-                        </DropdownMenuItem>
-                      ))
-                    )}
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                  }
+                />
               </div>
               {p.members.length === 0 ? (
                 <p className="text-xs text-muted-foreground">No members yet.</p>

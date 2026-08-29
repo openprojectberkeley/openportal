@@ -2,17 +2,11 @@
 
 import { createClient } from "@/lib/supabase/client";
 import { useEffect, useState } from "react";
-import { PlusCircle, X } from "lucide-react";
+import { X } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/overlay-scrollbar";
 import { PersonName } from "@/components/person-profile-provider";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Button } from "@/components/ui/button";
+import { AddMemberPicker, useAddMemberFilters } from "@/components/add-member-picker";
 import { MemberRosterSkeleton } from "@/components/skeletons";
 import { AdminCrown } from "@/components/admin-crown";
 
@@ -39,6 +33,7 @@ export function PortalMembersModal({ portalId, open, onOpenChange, canEdit }: Pr
   const [rows, setRows] = useState<MemberRow[]>([]);
   const [allMembers, setAllMembers] = useState<MemberOption[]>([]);
   const [loading, setLoading] = useState(true);
+  const filters = useAddMemberFilters(open && canEdit);
 
   useEffect(() => {
     if (!open) return;
@@ -162,24 +157,7 @@ export function PortalMembersModal({ portalId, open, onOpenChange, canEdit }: Pr
         {/* Add member stays locked to the bottom-left, below the roster. */}
         {canEdit && (
           <div className="flex-shrink-0 pt-3 mt-1 border-t">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button size="sm" variant="outline">
-                  <PlusCircle size={14} /> Add member
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" side="top" className="max-h-64 overflow-y-auto">
-                {available.length === 0 ? (
-                  <div className="px-2 py-1.5 text-xs text-muted-foreground">No members left to add</div>
-                ) : (
-                  available.map((m) => (
-                    <DropdownMenuItem key={m.user_id} onSelect={() => addMember(m)}>
-                      {m.name}
-                    </DropdownMenuItem>
-                  ))
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <AddMemberPicker options={available} onAdd={addMember} filters={filters} />
           </div>
         )}
       </DialogContent>

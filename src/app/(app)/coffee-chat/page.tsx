@@ -11,6 +11,7 @@ import { useRefreshOnReturn } from "@/lib/use-refresh-on-return";
 import { loadCoffeeChatWindowBounds, earliestBookableIso } from "@/lib/coffee-chat-window";
 import { CoffeeTeamSkeleton } from "@/components/skeletons";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { roleRank, sortRoles } from "@/lib/role-order";
 import { MapPin } from "lucide-react";
 
 // At most this many cancellations per rolling 24h, to curb slot churn (there's
@@ -133,22 +134,21 @@ export default function CoffeeChatPage() {
       (myChats ?? []).filter((c) => new Date(c.meeting_time).getTime() >= nowMs).map((c) => c.member_id),
     );
 
-    // Ordering: President first, then the rest of exec (grouped by role name,
-    // alphabetically), then everyone else (board/PMs). Name breaks every tie.
-    const PRESIDENT_ROLE = "President";
-    const rankOf = (userId: string) => {
+    // Ordering: President, then VPs, then any other exec, then PMs/board (see
+    // roleRank). A member sits at their highest-ranking role; role name
+    // (alphabetical) then person name break ties.
+    const memberRank = (userId: string) => {
       const roles = rolesMap.get(userId) ?? [];
-      if (roles.some((r) => r.role_name === PRESIDENT_ROLE)) return { tier: 0, execRole: "" };
-      const execRoleNames = roles.filter((r) => r.access_level === "exec").map((r) => r.role_name).sort();
-      if (execRoleNames.length > 0) return { tier: 1, execRole: execRoleNames[0] };
-      return { tier: 2, execRole: "" };
+      if (roles.length === 0) return { tier: Infinity, role: "" };
+      const best = roles.reduce((a, b) => (roleRank(a) <= roleRank(b) ? a : b));
+      return { tier: roleRank(best), role: best.role_name };
     };
 
     const memberCards = (profiles ?? []).map((p) => ({
       id: p.user_id,
       user_id: p.user_id,
       name: nameMap.get(p.user_id) ?? "Unknown",
-      roles: (rolesMap.get(p.user_id) ?? []).map(({ id, role_name }) => ({ id, role_name })),
+      roles: sortRoles(rolesMap.get(p.user_id) ?? []).map(({ id, role_name }) => ({ id, role_name })),
       avatarUrl: p.avatar_url ?? null,
       interests: p.interests ?? null,
       bookable: bookableMemberIds.has(p.user_id),
@@ -156,10 +156,10 @@ export default function CoffeeChatPage() {
     }));
 
     memberCards.sort((a, b) => {
-      const ra = rankOf(a.user_id);
-      const rb = rankOf(b.user_id);
+      const ra = memberRank(a.user_id);
+      const rb = memberRank(b.user_id);
       if (ra.tier !== rb.tier) return ra.tier - rb.tier;
-      if (ra.tier === 1 && ra.execRole !== rb.execRole) return ra.execRole.localeCompare(rb.execRole);
+      if (ra.role !== rb.role) return ra.role.localeCompare(rb.role);
       return a.name.localeCompare(b.name);
     });
 

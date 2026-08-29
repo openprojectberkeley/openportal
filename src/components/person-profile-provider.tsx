@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useRef, useState } from "react"
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { ProfileModal } from "@/components/profile-modal";
 import { cn } from "@/lib/utils";
+import { sortRoles } from "@/lib/role-order";
 
 export type Role = { id: string; role_name: string };
 
@@ -102,7 +103,7 @@ export function PersonName({ userId, name, preloaded, className }: PersonNamePro
   if (!userId) return <span className={className}>{name}</span>;
 
   const cached = getCached(userId);
-  const roles = cached?.roles ?? preloaded?.roles ?? [];
+  const roles = sortRoles(cached?.roles ?? preloaded?.roles ?? []);
 
   return (
     <HoverCard openDelay={200} closeDelay={100} onOpenChange={(o) => o && ensureLoaded(userId)}>

@@ -21,6 +21,7 @@ import { PortalCreateDialog, type PortalType } from "@/components/portal-create-
 import { ProjectEditDialog } from "@/components/project-edit-dialog";
 import { AdminCrown } from "@/components/admin-crown";
 import { PortalDefaultIcon } from "@/components/portal-default-icon";
+import { AddMemberPicker, useAddMemberFilters } from "@/components/add-member-picker";
 
 export type MemberOption = { user_id: string; name: string };
 export type RoleOption = { id: string; role_name: string };
@@ -54,6 +55,7 @@ export function PortalsPanel({ members, allRoles }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const memberFilters = useAddMemberFilters(true);
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -308,26 +310,16 @@ export function PortalsPanel({ members, allRoles }: Props) {
                         Members
                       </span>
                       <span className="text-[10px] font-normal text-muted-foreground/60">({p.members.length})</span>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
+                      <AddMemberPicker
+                        options={availableMembers}
+                        onAdd={(m) => addMember(p, m)}
+                        filters={memberFilters}
+                        trigger={
                           <button className="text-muted-foreground hover:text-foreground transition-colors">
                             <PlusCircle size={14} />
                           </button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="start">
-                          {availableMembers.length === 0 ? (
-                            <div className="px-2 py-1.5 text-xs text-muted-foreground">
-                              No members left to add
-                            </div>
-                          ) : (
-                            availableMembers.map((m) => (
-                              <DropdownMenuItem key={m.user_id} onSelect={() => addMember(p, m)}>
-                                {m.name}
-                              </DropdownMenuItem>
-                            ))
-                          )}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                        }
+                      />
                     </div>
                     {p.members.length === 0 ? (
                       <p className="text-xs text-muted-foreground">No members yet.</p>
