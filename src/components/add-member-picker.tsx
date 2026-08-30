@@ -129,7 +129,7 @@ export function AddMemberPicker({ options, onAdd, filters, trigger }: Props) {
           </Button>
         )}
       </PopoverTrigger>
-      <PopoverContent container={dialogContainer} align="start" className="w-72 p-2">
+      <PopoverContent container={dialogContainer} side="top" align="end" className="w-72 p-2">
         <div className="flex flex-col gap-2">
           <Input
             autoFocus
