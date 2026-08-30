@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/overlay-scrollbar";
-import { initials, type OpenTarget, type PublicProfile } from "@/components/person-profile-provider";
+import { initials, ProjectBadge, type OpenTarget, type PublicProfile } from "@/components/person-profile-provider";
 import { sortRoles } from "@/lib/role-order";
 
 type Props = {
@@ -54,6 +54,7 @@ export function ProfileModal({ target, cached, onLoaded, onClose }: Props) {
   // Merge: preloaded fields fill gaps until the full record arrives.
   const merged = { ...target?.preloaded, ...(data ?? {}) } as Partial<PublicProfile>;
   const roles = sortRoles(merged.roles ?? []);
+  const projects = merged.projects ?? [];
 
   const contact: { label: string; value: string; href?: string }[] = [];
   if (merged.email) contact.push({ label: "Email", value: merged.email, href: `mailto:${merged.email}` });
@@ -112,6 +113,9 @@ export function ProfileModal({ target, cached, onLoaded, onClose }: Props) {
                   >
                     {r.role_name}
                   </span>
+                ))}
+                {projects.map((p) => (
+                  <ProjectBadge key={p.id} project={p} />
                 ))}
                 {merged.active === false && (
                   <span className="px-2 py-0.5 rounded-full bg-foreground/10 text-muted-foreground text-xs font-medium">

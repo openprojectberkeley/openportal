@@ -1,12 +1,16 @@
 "use client";
 
 import { createContext, useCallback, useContext, useRef, useState } from "react";
+import { Crown } from "lucide-react";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { ProfileModal } from "@/components/profile-modal";
 import { cn } from "@/lib/utils";
 import { sortRoles } from "@/lib/role-order";
+import { readableTextColor, DEFAULT_ACCENT } from "@/lib/portal-color";
 
 export type Role = { id: string; role_name: string };
+
+export type MemberProject = { id: string; name: string; is_pm: boolean; color: string | null };
 
 export type PublicProfile = {
   user_id: string;
@@ -22,6 +26,7 @@ export type PublicProfile = {
   active: boolean | null;
   avatar_url: string | null;
   roles: Role[];
+  projects: MemberProject[];
 };
 
 export type OpenTarget = { userId: string; name: string; preloaded?: Partial<PublicProfile> };
@@ -34,6 +39,22 @@ export function initials(name: string): string {
     .join("")
     .slice(0, 2)
     .toUpperCase();
+}
+
+// A project pill tinted with the project's own accent color, with a crown
+// appended when the member is a PM of that project. Shared by the hover card and
+// the full profile modal so both stay in sync.
+export function ProjectBadge({ project }: { project: MemberProject }) {
+  const bg = project.color || DEFAULT_ACCENT;
+  return (
+    <span
+      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
+      style={{ backgroundColor: bg, color: readableTextColor(bg) }}
+    >
+      {project.name}
+      {project.is_pm && <Crown size={11} className="fill-current shrink-0" />}
+    </span>
+  );
 }
 
 type ContextValue = {
@@ -104,6 +125,7 @@ export function PersonName({ userId, name, preloaded, className }: PersonNamePro
 
   const cached = getCached(userId);
   const roles = sortRoles(cached?.roles ?? preloaded?.roles ?? []);
+  const projects = cached?.projects ?? preloaded?.projects ?? [];
 
   return (
     <HoverCard openDelay={200} closeDelay={100} onOpenChange={(o) => o && ensureLoaded(userId)}>
@@ -126,7 +148,7 @@ export function PersonName({ userId, name, preloaded, className }: PersonNamePro
           </div>
           <div className="flex flex-col gap-1.5 min-w-0">
             <span className="font-semibold text-sm truncate">{name}</span>
-            {roles.length > 0 && (
+            {(roles.length > 0 || projects.length > 0) && (
               <div className="flex flex-wrap gap-1">
                 {roles.map((r) => (
                   <span
@@ -135,6 +157,9 @@ export function PersonName({ userId, name, preloaded, className }: PersonNamePro
                   >
                     {r.role_name}
                   </span>
+                ))}
+                {projects.map((p) => (
+                  <ProjectBadge key={p.id} project={p} />
                 ))}
               </div>
             )}

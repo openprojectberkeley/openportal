@@ -14,7 +14,7 @@ export async function GET(
   const { data: { user }, error } = await supabase.auth.getUser();
   if (error || !user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const [{ data: member }, { data: memberRoles }] = await Promise.all([
+  const [{ data: member }, { data: memberRoles }, { data: memberProjects }] = await Promise.all([
     supabase
       .from("members")
       .select(
@@ -26,6 +26,10 @@ export async function GET(
       .from("members_roles")
       .select("roles(id, role_name)")
       .eq("user_id", userId),
+    supabase
+      .from("project_members")
+      .select("is_pm, projects(id, name, color)")
+      .eq("user_id", userId),
   ]);
 
   if (!member) return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -34,5 +38,14 @@ export async function GET(
     .map((mr) => mr.roles as unknown as { id: string; role_name: string } | null)
     .filter((r): r is { id: string; role_name: string } => Boolean(r));
 
-  return NextResponse.json({ ...member, roles });
+  const projects = (memberProjects ?? [])
+    .map((pm) => {
+      const project = pm.projects as unknown as { id: string; name: string; color: string | null } | null;
+      return project
+        ? { id: project.id, name: project.name, is_pm: Boolean(pm.is_pm), color: project.color ?? null }
+        : null;
+    })
+    .filter((p): p is { id: string; name: string; is_pm: boolean; color: string | null } => Boolean(p));
+
+  return NextResponse.json({ ...member, roles, projects });
 }

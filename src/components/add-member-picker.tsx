@@ -77,12 +77,14 @@ type Props = {
   onAdd: (m: MemberOption) => void;
   filters: AddMemberFilters;
   trigger?: React.ReactNode;
+  side?: "top" | "right" | "bottom" | "left";
+  align?: "start" | "center" | "end";
 };
 
 // Compact popover for adding a member: a search box plus role and project
 // filters over a scrollable result list. Add-only — the caller owns the
 // mutation and its own roster state.
-export function AddMemberPicker({ options, onAdd, filters, trigger }: Props) {
+export function AddMemberPicker({ options, onAdd, filters, trigger, side = "bottom", align = "start" }: Props) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState<number | null>(null);
@@ -129,7 +131,7 @@ export function AddMemberPicker({ options, onAdd, filters, trigger }: Props) {
           </Button>
         )}
       </PopoverTrigger>
-      <PopoverContent container={dialogContainer} side="top" align="end" className="w-72 p-2">
+      <PopoverContent container={dialogContainer} side={side} align={align} className="w-72 p-2">
         <div className="flex flex-col gap-2">
           <Input
             autoFocus

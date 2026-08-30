@@ -314,6 +314,7 @@ export function PortalsPanel({ members, allRoles }: Props) {
                         options={availableMembers}
                         onAdd={(m) => addMember(p, m)}
                         filters={memberFilters}
+                        side="right"
                         trigger={
                           <button className="text-muted-foreground hover:text-foreground transition-colors">
                             <PlusCircle size={14} />

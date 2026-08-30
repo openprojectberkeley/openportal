@@ -157,7 +157,7 @@ export function PortalMembersModal({ portalId, open, onOpenChange, canEdit }: Pr
         {/* Add member stays locked to the bottom-left, below the roster. */}
         {canEdit && (
           <div className="flex-shrink-0 pt-3 mt-1 border-t">
-            <AddMemberPicker options={available} onAdd={addMember} filters={filters} />
+            <AddMemberPicker options={available} onAdd={addMember} filters={filters} side="left" align="end" />
           </div>
         )}
       </DialogContent>
