@@ -62,7 +62,7 @@ export function buildInvite(inv: IcsInvite): string {
     `SUMMARY:${escapeText(inv.summary)}`,
     `STATUS:${status}`,
     `ORGANIZER;CN=${escapeText(inv.organizerName)}:mailto:${inv.organizerEmail}`,
-    `ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:${inv.attendeeEmail}`,
+    `ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=FALSE:mailto:${inv.attendeeEmail}`,
   ];
 
   if (inv.location) lines.push(`LOCATION:${escapeText(inv.location)}`);
