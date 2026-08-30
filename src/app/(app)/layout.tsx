@@ -3,6 +3,7 @@ import { ThemeSwitcher } from "@/components/theme-switcher";
 import { PortalMetaProvider } from "@/components/portal-meta-provider";
 import { NotificationsProvider } from "@/components/notifications-provider";
 import { TimezoneSync } from "@/components/timezone-sync";
+import { SupportButton } from "@/components/support-button";
 
 // Shared shell for the authenticated app: home, portals, the applicant flow,
 // and the manager section. Replaces the old apply/ and protected/ layouts.
@@ -23,6 +24,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <ThemeSwitcher />
           </div>
         </footer>
+        <SupportButton />
       </main>
       </NotificationsProvider>
     </PortalMetaProvider>

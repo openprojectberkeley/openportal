@@ -345,7 +345,7 @@ export function CalendarPanel({ portalId }: Props) {
         {/* Month section (shrinks when the events sections sit beside it). */}
         <div className="w-full sm:w-1/2 lg:w-full flex flex-col gap-3">
           <div className="flex items-center justify-between">
-            <h2 className="font-semibold text-sm">
+            <h2 className="font-semibold text-sm select-none">
               {MONTHS[viewMonth]} {viewYear}
             </h2>
             <div className="flex items-center gap-1">
@@ -367,7 +367,7 @@ export function CalendarPanel({ portalId }: Props) {
 
           <div className="grid grid-cols-7 gap-1 text-center">
             {WEEKDAYS.map((w) => (
-              <div key={w} className="text-[10px] font-medium text-muted-foreground uppercase py-1">
+              <div key={w} className="text-[10px] font-medium text-muted-foreground uppercase py-1 select-none">
                 {w}
               </div>
             ))}

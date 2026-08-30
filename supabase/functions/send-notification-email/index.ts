@@ -18,7 +18,7 @@
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { encodeBase64 } from "jsr:@std/encoding@1/base64";
-import { buildInvite, type IcsMethod } from "./ics.ts";
+import { buildInvite, type IcsAttendee, type IcsMethod } from "./ics.ts";
 
 const SMTP2GO_ENDPOINT = "https://api.smtp2go.com/v3/email/send";
 
@@ -26,8 +26,8 @@ const ORGANIZER_NAME = "Open Portal";
 const ORGANIZER_EMAIL = "noreply@openprojectberkeley.com";
 const EVENT_SUMMARY = "Coffee chat — Open Project";
 
-// Types that carry a schedulable meeting, and how each maps to a calendar action.
-const CANCEL_TYPES = new Set(["chat_cancelled_by_applicant", "chat_cancelled_by_host"]);
+// Every coffee-chat type carries a calendar action: REQUEST adds/updates the
+// shared slot event, CANCEL removes the leaver's copy (see method rule below).
 const CALENDAR_TYPES = new Set([
   "chat_booked",
   "location_added",
@@ -35,6 +35,18 @@ const CALENDAR_TYPES = new Set([
   "chat_cancelled_by_applicant",
   "chat_cancelled_by_host",
 ]);
+const CANCEL_TYPES = new Set(["chat_cancelled_by_applicant", "chat_cancelled_by_host"]);
+
+type MemberProfile = {
+  user_id: string;
+  email: string | null;
+  preferred_firstname: string | null;
+  lastname: string | null;
+};
+
+function displayName(p: { preferred_firstname: string | null; lastname: string | null }): string {
+  return [p.preferred_firstname, p.lastname].filter(Boolean).join(" ") || "Open Project member";
+}
 
 function escapeHtml(s: string): string {
   return s
@@ -65,6 +77,7 @@ type NotificationRow = {
   body: string | null;
   coffee_chat_id: string | null;
   meeting_time: string | null;
+  member_id: string | null;
   created_at: string;
   email_sent_at: string | null;
 };
@@ -99,7 +112,7 @@ Deno.serve(async (req) => {
   // Load the notification. Guard email_sent_at so replays never double-send.
   const { data: notif, error: notifErr } = await admin
     .from("notifications")
-    .select("id, user_id, type, title, body, coffee_chat_id, meeting_time, created_at, email_sent_at")
+    .select("id, user_id, type, title, body, coffee_chat_id, meeting_time, member_id, created_at, email_sent_at")
     .eq("id", notificationId)
     .maybeSingle<NotificationRow>();
 
@@ -131,29 +144,63 @@ Deno.serve(async (req) => {
   const greeting = member.preferred_firstname ? `Hi ${escapeHtml(member.preferred_firstname)},` : "Hi,";
   const bodyText = notif.body ?? "";
 
-  // Build a calendar action for the schedulable coffee-chat types. Everything is
-  // derived from the notification row (meeting_time is stored there); the seat is
-  // only an enrichment for duration/location, so a missing/altered seat degrades
-  // gracefully to a 30-min event with no location rather than skipping the invite.
+  // Build a group calendar invite for the SLOT (host + meeting_time). All seats
+  // of a slot share one UID, so a new booker is added to the same event; each
+  // ATTENDEE line is one party. REQUEST adds/updates; CANCEL removes the leaver's
+  // copy. The slot is identified by the notification's member_id + meeting_time.
   let icsInvite: string | null = null;
   let icsMethod: IcsMethod = "REQUEST";
   let gcalHtml = "";
-  if (CALENDAR_TYPES.has(notif.type) && notif.coffee_chat_id && notif.meeting_time) {
-    const { data: seat } = await admin
+  if (CALENDAR_TYPES.has(notif.type) && notif.member_id && notif.meeting_time) {
+    // All seats at this host+time. Gives duration, location, and the applicant
+    // roster; a missing seat degrades to a 30-min, no-location event.
+    const { data: seats } = await admin
       .from("coffee_chats")
-      .select("duration_minutes, location")
-      .eq("id", notif.coffee_chat_id)
-      .maybeSingle<{ duration_minutes: number | null; location: string | null }>();
+      .select("applicant_id, duration_minutes, location")
+      .eq("member_id", notif.member_id)
+      .eq("meeting_time", notif.meeting_time);
+
+    const durationMin = seats?.find((s) => s.duration_minutes != null)?.duration_minutes ?? 30;
+    const location = seats?.find((s) => s.location)?.location ?? null;
+    const applicantIds = [...new Set((seats ?? []).map((s) => s.applicant_id).filter((v): v is string => !!v))];
+
+    // CANCEL only for the applicant who left; everyone else (host roster update,
+    // new booker, location change) gets a REQUEST.
+    const method: IcsMethod = CANCEL_TYPES.has(notif.type) && notif.user_id !== notif.member_id
+      ? "CANCEL"
+      : "REQUEST";
+    icsMethod = method;
+
+    // Per-recipient roster for privacy: the HOST's invite lists everyone (host +
+    // all applicants); an APPLICANT's invite lists only the host + themselves, so
+    // applicants never see co-attendees on their calendar (they see co-chatters
+    // only in Open Portal). For a CANCEL we address only the leaving recipient.
+    const isHostRecipient = notif.user_id === notif.member_id;
+    let attendees: IcsAttendee[] = [];
+    if (method === "CANCEL") {
+      attendees = [{ name: member.preferred_firstname ?? member.email, email: member.email }];
+    } else {
+      const rosterIds = isHostRecipient
+        ? [notif.member_id, ...applicantIds]
+        : [notif.member_id, notif.user_id];
+      const ids = [...new Set(rosterIds)];
+      const { data: profiles } = await admin
+        .from("members")
+        .select("user_id, email, preferred_firstname, lastname")
+        .in("user_id", ids);
+      attendees = (profiles ?? [])
+        .filter((p): p is MemberProfile & { email: string } => !!p.email)
+        .map((p) => ({ name: displayName(p), email: p.email }));
+    }
 
     const start = new Date(notif.meeting_time);
-    const end = new Date(start.getTime() + (seat?.duration_minutes ?? 30) * 60 * 1000);
-    const location = seat?.location ?? null;
-    icsMethod = CANCEL_TYPES.has(notif.type) ? "CANCEL" : "REQUEST";
+    const end = new Date(start.getTime() + durationMin * 60 * 1000);
 
     icsInvite = buildInvite({
-      method: icsMethod,
-      uid: `${notif.coffee_chat_id}@openportal`,
-      // Monotonic per notification, so updates/cancels outrank the original.
+      method,
+      // One stable UID per slot (host + time), shared by all seats/attendees.
+      uid: `slot-${notif.member_id}-${Math.floor(start.getTime() / 1000)}@openportal`,
+      // Monotonic per notification, so a later update/cancel outranks the original.
       sequence: Math.floor(Date.parse(notif.created_at) / 1000),
       start,
       end,
@@ -162,11 +209,11 @@ Deno.serve(async (req) => {
       location,
       organizerName: ORGANIZER_NAME,
       organizerEmail: ORGANIZER_EMAIL,
-      attendeeEmail: member.email,
+      attendees,
     });
 
-    // Explicit "Add to Google Calendar" fallback — only for add/update, not cancel.
-    if (icsMethod === "REQUEST") {
+    // Explicit "Add to Google Calendar" fallback — not on a cancel.
+    if (method === "REQUEST") {
       const url = gcalUrl({ start, end, title: EVENT_SUMMARY, details: bodyText || undefined, location: location ?? undefined });
       gcalHtml = `<p style="margin:20px 0 0"><a href="${escapeHtml(url)}" style="display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:10px 16px;border-radius:6px;font-weight:600">Add to Google Calendar</a></p>`;
     }
@@ -189,8 +236,8 @@ Deno.serve(async (req) => {
   const text = `${greeting}\n\n${notif.title}\n${bodyText}${appUrl ? `\n\nOpen Portal: ${appUrl}` : ""}`;
 
   // SMTP2GO v3 attachments: base64 `fileblob`, `filename`, `mimetype`. The
-  // text/calendar mimetype (with the matching METHOD) is what makes mail clients
-  // treat the .ics as an invite rather than a generic file.
+  // text/calendar mimetype is what makes mail clients treat the .ics as an
+  // add-to-calendar invite rather than a generic file.
   const attachments = icsInvite
     ? [{
       filename: "invite.ics",

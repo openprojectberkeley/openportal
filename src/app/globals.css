@@ -4,25 +4,28 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 0 0% 3.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 0 0% 3.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 3.9%;
-    --primary: 0 0% 9%;
-    --primary-foreground: 0 0% 98%;
-    --secondary: 0 0% 96.1%;
-    --secondary-foreground: 0 0% 9%;
-    --muted: 0 0% 96.1%;
-    --muted-foreground: 0 0% 45.1%;
-    --accent: 0 0% 96.1%;
-    --accent-foreground: 0 0% 9%;
+    /* Light theme: softened off-white (never solid white) with a barely-there
+       cool blue/purple tint (hue ~255, very low saturation). The tint is meant
+       to be felt, not seen. */
+    --background: 255 20% 97%;
+    --foreground: 255 12% 12%;
+    --card: 255 24% 99%;
+    --card-foreground: 255 12% 12%;
+    --popover: 255 24% 99%;
+    --popover-foreground: 255 12% 12%;
+    --primary: 255 12% 15%;
+    --primary-foreground: 255 20% 98%;
+    --secondary: 255 16% 93.5%;
+    --secondary-foreground: 255 12% 18%;
+    --muted: 255 16% 94%;
+    --muted-foreground: 255 8% 44%;
+    --accent: 255 18% 92%;
+    --accent-foreground: 255 12% 18%;
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 89.8%;
-    --input: 0 0% 89.8%;
-    --ring: 0 0% 3.9%;
+    --border: 255 14% 88%;
+    --input: 255 14% 88%;
+    --ring: 255 12% 40%;
     --chart-1: 12 76% 61%;
     --chart-2: 173 58% 39%;
     --chart-3: 197 37% 24%;
@@ -82,5 +85,34 @@
   }
   *::-webkit-scrollbar {
     display: none; /* WebKit */
+  }
+
+  /* Prevent text selection on non-content UI so click/drag on these elements
+     never leaves a stray highlight. Actual text content (headings, paragraphs,
+     inputs, etc.) stays selectable. Covers: all images, buttons and things that
+     act as buttons, form controls, links, and inline icons/logos (svg). */
+  img,
+  svg,
+  button,
+  a,
+  label,
+  summary,
+  [role="button"],
+  select {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  /* Images shouldn't be draggable either (avoids the ghost-drag image). */
+  img {
+    -webkit-user-drag: none;
+  }
+
+  /* Inputs and textareas are interactive text fields — keep them selectable
+     even though the label rule above turns off selection nearby. */
+  input:not([type="button"]):not([type="submit"]):not([type="reset"]),
+  textarea {
+    -webkit-user-select: text;
+    user-select: text;
   }
 }
