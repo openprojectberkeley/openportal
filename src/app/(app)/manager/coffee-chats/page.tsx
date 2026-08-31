@@ -974,7 +974,15 @@ export default function ManagerCoffeeChatsPage() {
       )}
       <div className="flex flex-col gap-1">
         <Link href="/manager" className="text-sm text-muted-foreground hover:text-foreground">← Back</Link>
-        <h1 className="text-2xl font-bold">Coffee Chats</h1>
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <h1 className="text-2xl font-bold">Coffee Chats</h1>
+          <Link
+            href="/manager/coffee-chats/all"
+            className="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-accent transition-colors"
+          >
+            View everyone&apos;s availability
+          </Link>
+        </div>
       </div>
 
       {/* Bookable window — VP Tech only */}

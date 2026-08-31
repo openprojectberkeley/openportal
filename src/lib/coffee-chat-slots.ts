@@ -30,10 +30,13 @@ export type DayGroup = { label: string; slots: SlotView[] };
 // least one open seat. `resolveName` maps a claimed applicant_id to a display
 // name (defaults to "Member"). Rows are keyed by their canonical ISO string so
 // equivalent timestamps collapse together; duration is taken from the first row
-// seen for a time.
+// seen for a time. Pass `includeFullyBooked` to also return slots whose seats
+// are all claimed (openCount 0) — used by the read-only availability overview,
+// which shows fully-booked times too (dimmed) rather than hiding them.
 export function bucketOpenSlots(
   rows: SeatRow[],
   resolveName: (userId: string) => string = () => "Member",
+  includeFullyBooked = false,
 ): OpenSlot[] {
   const openMap = new Map<string, number>();
   const capacityMap = new Map<string, number>();
@@ -54,7 +57,7 @@ export function bucketOpenSlots(
   }
 
   return [...openMap.entries()]
-    .filter(([, count]) => count > 0)
+    .filter(([, count]) => includeFullyBooked || count > 0)
     .map(([meeting_time, openCount]) => {
       const capacity = capacityMap.get(meeting_time) ?? openCount;
       return {

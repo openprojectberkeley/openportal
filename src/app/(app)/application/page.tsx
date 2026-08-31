@@ -1,19 +1,18 @@
 "use client";
 
 import { createClient } from "@/lib/supabase/client";
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Check, Pencil, X, AlertTriangle, Coffee, GripVertical, ChevronDown, Plus } from "lucide-react";
+import { Check, Pencil, X, AlertTriangle, Coffee, ChevronDown, Plus } from "lucide-react";
 import {
   DndContext,
   DragOverlay,
   PointerSensor,
   useSensor,
   useSensors,
-  closestCenter,
-  useDraggable,
+  closestCorners,
   useDroppable,
-  type DragEndEvent,
+  type DragStartEvent,
   type DragOverEvent,
 } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
@@ -51,9 +50,15 @@ const TYPE_LABELS: Record<ProjectType, string> = {
 
 const RANK_COUNT = 7;
 
-// TEMPORARY: application submissions are manually disabled while we prep the
-// next cycle. Remove this to fall back to the application_periods-driven gate.
-const APPLICATIONS_DISABLED = true;
+// The two drop zones the DnD arranges items between.
+const RANKED_ZONE = "ranked-zone";
+const AVAILABLE_ZONE = "available-zone";
+
+// TEMPORARY: submissions are manually locked while we prep the next cycle.
+// The application page stays fully browsable — members can still rank projects
+// and fill out their answers (drafts save) — but the "Submit application"
+// button is disabled. Set to false to restore normal submission.
+const SUBMISSIONS_LOCKED = true;
 
 const metaLine = (p: Project) =>
   [
@@ -63,6 +68,8 @@ const metaLine = (p: Project) =>
   ]
     .filter(Boolean)
     .join(" · ");
+
+const sameOrder = (a: string[], b: string[]) => a.length === b.length && a.every((x, i) => x === b[i]);
 
 export default function ApplicationPage() {
   const { isBoardOrExec } = useRoleSim();
@@ -92,15 +99,15 @@ export default function ApplicationPage() {
   const [error, setError] = useState<string | null>(null);
   // The id currently being dragged, so the DragOverlay can render a 1:1 preview.
   const [activeId, setActiveId] = useState<string | null>(null);
-  // Which zone the pointer is currently over, so we can show a slot preview there.
-  const [overArea, setOverArea] = useState<"ranking" | "available" | null>(null);
-  // For an incoming available card, the index in `ranked` it would drop into, so
-  // the slot preview appears between cards rather than always at the end.
-  const [overIndex, setOverIndex] = useState<number | null>(null);
-  // Pointer Y where the drag started; + the drag delta gives the live pointer Y,
-  // which decides before/after a hovered card far more reliably than the (tall)
-  // dragged card's own center — so the very top and bottom slots stay reachable.
-  const dragStartYRef = useRef<number | null>(null);
+  // A working copy of `ranked` mutated live while a drag is in flight (so the
+  // list reflows under the pointer). Committed to the DB once, on drop. The ref
+  // mirrors it so onDragEnd reads the final order without waiting on a re-render.
+  const [dragRanked, setDragRanked] = useState<string[] | null>(null);
+  const dragRankedRef = useRef<string[] | null>(null);
+  const setDrag = useCallback((next: string[] | null) => {
+    dragRankedRef.current = next;
+    setDragRanked(next);
+  }, []);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
@@ -109,8 +116,6 @@ export default function ApplicationPage() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setLoading(false); return; }
     userIdRef.current = user.id;
-
-    if (APPLICATIONS_DISABLED) { setClosed(true); setLoading(false); return; }
 
     // Applications can only be built/submitted while a period's status is 'open'
     // (the explicit switch — the start/end window is just an informational
@@ -222,64 +227,69 @@ export default function ApplicationPage() {
   const syncRanks = async (list: string[], idMap: Record<string, string>) => {
     const supabase = createClient();
     await Promise.all(
-      list.map((pid, i) => supabase.from("application_rankings").update({ rank: i + 1 }).eq("id", idMap[pid])),
+      list.map((pid, i) =>
+        idMap[pid]
+          ? supabase.from("application_rankings").update({ rank: i + 1 }).eq("id", idMap[pid])
+          : Promise.resolve(),
+      ),
     );
   };
 
-  const addProject = async (projectId: string, atIndex?: number) => {
-    if (ranked.includes(projectId) || ranked.length >= RANK_COUNT) return;
-    // First-timers can't rank OP Studio projects (mirrors the RLS gate).
-    const proj = projects.find((p) => p.id === projectId);
-    if (proj?.type === "studio" && !(memberReturning || isBoardOrExec)) return;
-    const aId = await ensureApp();
-    if (!aId) { setError("Couldn't start your application."); return; }
-    const index = atIndex ?? ranked.length;
-    const newRanked = [...ranked];
-    newRanked.splice(index, 0, projectId);
-
+  // Restore a soft-removed row (keeps its essay/answers — see migration 0021) or
+  // insert a fresh one, returning the ranking id and its completed flag.
+  const upsertRankingRow = async (
+    aId: string,
+    projectId: string,
+    rank: number,
+  ): Promise<{ rid: string; completed: boolean } | null> => {
     const supabase = createClient();
-
-    // A soft-removed row for this project still holds its essay/answers — restore
-    // it instead of creating a fresh one (see migration 0021).
     const { data: existing } = await supabase
       .from("application_rankings")
       .select("id, completed")
       .eq("application_id", aId)
       .eq("project_id", projectId)
       .maybeSingle();
-
-    let rid: string;
-    let completed = false;
     if (existing) {
-      rid = existing.id as string;
-      completed = !!existing.completed;
+      const rid = existing.id as string;
       const { error: updateError } = await supabase
         .from("application_rankings")
-        .update({ ranked: true, rank: index + 1, updated_at: new Date().toISOString() })
+        .update({ ranked: true, rank, updated_at: new Date().toISOString() })
         .eq("id", rid);
-      if (updateError) return;
-    } else {
-      const { data, error: insertError } = await supabase
-        .from("application_rankings")
-        .insert({ application_id: aId, project_id: projectId, rank: index + 1, completed: false, ranked: true })
-        .select("id")
-        .single();
-      if (insertError || !data) return;
-      rid = data.id as string;
+      if (updateError) return null;
+      return { rid, completed: !!existing.completed };
     }
+    const { data, error: insertError } = await supabase
+      .from("application_rankings")
+      .insert({ application_id: aId, project_id: projectId, rank, completed: false, ranked: true })
+      .select("id")
+      .single();
+    if (insertError || !data) return null;
+    return { rid: data.id as string, completed: false };
+  };
 
-    const nextMap = { ...rankingIdByProject, [projectId]: rid };
+  // The `+` button on an available card — append to the ranking.
+  const addProject = async (projectId: string) => {
+    if (ranked.includes(projectId) || ranked.length >= RANK_COUNT) return;
+    // First-timers can't rank OP Studio projects (mirrors the RLS gate).
+    const proj = projects.find((p) => p.id === projectId);
+    if (proj?.type === "studio" && !(memberReturning || isBoardOrExec)) return;
+    const aId = await ensureApp();
+    if (!aId) { setError("Couldn't start your application."); return; }
+    const newRanked = [...ranked, projectId];
+    const row = await upsertRankingRow(aId, projectId, newRanked.length);
+    if (!row) return;
+    const nextMap = { ...rankingIdByProject, [projectId]: row.rid };
     setRankingIdByProject(nextMap);
-    setCompletedByProject((p) => ({ ...p, [projectId]: completed }));
+    setCompletedByProject((p) => ({ ...p, [projectId]: row.completed }));
     setRanked(newRanked);
     await syncRanks(newRanked, nextMap);
   };
 
+  // The `X` button on a ranked card — soft-remove so re-adding restores answers.
   const removeProject = async (projectId: string) => {
     const rid = rankingIdByProject[projectId];
     const newRanked = ranked.filter((p) => p !== projectId);
     const supabase = createClient();
-    // Soft-remove: keep the row (and its essay/answers) so re-adding restores it.
     if (rid) await supabase.from("application_rankings").update({ ranked: false }).eq("id", rid);
     const nextMap = { ...rankingIdByProject };
     delete nextMap[projectId];
@@ -289,83 +299,128 @@ export default function ApplicationPage() {
     await syncRanks(newRanked, nextMap);
   };
 
-  const reorder = async (newRanked: string[]) => {
-    setRanked(newRanked);
-    await syncRanks(newRanked, rankingIdByProject);
-  };
+  // Persist the net result of a drag (add / remove / reorder) in one pass by
+  // diffing the dropped order against the committed one.
+  const commitRanked = async (next: string[]) => {
+    const prev = ranked;
+    const added = next.filter((id) => !prev.includes(id));
+    const removed = prev.filter((id) => !next.includes(id));
 
-  const areaOf = (overId: string | null): "ranking" | "available" | null => {
-    if (!overId) return null;
-    if (overId === "ranked-zone" || overId.startsWith("slot:") || ranked.includes(overId)) return "ranking";
-    if (overId === "available-zone" || overId.startsWith("avail:")) return "available";
-    return null;
-  };
-
-  // Where an incoming available card would land in `ranked`, based on the card it
-  // is hovering: before it if the pointer sits above the hovered card's middle,
-  // otherwise after. Over the empty zone → the end. Using the live pointer Y
-  // (drag start + delta) rather than the dragged card's center keeps the very
-  // top and bottom slots reachable even for a tall dragged card.
-  const insertIndexFor = (event: DragOverEvent | DragEndEvent): number => {
-    const over = event.over;
-    if (!over) return ranked.length;
-    const idx = ranked.indexOf(String(over.id));
-    if (idx === -1) return ranked.length;
-    const startY = dragStartYRef.current;
-    const activeRect = event.active.rect.current.translated;
-    const pointerY =
-      startY != null
-        ? startY + event.delta.y
-        : activeRect
-          ? activeRect.top + activeRect.height / 2
-          : 0;
-    const overMidY = over.rect.top + over.rect.height / 2;
-    return pointerY < overMidY ? idx : idx + 1;
-  };
-
-  const onDragOver = (event: DragOverEvent) => {
-    const area = areaOf(event.over ? String(event.over.id) : null);
-    setOverArea(area);
-    const activeIsAvail = String(event.active.id).startsWith("avail:");
-    setOverIndex(activeIsAvail && area === "ranking" ? insertIndexFor(event) : null);
-  };
-
-  const onDragEnd = (event: DragEndEvent) => {
-    setOverArea(null);
-    setOverIndex(null);
-    const { active, over } = event;
-    if (!over) return;
-    const activeId = String(active.id);
-    const overId = String(over.id);
-    const area = areaOf(overId);
-
-    if (activeId.startsWith("avail:")) {
-      // Only a drop onto the ranking adds it — dropping back over the projects
-      // list (or its own area) does nothing. Inserted at the hovered slot,
-      // matching the slot preview (falls back to the end).
-      if (area === "ranking") addProject(activeId.slice(6), insertIndexFor(event));
+    if (added.length === 0 && removed.length === 0) {
+      if (!sameOrder(prev, next)) {
+        setRanked(next);
+        await syncRanks(next, rankingIdByProject);
+      }
       return;
     }
 
-    // A ranked item dropped back over the available list is removed; over the
-    // ranking it reorders.
-    if (ranked.includes(activeId)) {
-      if (area === "available") { removeProject(activeId); return; }
-      if (area === "ranking") {
-        const from = ranked.indexOf(activeId);
-        // Over another card → that card's slot; over the empty zone below the
-        // last card → the bottom, so a card can be dragged to become last.
-        const to = ranked.includes(overId) ? ranked.indexOf(overId) : ranked.length - 1;
-        if (to !== from) reorder(arrayMove(ranked, from, to));
-      }
+    const supabase = createClient();
+    const aId = added.length ? await ensureApp() : appIdRef.current;
+    const nextMap: Record<string, string> = { ...rankingIdByProject };
+    const nextCompleted: Record<string, boolean> = { ...completedByProject };
+
+    for (const projectId of added) {
+      if (!aId) { setError("Couldn't start your application."); continue; }
+      const row = await upsertRankingRow(aId, projectId, next.indexOf(projectId) + 1);
+      if (!row) continue;
+      nextMap[projectId] = row.rid;
+      nextCompleted[projectId] = row.completed;
     }
+    for (const projectId of removed) {
+      const rid = rankingIdByProject[projectId];
+      if (rid) await supabase.from("application_rankings").update({ ranked: false }).eq("id", rid);
+      delete nextMap[projectId];
+      delete nextCompleted[projectId];
+    }
+
+    setRankingIdByProject(nextMap);
+    setCompletedByProject(nextCompleted);
+    setRanked(next);
+    await syncRanks(next, nextMap);
   };
 
   const projectById = (id: string) => projects.find((p) => p.id === id);
   const studioMet = (projectId: string) => (pmMap[projectId] ?? []).some((pm) => chattedWith.has(pm.user_id));
   const studioBlocked = ranked.filter((id) => projectById(id)?.type === "studio" && !studioMet(id));
   const allCompleted = ranked.length > 0 && ranked.every((id) => completedByProject[id]);
-  const canSubmit = ranked.length === RANK_COUNT && allCompleted && studioBlocked.length === 0;
+  // The ranking is otherwise complete and ready — used to decide which hint to
+  // show when submissions are locked.
+  const rankingReady = ranked.length === RANK_COUNT && allCompleted && studioBlocked.length === 0;
+  const canSubmit = rankingReady && !SUBMISSIONS_LOCKED;
+
+  // First-time members (non_member) may only apply to OP Launch; returning
+  // members (active/inactive) and staff (board/exec) may also apply to OP Studio.
+  const studioEligible = memberReturning || isBoardOrExec;
+
+  // ---- Drag orchestration (multi-container sortable) ----------------------
+  // Both lists are sortable containers; `dragRanked` is mutated live on hover so
+  // a card can be dropped into any slot (first/last included) and reflows under
+  // the pointer. `ranked` derives which projects are "available".
+  const onDragStart = (event: DragStartEvent) => {
+    setActiveId(String(event.active.id));
+    setDrag([...ranked]);
+  };
+
+  const onDragOver = (event: DragOverEvent) => {
+    const { active, over } = event;
+    if (!over) return;
+    const activeIdStr = String(active.id);
+    const overId = String(over.id);
+    const base = dragRankedRef.current ?? ranked;
+    const inRanked = base.includes(activeIdStr);
+    const overRanked = overId === RANKED_ZONE || base.includes(overId);
+
+    // Available → ranking: insert at the hovered slot.
+    if (!inRanked && overRanked) {
+      const proj = projectById(activeIdStr);
+      if (proj?.type === "studio" && !studioEligible) return;
+      if (base.length >= RANK_COUNT) return;
+      let newIndex: number;
+      if (overId === RANKED_ZONE) {
+        newIndex = base.length;
+      } else {
+        const overIndex = base.indexOf(overId);
+        const translated = active.rect.current.translated;
+        const isBelow = translated && over.rect ? translated.top > over.rect.top + over.rect.height / 2 : false;
+        newIndex = overIndex >= 0 ? overIndex + (isBelow ? 1 : 0) : base.length;
+      }
+      const nextArr = [...base];
+      nextArr.splice(newIndex, 0, activeIdStr);
+      setDrag(nextArr);
+      return;
+    }
+
+    // Ranking → available: pull it out of the ranking.
+    if (inRanked && !overRanked) {
+      setDrag(base.filter((id) => id !== activeIdStr));
+      return;
+    }
+
+    // Reorder within the ranking.
+    if (inRanked && overRanked) {
+      const from = base.indexOf(activeIdStr);
+      const to = overId === RANKED_ZONE ? base.length - 1 : base.indexOf(overId);
+      if (from < 0 || to < 0 || from === to) return;
+      setDrag(arrayMove(base, from, to));
+    }
+  };
+
+  const onDragEnd = () => {
+    const result = dragRankedRef.current;
+    setActiveId(null);
+    setDrag(null);
+    // Keep the dropped order on screen immediately; commitRanked reconciles the
+    // DB (and fills in ranking ids) against the still-current committed `ranked`.
+    if (result && !sameOrder(result, ranked)) {
+      setRanked(result);
+      commitRanked(result);
+    }
+  };
+
+  const onDragCancel = () => {
+    setActiveId(null);
+    setDrag(null);
+  };
 
   const submit = async () => {
     if (!canSubmit || !appIdRef.current) return;
@@ -423,22 +478,14 @@ export default function ApplicationPage() {
     );
   }
 
-  // First-time members (non_member) may only apply to OP Launch; returning
-  // members (active/inactive) and staff (board/exec) may also apply to OP Studio.
-  const studioEligible = memberReturning || isBoardOrExec;
-  const available = projects.filter((p) => !ranked.includes(p.id));
-  const studioAvailable = studioEligible ? available.filter((p) => p.type === "studio") : [];
-  const launchAvailable = available.filter((p) => p.type === "launch");
-  const full = ranked.length >= RANK_COUNT;
-  const activeIsAvail = !!activeId?.startsWith("avail:");
-  const activeProject = activeId
-    ? projectById(activeIsAvail ? activeId.slice(6) : activeId)
-    : null;
-  // Slot previews: an available card hovering the ranking previews at the end;
-  // a ranked card hovering the projects list previews back in its group.
-  const rankingGhost = (activeIsAvail && overArea === "ranking" && !full ? activeProject : null) ?? null;
-  const availableGhost =
-    (!activeIsAvail && activeId && ranked.includes(activeId) && overArea === "available" ? activeProject : null) ?? null;
+  // While a drag is live, render from the working copy so the list reflows.
+  const rankedView = dragRanked ?? ranked;
+  const availableProjects = projects.filter((p) => !rankedView.includes(p.id));
+  const studioAvailable = studioEligible ? availableProjects.filter((p) => p.type === "studio") : [];
+  const launchAvailable = availableProjects.filter((p) => p.type === "launch");
+  const availableIds = [...studioAvailable, ...launchAvailable].map((p) => p.id);
+  const full = rankedView.length >= RANK_COUNT;
+  const activeProject = activeId ? projectById(activeId) : null;
 
   return (
     <div className="w-full max-w-5xl mx-auto p-6 flex flex-col gap-6">
@@ -453,20 +500,11 @@ export default function ApplicationPage() {
 
       <DndContext
         sensors={sensors}
-        collisionDetection={closestCenter}
-        onDragStart={(e) => {
-          setActiveId(String(e.active.id));
-          const ae = e.activatorEvent;
-          dragStartYRef.current =
-            typeof PointerEvent !== "undefined" && ae instanceof PointerEvent
-              ? ae.clientY
-              : ae instanceof MouseEvent
-                ? ae.clientY
-                : null;
-        }}
+        collisionDetection={closestCorners}
+        onDragStart={onDragStart}
         onDragOver={onDragOver}
-        onDragEnd={(e) => { setActiveId(null); onDragEnd(e); }}
-        onDragCancel={() => { setActiveId(null); setOverArea(null); setOverIndex(null); }}
+        onDragEnd={onDragEnd}
+        onDragCancel={onDragCancel}
       >
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Available projects */}
@@ -474,29 +512,27 @@ export default function ApplicationPage() {
             studioAvailable={studioAvailable}
             launchAvailable={launchAvailable}
             studioEligible={studioEligible}
+            availableIds={availableIds}
             pmMap={pmMap}
             studioMet={studioMet}
             full={full}
             onAdd={addProject}
-            ghost={availableGhost}
           />
 
           {/* Ranking */}
           <div className="flex flex-col gap-3">
             <div className="flex items-center gap-2">
               <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Your ranking</h2>
-              <span className="text-xs font-medium text-muted-foreground tabular-nums">{ranked.length}/{RANK_COUNT}</span>
+              <span className="text-xs font-medium text-muted-foreground tabular-nums">{rankedView.length}/{RANK_COUNT}</span>
             </div>
             <RankZone
-              ranked={ranked}
+              ranked={rankedView}
               projectById={projectById}
               completedByProject={completedByProject}
               pmMap={pmMap}
               studioMet={studioMet}
               onOpen={(pid) => setModalProject(pid)}
               onRemove={removeProject}
-              ghost={rankingGhost}
-              ghostIndex={overIndex ?? ranked.length}
             />
           </div>
         </div>
@@ -510,18 +546,26 @@ export default function ApplicationPage() {
 
       <div className="flex flex-col gap-2 border-t pt-6">
         {error && <p className="text-sm text-red-500">{error}</p>}
-        {!canSubmit && (
+        {SUBMISSIONS_LOCKED ? (
           <p className="text-xs text-muted-foreground">
-            {ranked.length !== RANK_COUNT
-              ? `Rank exactly ${RANK_COUNT} projects (${ranked.length} selected).`
-              : studioBlocked.length > 0
-                ? "Complete the required coffee chat(s) for your OP Studio picks."
-                : "Open each ranked project and complete its questions."}
+            Submissions are temporarily closed. You can still rank projects and
+            fill out your answers — your progress saves automatically, so you can
+            submit once we reopen.
           </p>
+        ) : (
+          !canSubmit && (
+            <p className="text-xs text-muted-foreground">
+              {ranked.length !== RANK_COUNT
+                ? `Rank exactly ${RANK_COUNT} projects (${ranked.length} selected).`
+                : studioBlocked.length > 0
+                  ? "Complete the required coffee chat(s) for your OP Studio picks."
+                  : "Open each ranked project and complete its questions."}
+            </p>
+          )
         )}
         <div className="flex justify-end">
           <Button onClick={submit} disabled={!canSubmit || submitting}>
-            {submitting ? "Submitting…" : "Submit application"}
+            {SUBMISSIONS_LOCKED ? "Submissions closed" : submitting ? "Submitting…" : "Submit application"}
           </Button>
         </div>
       </div>
@@ -544,37 +588,39 @@ function AvailableZone({
   studioAvailable,
   launchAvailable,
   studioEligible,
+  availableIds,
   pmMap,
   studioMet,
   full,
   onAdd,
-  ghost,
 }: {
   studioAvailable: Project[];
   launchAvailable: Project[];
   studioEligible: boolean;
+  availableIds: string[];
   pmMap: Record<string, Pm[]>;
   studioMet: (id: string) => boolean;
   full: boolean;
   onAdd: (id: string) => void;
-  ghost: Project | null;
 }) {
   // A drop target so a ranked project can be dragged back here to unrank it.
-  const { setNodeRef } = useDroppable({ id: "available-zone" });
+  const { setNodeRef } = useDroppable({ id: AVAILABLE_ZONE });
   return (
     <div ref={setNodeRef} className="flex flex-col gap-4 rounded-xl">
       <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Projects</h2>
-      {studioEligible ? (
-        <AvailableGroup title={TYPE_LABELS.studio} list={studioAvailable} pmMap={pmMap} studioMet={studioMet} full={full} onAdd={onAdd} ghost={ghost?.type === "studio" ? ghost : null} />
-      ) : (
-        <div className="flex flex-col gap-1.5">
-          <h3 className="text-xs font-semibold text-muted-foreground">{TYPE_LABELS.studio}</h3>
-          <p className="rounded-lg border border-dashed px-3 py-2.5 text-xs text-muted-foreground">
-            OP Studio is open to returning members only. First-time applicants can apply to OP Launch projects.
-          </p>
-        </div>
-      )}
-      <AvailableGroup title={TYPE_LABELS.launch} list={launchAvailable} pmMap={pmMap} studioMet={studioMet} full={full} onAdd={onAdd} ghost={ghost?.type === "launch" ? ghost : null} />
+      <SortableContext items={availableIds} strategy={verticalListSortingStrategy}>
+        {studioEligible ? (
+          <AvailableGroup title={TYPE_LABELS.studio} list={studioAvailable} pmMap={pmMap} studioMet={studioMet} full={full} onAdd={onAdd} />
+        ) : (
+          <div className="flex flex-col gap-1.5">
+            <h3 className="text-xs font-semibold text-muted-foreground">{TYPE_LABELS.studio}</h3>
+            <p className="rounded-lg border border-dashed px-3 py-2.5 text-xs text-muted-foreground">
+              OP Studio is open to returning members only. First-time applicants can apply to OP Launch projects.
+            </p>
+          </div>
+        )}
+        <AvailableGroup title={TYPE_LABELS.launch} list={launchAvailable} pmMap={pmMap} studioMet={studioMet} full={full} onAdd={onAdd} />
+      </SortableContext>
     </div>
   );
 }
@@ -586,7 +632,6 @@ function AvailableGroup({
   studioMet,
   full,
   onAdd,
-  ghost,
 }: {
   title: string;
   list: Project[];
@@ -594,7 +639,6 @@ function AvailableGroup({
   studioMet: (id: string) => boolean;
   full: boolean;
   onAdd: (id: string) => void;
-  ghost: Project | null;
 }) {
   return (
     <div className="flex flex-col gap-2">
@@ -602,41 +646,132 @@ function AvailableGroup({
         <h3 className="text-xs font-semibold text-muted-foreground/80 uppercase tracking-wide">{title}</h3>
         <span className="text-[10px] font-normal text-muted-foreground/60">({list.length})</span>
       </div>
-      {list.length === 0 && !ghost ? (
+      {list.length === 0 ? (
         <p className="text-xs text-muted-foreground">None available.</p>
       ) : (
         <div className="flex flex-col gap-2">
           {list.map((p) => (
-            <AvailableCard key={p.id} project={p} pmMap={pmMap} studioMet={studioMet} full={full} onAdd={onAdd} />
+            <ProjectCard
+              key={p.id}
+              project={p}
+              variant="available"
+              full={full}
+              onAdd={onAdd}
+              met={p.type === "studio" ? studioMet(p.id) : true}
+              pms={pmMap[p.id] ?? []}
+            />
           ))}
-          {ghost && <GhostCard project={ghost} />}
         </div>
       )}
     </div>
   );
 }
 
-function AvailableCard({
-  project,
+function RankZone({
+  ranked,
+  projectById,
+  completedByProject,
   pmMap,
   studioMet,
-  full,
-  onAdd,
+  onOpen,
+  onRemove,
 }: {
-  project: Project;
+  ranked: string[];
+  projectById: (id: string) => Project | undefined;
+  completedByProject: Record<string, boolean>;
   pmMap: Record<string, Pm[]>;
   studioMet: (id: string) => boolean;
-  full: boolean;
-  onAdd: (id: string) => void;
+  onOpen: (id: string) => void;
+  onRemove: (id: string) => void;
 }) {
-  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: `avail:${project.id}` });
-  // Click toggles this detail dropdown; the + button and drag handle adding.
+  const { setNodeRef } = useDroppable({ id: RANKED_ZONE });
+  return (
+    <div ref={setNodeRef} className="min-h-40 flex flex-col gap-2">
+      {ranked.length === 0 ? (
+        <div className="flex-1 flex items-center justify-center text-center text-sm text-muted-foreground py-10 rounded-xl bg-accent/20">
+          Drag projects here to rank them.
+        </div>
+      ) : (
+        <SortableContext items={ranked} strategy={verticalListSortingStrategy}>
+          {ranked.map((id, i) => {
+            const p = projectById(id);
+            if (!p) return null;
+            return (
+              <ProjectCard
+                key={id}
+                project={p}
+                variant="ranked"
+                rankNumber={i + 1}
+                completed={!!completedByProject[id]}
+                studioNeedsChat={p.type === "studio" && !studioMet(id)}
+                pms={pmMap[id] ?? []}
+                onOpen={() => onOpen(id)}
+                onRemove={() => onRemove(id)}
+              />
+            );
+          })}
+        </SortableContext>
+      )}
+    </div>
+  );
+}
+
+type CardProps = {
+  project: Project;
+  variant: "available" | "ranked";
+  full?: boolean;
+  onAdd?: (id: string) => void;
+  met?: boolean;
+  pms?: Pm[];
+  rankNumber?: number;
+  completed?: boolean;
+  studioNeedsChat?: boolean;
+  onOpen?: () => void;
+  onRemove?: () => void;
+};
+
+// One sortable card, shared by both lists so they match in size / border /
+// structure and drag between each other seamlessly. Ranked cards hang their
+// rank number outside the card, to the left.
+function ProjectCard(props: CardProps) {
+  const { project, variant, rankNumber, completed } = props;
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: project.id });
+  // Click toggles the info dropdown; drag (activation distance) moves the card.
   const [open, setOpen] = useState(false);
-  // The DragOverlay renders the moving copy; the source just dims in place.
-  const style = { opacity: isDragging ? 0.4 : 1 } as React.CSSProperties;
-  const meta = metaLine(project);
-  const met = project.type === "studio" ? studioMet(project.id) : true;
-  const pms = pmMap[project.id] ?? [];
+  // The dragged item hides in place (the DragOverlay shows the moving copy).
+  const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0 : 1 } as React.CSSProperties;
+
+  const box = (
+    <div
+      onClick={() => setOpen((o) => !o)}
+      className={`group relative overflow-hidden border rounded-xl p-3 pl-4 transition-colors hover:bg-accent ${
+        completed ? "border-green-600/40 bg-green-600/5" : "bg-background"
+      }`}
+    >
+      <CardContent {...props} open={open} />
+    </div>
+  );
+
+  if (variant === "ranked") {
+    return (
+      <div
+        ref={setNodeRef}
+        style={style}
+        {...attributes}
+        {...listeners}
+        className="flex items-center gap-2.5 touch-none select-none cursor-grab active:cursor-grabbing"
+      >
+        <span
+          className={`h-6 w-6 rounded-full text-xs font-semibold flex items-center justify-center flex-shrink-0 ${
+            completed ? "bg-green-600 text-white" : "bg-foreground text-background"
+          }`}
+        >
+          {completed ? <Check size={14} /> : rankNumber}
+        </span>
+        <div className="flex-1 min-w-0">{box}</div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -644,9 +779,29 @@ function AvailableCard({
       style={style}
       {...attributes}
       {...listeners}
-      onClick={() => setOpen((o) => !o)}
-      className="group relative overflow-hidden border rounded-xl p-3 pl-4 bg-background touch-none select-none cursor-grab hover:bg-accent transition-colors"
+      className="touch-none select-none cursor-grab"
     >
+      {box}
+    </div>
+  );
+}
+
+function CardContent({
+  project,
+  variant,
+  open,
+  full,
+  onAdd,
+  met,
+  pms,
+  completed,
+  studioNeedsChat,
+  onOpen,
+  onRemove,
+}: CardProps & { open: boolean }) {
+  const meta = metaLine(project);
+  return (
+    <>
       {/* Accent color as a slim tab on the card's left edge. */}
       <div
         className="absolute inset-y-0 left-0 w-1.5 pointer-events-none"
@@ -660,224 +815,144 @@ function AvailableCard({
             size={14}
             className={`text-muted-foreground/50 flex-shrink-0 transition-transform ${open ? "" : "-rotate-90"}`}
           />
-          {project.icon_url ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={project.icon_url} alt="" className="h-8 w-8 flex-shrink-0 rounded-lg object-cover" />
-          ) : project.icon ? (
-            <span
-              className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-lg bg-foreground/5"
-              style={{ backgroundColor: project.color || undefined, color: project.color ? readableTextColor(project.color) : undefined }}
-            >
-              {project.icon}
-            </span>
-          ) : null}
+          <ProjectIcon project={project} />
           <span className="font-medium text-sm flex-1 min-w-0 truncate">{project.name}</span>
-          {project.client && <span className="text-xs text-muted-foreground">{project.client}</span>}
-          <button
-            type="button"
-            disabled={full}
-            onClick={(e) => { e.stopPropagation(); if (!full) onAdd(project.id); }}
-            onPointerDown={(e) => e.stopPropagation()}
-            aria-label={`Add ${project.name}`}
-            title={full ? `You can rank up to ${RANK_COUNT} projects` : `Add ${project.name}`}
-            className="flex h-7 w-7 items-center justify-center rounded-md border bg-background text-foreground hover:bg-foreground hover:text-background hover:border-foreground disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-background disabled:hover:text-foreground flex-shrink-0 transition-colors"
-          >
-            <Plus size={16} />
-          </button>
+
+          {variant === "available" ? (
+            <>
+              {project.client && <span className="text-xs text-muted-foreground flex-shrink-0">{project.client}</span>}
+              <button
+                type="button"
+                disabled={full}
+                onClick={(e) => { e.stopPropagation(); if (!full) onAdd?.(project.id); }}
+                onPointerDown={(e) => e.stopPropagation()}
+                aria-label={`Add ${project.name}`}
+                title={full ? `You can rank up to ${RANK_COUNT} projects` : `Add ${project.name}`}
+                className="flex h-7 w-7 items-center justify-center rounded-md border bg-background text-foreground hover:bg-foreground hover:text-background hover:border-foreground disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-background disabled:hover:text-foreground flex-shrink-0 transition-colors"
+              >
+                <Plus size={16} />
+              </button>
+            </>
+          ) : (
+            <>
+              {!completed && (
+                <span
+                  className="text-red-500 font-semibold flex-shrink-0"
+                  title="Required questions unfinished"
+                  aria-label="Required questions unfinished"
+                >
+                  *
+                </span>
+              )}
+              <span className="px-2 py-0.5 rounded-full bg-foreground/10 text-foreground text-[11px] font-medium flex-shrink-0">
+                {TYPE_LABELS[project.type]}
+              </span>
+              {/* Edit: the rounded square flashes while questions are unfinished;
+                  the pencil glyph itself stays solid. */}
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); onOpen?.(); }}
+                onPointerDown={(e) => e.stopPropagation()}
+                aria-label="Edit answers"
+                className="relative flex h-7 w-7 items-center justify-center flex-shrink-0"
+              >
+                <span
+                  className={`absolute inset-0 rounded-md border ${
+                    completed
+                      ? "border-border bg-background"
+                      : "border-amber-500/70 bg-amber-500/10 animate-slow-flash"
+                  }`}
+                  aria-hidden
+                />
+                <Pencil size={14} className="relative z-10 text-foreground" />
+              </button>
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); onRemove?.(); }}
+                onPointerDown={(e) => e.stopPropagation()}
+                aria-label="Remove"
+                className="flex h-7 w-7 items-center justify-center rounded-md border bg-background text-muted-foreground hover:bg-red-500 hover:text-white hover:border-red-500 flex-shrink-0 transition-colors"
+              >
+                <X size={16} />
+              </button>
+            </>
+          )}
         </div>
+
         {open && (
           <>
             {project.description && <p className="text-sm text-muted-foreground pl-6">{project.description}</p>}
             {meta && <p className="text-[11px] text-muted-foreground/80 pl-6">{meta}</p>}
-            {pms.length > 0 && (
+            {pms && pms.length > 0 && (
               <p className="text-xs text-muted-foreground/80 pl-6">
                 PM{pms.length > 1 ? "s" : ""}: {pms.map((pm) => pm.name).join(", ")}
               </p>
             )}
           </>
         )}
-        {project.type === "studio" && (
+
+        {variant === "available" && project.type === "studio" && (
           <div className={`flex items-center gap-1.5 text-[11px] pl-6 ${met ? "text-green-700 dark:text-green-400" : "text-amber-600 dark:text-amber-500"}`}>
             {met ? <Check size={12} /> : <Coffee size={12} />}
             {met ? "Coffee chat complete" : "Coffee chat needed"}
           </div>
         )}
-      </div>
-    </div>
-  );
-}
 
-function RankZone({
-  ranked,
-  projectById,
-  completedByProject,
-  pmMap,
-  studioMet,
-  onOpen,
-  onRemove,
-  ghost,
-  ghostIndex,
-}: {
-  ranked: string[];
-  projectById: (id: string) => Project | undefined;
-  completedByProject: Record<string, boolean>;
-  pmMap: Record<string, Pm[]>;
-  studioMet: (id: string) => boolean;
-  onOpen: (id: string) => void;
-  onRemove: (id: string) => void;
-  ghost: Project | null;
-  ghostIndex: number;
-}) {
-  const { setNodeRef } = useDroppable({ id: "ranked-zone" });
-  return (
-    <div ref={setNodeRef} className="min-h-40 flex flex-col gap-2">
-      {ranked.length === 0 && !ghost ? (
-        <div className="flex-1 flex items-center justify-center text-center text-sm text-muted-foreground py-10 rounded-xl bg-accent/20">
-          Drag projects here to rank them.
-        </div>
-      ) : (
-        <>
-          <SortableContext items={ranked} strategy={verticalListSortingStrategy}>
-            {ranked.map((id, i) => {
-              const p = projectById(id);
-              if (!p) return null;
-              return (
-                <Fragment key={id}>
-                  {ghost && ghostIndex === i && <GhostCard project={ghost} rankNumber={i + 1} />}
-                  <RankedCard
-                    project={p}
-                    rankNumber={i + 1}
-                    completed={!!completedByProject[id]}
-                    studioNeedsChat={p.type === "studio" && !studioMet(id)}
-                    pms={pmMap[id] ?? []}
-                    onOpen={() => onOpen(id)}
-                    onRemove={() => onRemove(id)}
-                  />
-                </Fragment>
-              );
-            })}
-          </SortableContext>
-          {ghost && ghostIndex >= ranked.length && <GhostCard project={ghost} rankNumber={ranked.length + 1} />}
-        </>
-      )}
-    </div>
-  );
-}
-
-function RankedCard({
-  project,
-  rankNumber,
-  completed,
-  studioNeedsChat,
-  pms,
-  onOpen,
-  onRemove,
-}: {
-  project: Project;
-  rankNumber: number;
-  completed: boolean;
-  studioNeedsChat: boolean;
-  pms: Pm[];
-  onOpen: () => void;
-  onRemove: () => void;
-}) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: project.id });
-  // Siblings reflow with the sortable transition; the dragged item is hidden in
-  // place (the DragOverlay shows the moving copy) so it tracks the pointer 1:1.
-  const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0 : 1 };
-
-  return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      {...attributes}
-      {...listeners}
-      className={`rounded-xl border p-3 flex flex-col gap-2 transition-colors touch-none select-none cursor-grab active:cursor-grabbing ${
-        completed ? "border-green-600/40 bg-green-600/5" : "bg-background"
-      }`}
-    >
-      <div className="flex items-center gap-2">
-        <span className="text-muted-foreground/50 flex-shrink-0" aria-hidden>
-          <GripVertical size={15} />
-        </span>
-        <span
-          className={`h-6 w-6 rounded-full text-xs font-semibold flex items-center justify-center flex-shrink-0 ${
-            completed ? "bg-green-600 text-white" : "bg-foreground text-background"
-          }`}
-        >
-          {completed ? <Check size={14} /> : rankNumber}
-        </span>
-        <button onClick={onOpen} className="flex items-center gap-2 flex-1 min-w-0 text-left">
-          <span className="font-medium text-sm truncate">{project.name}</span>
-          {!completed && (
-            <span className="text-red-500 font-semibold flex-shrink-0" title="Required questions unfinished" aria-label="Required questions unfinished">
-              *
+        {variant === "ranked" && studioNeedsChat && (
+          <div className="flex items-center gap-2 text-xs text-amber-600 dark:text-amber-500 bg-amber-500/10 rounded-md px-3 py-2">
+            <AlertTriangle size={14} className="flex-shrink-0" />
+            <span className="flex-1">
+              Coffee chat with a PM{pms && pms.length ? ` (${pms.map((pm) => pm.name).join(", ")})` : ""} required.
             </span>
-          )}
-          <span className="px-2 py-0.5 rounded-full bg-foreground/10 text-foreground text-[11px] font-medium flex-shrink-0">
-            {TYPE_LABELS[project.type]}
-          </span>
-        </button>
-        <button
-          onClick={onOpen}
-          className={`flex-shrink-0 transition-colors ${
-            completed
-              ? "text-muted-foreground hover:text-foreground"
-              : "flex h-7 w-7 items-center justify-center rounded-md bg-white text-neutral-800 border border-black/10 shadow-sm hover:bg-white/90"
-          }`}
-          aria-label="Edit answers"
-        >
-          <Pencil size={14} />
-        </button>
-        <button onClick={onRemove} className="text-muted-foreground hover:text-red-500 transition-colors flex-shrink-0" aria-label="Remove">
-          <X size={15} />
-        </button>
+            <Link
+              href="/coffee-chat"
+              onClick={(e) => e.stopPropagation()}
+              className="inline-flex items-center gap-1 font-medium hover:underline flex-shrink-0"
+            >
+              <Coffee size={13} /> Book
+            </Link>
+          </div>
+        )}
       </div>
-
-      {studioNeedsChat && (
-        <div className="flex items-center gap-2 text-xs text-amber-600 dark:text-amber-500 bg-amber-500/10 rounded-md px-3 py-2">
-          <AlertTriangle size={14} className="flex-shrink-0" />
-          <span className="flex-1">
-            Coffee chat with a PM{pms.length ? ` (${pms.map((pm) => pm.name).join(", ")})` : ""} required.
-          </span>
-          <Link href="/coffee-chat" className="inline-flex items-center gap-1 font-medium hover:underline flex-shrink-0">
-            <Coffee size={13} /> Book
-          </Link>
-        </div>
-      )}
-
-    </div>
+    </>
   );
 }
 
-// A faded placeholder showing where the dragged card will slot in.
-function GhostCard({ project, rankNumber }: { project: Project; rankNumber?: number }) {
-  return (
-    <div className="rounded-xl border border-dashed border-foreground/30 bg-accent/40 p-3 flex items-center gap-2 opacity-70">
-      {rankNumber != null ? (
-        <span className="h-6 w-6 rounded-full bg-foreground/30 text-background text-xs font-semibold flex items-center justify-center flex-shrink-0">
-          {rankNumber}
-        </span>
-      ) : (
-        <GripVertical size={15} className="text-muted-foreground/50 flex-shrink-0" />
-      )}
-      <span className="font-medium text-sm truncate">{project.name}</span>
-      <span className="px-2 py-0.5 rounded-full bg-foreground/10 text-foreground text-[11px] font-medium flex-shrink-0">
-        {TYPE_LABELS[project.type]}
+function ProjectIcon({ project }: { project: Project }) {
+  if (project.icon_url) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={project.icon_url} alt="" className="h-8 w-8 flex-shrink-0 rounded-lg object-cover" />;
+  }
+  if (project.icon) {
+    return (
+      <span
+        className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-lg bg-foreground/5"
+        style={{ backgroundColor: project.color || undefined, color: project.color ? readableTextColor(project.color) : undefined }}
+      >
+        {project.icon}
       </span>
-    </div>
-  );
+    );
+  }
+  return null;
 }
 
-// The card rendered under the pointer while dragging (via DragOverlay).
+// The card rendered under the pointer while dragging (via DragOverlay) — mirrors
+// the collapsed card look so moving between lists feels seamless.
 function DragPreview({ project }: { project: Project }) {
   return (
-    <div className="rounded-xl border bg-background p-3 shadow-lg flex items-center gap-2 cursor-grabbing">
-      <GripVertical size={15} className="text-muted-foreground/50 flex-shrink-0" />
-      <span className="font-medium text-sm truncate">{project.name}</span>
-      <span className="px-2 py-0.5 rounded-full bg-foreground/10 text-foreground text-[11px] font-medium flex-shrink-0">
-        {TYPE_LABELS[project.type]}
-      </span>
+    <div className="relative overflow-hidden rounded-xl border bg-background p-3 pl-4 shadow-lg cursor-grabbing flex items-center gap-2">
+      <div
+        className="absolute inset-y-0 left-0 w-1.5 pointer-events-none"
+        style={{ backgroundColor: project.color || DEFAULT_ACCENT }}
+        aria-hidden
+      />
+      <div className="relative z-10 flex items-center gap-2 min-w-0">
+        <ProjectIcon project={project} />
+        <span className="font-medium text-sm truncate">{project.name}</span>
+        <span className="px-2 py-0.5 rounded-full bg-foreground/10 text-foreground text-[11px] font-medium flex-shrink-0">
+          {TYPE_LABELS[project.type]}
+        </span>
+      </div>
     </div>
   );
 }

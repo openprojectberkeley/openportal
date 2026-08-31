@@ -232,7 +232,7 @@ export default function HomePage() {
             </div>
             <div className="flex flex-wrap gap-2">
               <ReapplyStep label="Infosession" href="/infosession" done={reapply.infosessionDone} icon={Users} />
-              <ReapplyStep label="Application" href="/application" done={false} icon={FileText} disabled />
+              <ReapplyStep label="Application" href="/application" done={false} icon={FileText} />
             </div>
           </div>
         )}
@@ -348,7 +348,7 @@ function ApplicantChecklist({
   const items = [
     { label: "Coffee Chat", description: "Meet a member and chat about the club.", href: "/coffee-chat", done: completed.coffeeChat, icon: Coffee },
     { label: "Infosession", description: "Attend an infosession to learn more.", href: "/infosession", done: completed.infosession, icon: Users },
-    { label: "Application", description: "Submissions closed — check back soon.", href: "/application", done: completed.application, icon: FileText, disabled: !completed.application },
+    { label: "Application", description: "Submit your written application.", href: "/application", done: completed.application, icon: FileText },
   ];
 
   const doneCount = items.filter((i) => i.done).length;
@@ -377,15 +377,11 @@ function ApplicantChecklist({
           </div>
 
           <div className="flex flex-col gap-3">
-            {items.map(({ label, description, href, done, icon: Icon, disabled }) => (
+            {items.map(({ label, description, href, done, icon: Icon }) => (
               <button
                 key={href}
-                onClick={disabled ? undefined : () => router.push(href)}
-                disabled={disabled}
-                aria-disabled={disabled}
-                className={`group border rounded-xl px-4 py-3.5 flex items-center gap-3.5 text-left bg-background transition-all ${
-                  disabled ? "opacity-50 cursor-not-allowed" : "hover:border-foreground/20 hover:shadow-sm"
-                }`}
+                onClick={() => router.push(href)}
+                className="group border rounded-xl px-4 py-3.5 flex items-center gap-3.5 text-left bg-background hover:border-foreground/20 hover:shadow-sm transition-all"
               >
                 <div
                   className={`h-10 w-10 rounded-full flex items-center justify-center flex-shrink-0 transition-colors ${

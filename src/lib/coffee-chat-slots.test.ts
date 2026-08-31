@@ -33,6 +33,20 @@ describe("bucketOpenSlots", () => {
     expect(bucketOpenSlots(rows)).toHaveLength(0);
   });
 
+  it("keeps a fully-booked slot when includeFullyBooked is set", () => {
+    const rows: SeatRow[] = [
+      { meeting_time: T1, applicant_id: "u1", duration_minutes: 20 },
+      { meeting_time: T1, applicant_id: "u2", duration_minutes: 20 },
+      { meeting_time: T2, applicant_id: null, duration_minutes: 20 },
+    ];
+    const slots = bucketOpenSlots(rows, undefined, true);
+    expect(slots).toHaveLength(2);
+    const full = slots.find((s) => s.meeting_time === T1)!;
+    expect(full.openCount).toBe(0);
+    expect(full.capacity).toBe(2);
+    expect(full.filled).toBe(2);
+  });
+
   it("resolves attendee names via the resolver, defaulting to Member", () => {
     const rows: SeatRow[] = [
       { meeting_time: T1, applicant_id: "u1", duration_minutes: 30 },

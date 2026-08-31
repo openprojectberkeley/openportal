@@ -14,9 +14,12 @@ export type CoffeeChatCardProps = {
   onBook?: () => void;
   disabled?: boolean;
   booked?: boolean;
+  // Read-only "everyone's availability" mode: no Book button; the whole card is
+  // a link (handled by the parent) and this summary replaces the CTA.
+  summary?: { open: number; booked: number };
 };
 
-export function CoffeeChatCard({ id, name, roles, avatarUrl, interests, onBook, disabled, booked }: CoffeeChatCardProps) {
+export function CoffeeChatCard({ id, name, roles, avatarUrl, interests, onBook, disabled, booked, summary }: CoffeeChatCardProps) {
   const initials = name
     .split(" ")
     .map((w) => w[0])
@@ -62,7 +65,17 @@ export function CoffeeChatCard({ id, name, roles, avatarUrl, interests, onBook, 
           <span className="font-medium text-foreground">Interests: </span>{interests}
         </p>
       )}
-      {booked ? (
+      {summary ? (
+        <div className="mt-auto flex items-center gap-2 text-sm tabular-nums">
+          <span className={summary.open > 0 ? "font-medium text-foreground" : "text-muted-foreground"}>
+            {summary.open} open time{summary.open === 1 ? "" : "s"}
+          </span>
+          <span className="h-1 w-1 rounded-full bg-muted-foreground/50" />
+          <span className="text-muted-foreground">
+            {summary.booked} booked
+          </span>
+        </div>
+      ) : booked ? (
         <div className="mt-auto w-full rounded-md border border-green-600/40 bg-green-600/10 px-4 py-2 text-sm font-medium text-green-700 dark:text-green-400 flex items-center justify-center gap-1.5">
           <Check size={16} strokeWidth={2.5} />
           Booked
