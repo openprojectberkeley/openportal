@@ -192,7 +192,7 @@ export function ApplicationReviewModal({
                       : a.answer ?? "";
                     return (
                       <div key={i} className="flex flex-col gap-0.5 pl-1 border-l-2 border-muted">
-                        <span className="text-xs font-medium text-muted-foreground pl-2">
+                        <span className="text-xs font-medium text-muted-foreground pl-2 whitespace-pre-wrap">
                           {a.question?.prompt}
                         </span>
                         <span className="text-sm pl-2 whitespace-pre-wrap">

@@ -186,7 +186,7 @@ export function ProjectApplicationModal({ projectId, projectName, rankingId, ope
           <div className="flex flex-col gap-5">
             {/* Essay: prompt/required are per-project, editable via ProjectQuestionsDialog */}
             <div className="flex flex-col gap-1">
-              <Label htmlFor="app-essay" className="mb-1.5">
+              <Label htmlFor="app-essay" className="mb-1.5 whitespace-pre-wrap">
                 {essayPrompt} {essayRequired && <span className="text-red-500">*</span>}
               </Label>
               <textarea
@@ -212,7 +212,7 @@ export function ProjectApplicationModal({ projectId, projectName, rankingId, ope
               const v = getAnswer(q.id);
               return (
                 <div key={q.id} className="flex flex-col gap-2.5">
-                  <Label>
+                  <Label className="whitespace-pre-wrap">
                     {q.prompt} {q.required && <span className="text-red-500">*</span>}
                   </Label>
 

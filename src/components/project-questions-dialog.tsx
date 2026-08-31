@@ -239,7 +239,7 @@ export function ProjectQuestionsDialog({ projectId, open, onOpenChange }: Props)
               {questions.map((q, i) => (
                 <div key={q.id} className={`flex items-start gap-2 px-3 py-2.5 ${i > 0 ? "border-t" : ""}`}>
                   <div className="flex flex-col gap-0.5 flex-1 min-w-0">
-                    <span className="text-sm font-medium">{q.prompt}</span>
+                    <span className="text-sm font-medium whitespace-pre-wrap">{q.prompt}</span>
                     <span className="text-[11px] text-muted-foreground">
                       {QUESTION_TYPE_LABELS[q.type]}
                       {q.required ? " · required" : " · optional"}
