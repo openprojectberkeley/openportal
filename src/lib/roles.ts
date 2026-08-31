@@ -2,9 +2,20 @@
 
 // Must match the role_name value in the roles table exactly.
 export const VP_TECH_ROLE_NAME = "VP Tech";
+export const PRESIDENT_ROLE_NAME = "President";
 
-// Cookie that carries a VP Tech "view as" simulation so server components
-// (e.g. the manager route guard) can honor it too.
+// Role names granted VP Tech's special in-app capabilities (the "view as" role
+// simulation toggle; the coffee-chat booking window admin gated server-side by
+// is_vp_tech_or_president() in supabase/migrations/0047_president_vp_tech_parity.sql).
+// Keep in sync with that migration.
+export const ELEVATED_ROLE_NAMES: string[] = [VP_TECH_ROLE_NAME, PRESIDENT_ROLE_NAME];
+
+export function hasElevatedRole(roles: { role_name: string | null }[]): boolean {
+  return roles.some((r) => r.role_name != null && ELEVATED_ROLE_NAMES.includes(r.role_name));
+}
+
+// Cookie that carries a VP Tech/President "view as" simulation so server
+// components (e.g. the manager route guard) can honor it too.
 export const SIM_COOKIE = "op_sim_persona";
 
 // Shape of a members_roles row joined to its role (a to-one relation, so

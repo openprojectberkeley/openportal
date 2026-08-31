@@ -9,7 +9,7 @@ export async function GET() {
   const { data: { user }, error } = await supabase.auth.getUser();
   if (error || !user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  // Honors the VP Tech "view as" simulation cookie.
+  // Honors the VP Tech/President "view as" simulation cookie.
   const accessLevels = await getEffectiveAccessLevels(supabase);
   if (!accessIsExec(accessLevels)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 

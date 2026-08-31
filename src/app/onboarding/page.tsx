@@ -29,7 +29,7 @@ export default function OnboardingPage() {
   const router = useRouter();
   // `persona` is the real access-derived persona for everyone except VP
   // Tech, who can simulate any persona — so gating on persona === "exec"
-  // means: real exec always passes, VP Tech only passes while simulating
+  // means: real exec always passes, VP Tech/President only pass while simulating
   // exec, and member/board are bounced either way (real or simulated).
   const { ready: rolesReady, persona } = useRoleSim();
   const viewingAsExec = persona === "exec";
@@ -79,7 +79,7 @@ export default function OnboardingPage() {
       // Onboarding has no route guard against being typed in directly, so
       // anyone who already has a members row and isn't viewing as exec gets
       // bounced back to the app instead of re-onboarding — member/board are
-      // bounced even for VP Tech unless they're simulating exec. Exec (real
+      // bounced even for VP Tech/President unless they're simulating exec. Exec (real
       // or simulated) can still reach it, e.g. to fix their own profile —
       // pre-fill so re-submitting doesn't blank out their existing data.
       const { data: existing } = await supabase

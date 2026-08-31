@@ -21,7 +21,7 @@ async function ManagerGuard({ children }: { children: React.ReactNode }) {
 
   if (!user) redirect("/");
 
-  // Honors the VP Tech "view as" simulation cookie, so simulating a plain
+  // Honors the VP Tech/President "view as" simulation cookie, so simulating a plain
   // member is actually blocked here (not just hidden in the UI).
   const accessLevels = await getEffectiveAccessLevels(supabase);
 

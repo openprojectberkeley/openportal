@@ -1,11 +1,12 @@
 import { cookies } from "next/headers";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { PERSONA_ACCESS_LEVELS, SIM_COOKIE, VP_TECH_ROLE_NAME, isPersona, type MemberRoleRow } from "./roles";
+import { PERSONA_ACCESS_LEVELS, SIM_COOKIE, hasElevatedRole, isPersona, type MemberRoleRow } from "./roles";
 
 /**
- * The access levels to enforce for the current user, honoring a VP Tech
- * "view as" simulation cookie. Simulation can only ever REDUCE access — only
- * VP Tech may simulate, and they're already exec — so it never escalates.
+ * The access levels to enforce for the current user, honoring a VP Tech /
+ * President "view as" simulation cookie. Simulation can only ever REDUCE
+ * access — only VP Tech/President may simulate, and they're already exec —
+ * so it never escalates.
  */
 export async function getEffectiveAccessLevels(supabase: SupabaseClient): Promise<string[]> {
   const { data: { user } } = await supabase.auth.getUser();
@@ -18,7 +19,7 @@ export async function getEffectiveAccessLevels(supabase: SupabaseClient): Promis
 
   const roles = ((roleRows ?? []) as unknown as MemberRoleRow[]).flatMap((r) => (r.roles ? [r.roles] : []));
   const realLevels = roles.map((r) => r.access_level).filter(Boolean) as string[];
-  const isVpTech = roles.some((r) => r.role_name === VP_TECH_ROLE_NAME);
+  const canSimulate = hasElevatedRole(roles);
 
   // board = exec + PMs: a PM of any project has board access even without a
   // board/exec role row.
@@ -30,7 +31,7 @@ export async function getEffectiveAccessLevels(supabase: SupabaseClient): Promis
     .limit(1);
   if ((pmRows ?? []).length > 0 && !realLevels.includes("board")) realLevels.push("board");
 
-  if (!isVpTech) return realLevels;
+  if (!canSimulate) return realLevels;
 
   const persona = (await cookies()).get(SIM_COOKIE)?.value;
   return isPersona(persona) ? PERSONA_ACCESS_LEVELS[persona] : realLevels;

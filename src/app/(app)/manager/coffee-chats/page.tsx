@@ -57,7 +57,7 @@ const BOOKED_COLOR: Record<Duration, string> = {
   15: "bg-blue-600",
 };
 
-// Fallback window used only until VP Tech configures one (or the app_settings
+// Fallback window used only until VP Tech/President configures one (or the app_settings
 // row is missing). Months are 0-indexed, so (2026, 7, 1) = Aug 1, 2026.
 const DEFAULT_RANGE_START = new Date(2026, 7, 1);
 const DEFAULT_RANGE_END = new Date(2026, 7, 31);
@@ -985,7 +985,7 @@ export default function ManagerCoffeeChatsPage() {
         </div>
       </div>
 
-      {/* Bookable window — VP Tech only */}
+      {/* Bookable window — VP Tech/President only */}
       {canEditWindow && (
         <div className="flex flex-col gap-3 border rounded-xl p-4">
           <div className="flex flex-col gap-0.5">
