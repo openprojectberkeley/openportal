@@ -13,6 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ProjectApplicationModalSkeleton } from "@/components/skeletons";
+import { techAreaLabel, techClassLabel } from "@/lib/application-profile";
 
 export type ReviewStatus = "submitted" | "accepted" | "rejected";
 
@@ -35,8 +36,12 @@ type AnswerRow = {
   question: { id: string; prompt: string; position: number } | null;
 };
 
-// The applicant's uploaded resume (in the team's Google Drive folder).
+// The applicant's optional "About you" answers + their Google Drive resume link.
 type Profile = {
+  tech_area_rankings: Record<string, number> | null;
+  tech_classes: string[] | null;
+  tech_classes_other: string | null;
+  about_note: string | null;
   resume_drive_url: string | null;
   resume_filename: string | null;
 };
@@ -77,7 +82,7 @@ export function ApplicationReviewModal({
     const load = async () => {
       const { data: appRow } = await supabase
         .from("applications")
-        .select("resume_drive_url, resume_filename")
+        .select("tech_area_rankings, tech_classes, tech_classes_other, about_note, resume_drive_url, resume_filename")
         .eq("id", applicationId)
         .maybeSingle();
       setProfile((appRow as Profile | null) ?? null);
@@ -158,7 +163,7 @@ export function ApplicationReviewModal({
           <ProjectApplicationModalSkeleton />
         ) : (
           <div className="flex flex-col gap-6">
-            <ResumeLink profile={profile} />
+            <ApplicantDetails profile={profile} />
 
             {rankings.length === 0 ? (
               <p className="text-sm text-muted-foreground">No ranked projects on this application.</p>
@@ -238,23 +243,73 @@ export function ApplicationReviewModal({
   );
 }
 
-// A link to the applicant's resume in the team's Google Drive folder.
-function ResumeLink({ profile }: { profile: Profile | null }) {
+// The applicant's optional "About you" answers + Drive resume link, above their
+// rankings.
+function ApplicantDetails({ profile }: { profile: Profile | null }) {
+  const ratedAreas = Object.entries(profile?.tech_area_rankings ?? {})
+    .filter(([, v]) => typeof v === "number" && v > 0)
+    .sort((a, b) => b[1] - a[1]);
+  const classes = profile?.tech_classes ?? [];
+  const other = profile?.tech_classes_other?.trim();
+  const note = profile?.about_note?.trim();
+  const resumeUrl = profile?.resume_drive_url;
+  const hasAny = ratedAreas.length > 0 || classes.length > 0 || !!other || !!note || !!resumeUrl;
+
   return (
-    <div className="flex flex-col gap-2 rounded-xl border bg-muted/30 p-4">
-      <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Resume</h3>
-      {profile?.resume_drive_url ? (
-        <a
-          href={profile.resume_drive_url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1.5 self-start rounded-md border bg-background px-3 py-1.5 text-sm hover:bg-accent transition-colors"
-        >
-          <FileText size={14} className="text-muted-foreground" />
-          {profile.resume_filename || "View resume"}
-        </a>
+    <div className="flex flex-col gap-3 rounded-xl border bg-muted/30 p-4">
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Applicant details</h3>
+
+      {!hasAny ? (
+        <p className="text-sm italic text-muted-foreground">No additional details provided.</p>
       ) : (
-        <p className="text-sm italic text-muted-foreground">No resume uploaded.</p>
+        <>
+          {ratedAreas.length > 0 && (
+            <div className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-muted-foreground">Technical areas of interest</span>
+              <div className="flex flex-wrap gap-1.5">
+                {ratedAreas.map(([key, v]) => (
+                  <span key={key} className="inline-flex items-center gap-1 rounded-full bg-foreground/10 px-2 py-0.5 text-xs">
+                    {techAreaLabel(key)} <span className="tabular-nums text-muted-foreground">{v}/5</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {(classes.length > 0 || other) && (
+            <div className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-muted-foreground">Tech classes</span>
+              <div className="flex flex-wrap gap-1.5">
+                {classes.map((c) => (
+                  <span key={c} className="rounded-full bg-foreground/10 px-2 py-0.5 text-xs">{techClassLabel(c)}</span>
+                ))}
+              </div>
+              {other && <p className="text-sm text-foreground/90">Other: {other}</p>}
+            </div>
+          )}
+
+          {resumeUrl && (
+            <div className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-muted-foreground">Resume</span>
+              <a
+                href={resumeUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 self-start rounded-md border bg-background px-3 py-1.5 text-sm hover:bg-accent transition-colors"
+              >
+                <FileText size={14} className="text-muted-foreground" />
+                {profile?.resume_filename || "View resume"}
+              </a>
+            </div>
+          )}
+
+          {note && (
+            <div className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-muted-foreground">Anything else</span>
+              <p className="text-sm whitespace-pre-wrap text-foreground/90">{note}</p>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

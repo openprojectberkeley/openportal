@@ -1,7 +1,8 @@
--- Revert 0043 (application profile + private resume bucket) and 0044
--- (resume_parsed). The "About you" section and heuristic resume parsing were
--- dropped from the product; resumes now go straight to a Google Drive folder
--- (see 0046 + the upload-resume-drive edge function). Idempotent.
+-- Partly revert the resume work: remove the private Supabase resume bucket and
+-- the heuristic parsing (resumes now go to a Google Drive folder — see 0046 +
+-- the upload-resume-drive edge function). The rest of the "About you" section
+-- (technical-area ratings, tech-classes checklist, free-text note) is KEPT, so
+-- its columns from 0043 are left in place. Idempotent.
 
 -- 1. Storage policies for the private resume bucket (0043). --------------------
 drop policy if exists "application_resumes_insert" on storage.objects;
@@ -17,12 +18,9 @@ drop policy if exists "application_resumes_read" on storage.objects;
 --      await supabase.storage.emptyBucket('application-resumes')
 --      await supabase.storage.deleteBucket('application-resumes')
 
--- 3. The application-profile / resume columns (0043 + 0044). ------------------
+-- 3. Drop only the Supabase-storage / parsing resume columns (0043 + 0044).
+--    `resume_filename` is kept (reused for the Drive filename in 0046); the
+--    tech-area / tech-classes / note columns are kept.
 alter table public.applications
-  drop column if exists tech_area_rankings,
-  drop column if exists tech_classes,
-  drop column if exists tech_classes_other,
   drop column if exists resume_path,
-  drop column if exists resume_filename,
-  drop column if exists about_note,
   drop column if exists resume_parsed;
