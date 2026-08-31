@@ -201,11 +201,13 @@ export function ProjectQuestionsDialog({ projectId, open, onOpenChange }: Props)
               </span>
               <div className="flex flex-col gap-1">
                 <Label htmlFor="essay-prompt">Prompt</Label>
-                <Input
+                <textarea
                   id="essay-prompt"
+                  rows={3}
                   value={essayPrompt}
                   onChange={(e) => setEssayPrompt(e.target.value)}
                   onBlur={saveEssayPrompt}
+                  className="border rounded-md px-3 py-2 text-sm w-full resize-y bg-background focus:outline-none focus:ring-1 focus:ring-ring"
                 />
                 <span className="text-[11px] text-muted-foreground">
                   Always first in the applicant&apos;s modal. 150–200 words is suggested; any non-empty answer saves.
@@ -270,7 +272,17 @@ export function ProjectQuestionsDialog({ projectId, open, onOpenChange }: Props)
               </span>
               <div className="flex flex-col gap-1">
                 <Label htmlFor="q-prompt">Question</Label>
-                <Input id="q-prompt" value={draft.prompt} onChange={(e) => setDraft((d) => (d ? { ...d, prompt: e.target.value } : d))} />
+                {draft.type === "long_answer" ? (
+                  <textarea
+                    id="q-prompt"
+                    rows={3}
+                    value={draft.prompt}
+                    onChange={(e) => setDraft((d) => (d ? { ...d, prompt: e.target.value } : d))}
+                    className="border rounded-md px-3 py-2 text-sm w-full resize-y bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                ) : (
+                  <Input id="q-prompt" value={draft.prompt} onChange={(e) => setDraft((d) => (d ? { ...d, prompt: e.target.value } : d))} />
+                )}
               </div>
               <div className="flex flex-col gap-1">
                 <Label>Type</Label>
