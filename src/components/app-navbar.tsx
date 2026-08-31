@@ -20,7 +20,6 @@ type MemberInfo = {
   preferredFirstname: string;
   lastname: string;
   avatarUrl: string | null;
-  isMember: boolean;
 };
 
 export function AppNavbar() {
@@ -36,7 +35,7 @@ export function AppNavbar() {
 
       const { data: memberData } = await supabase
         .from("members")
-        .select("preferred_firstname, lastname, active, avatar_url")
+        .select("preferred_firstname, lastname, avatar_url")
         .eq("user_id", user.id)
         .maybeSingle();
 
@@ -46,7 +45,6 @@ export function AppNavbar() {
           preferredFirstname: memberData.preferred_firstname ?? "",
           lastname: memberData.lastname ?? "",
           avatarUrl: memberData.avatar_url ?? null,
-          isMember: !!memberData.active,
         });
       }
     });

@@ -16,6 +16,7 @@ import { ProjectsPanel } from "@/components/projects-panel";
 import { PortalsPanel } from "@/components/portals-panel";
 import { AdminPageSkeleton } from "@/components/skeletons";
 import { PersonName } from "@/components/person-profile-provider";
+import { MEMBER_STATUS_LABEL, MEMBER_STATUS_VALUES, type MemberStatus } from "@/lib/member-status";
 
 type Tab = "members" | "projects" | "portals";
 
@@ -30,6 +31,7 @@ type Member = {
   phone: string | null;
   linkedin: string | null;
   github: string | null;
+  status: MemberStatus;
   roles: Role[];
 };
 
@@ -52,6 +54,7 @@ export default function AdminPage() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState<Set<string>>(new Set());
+  const [statusFilter, setStatusFilter] = useState<Set<MemberStatus>>(new Set());
   const [projectCount, setProjectCount] = useState<number | null>(null);
   const [portalCount, setPortalCount] = useState<number | null>(null);
 
@@ -129,10 +132,31 @@ export default function AdminPage() {
       return next;
     });
 
+  const toggleStatusFilter = (status: MemberStatus) =>
+    setStatusFilter((prev) => {
+      const next = new Set(prev);
+      next.has(status) ? next.delete(status) : next.add(status);
+      return next;
+    });
+
+  const setStatus = async (member: Member, status: MemberStatus) => {
+    if (status === member.status) return;
+    const supabase = createClient();
+    const { error: rpcError } = await supabase.rpc("set_member_status", {
+      p_user_id: member.user_id,
+      p_status: status,
+    });
+    if (rpcError) { setError(rpcError.message); return; }
+    setMembers((prev) =>
+      prev.map((m) => (m.user_id === member.user_id ? { ...m, status } : m)),
+    );
+  };
+
   const filtered = members.filter((m) => {
     const name = [m.preferred_firstname, m.lastname].filter(Boolean).join(" ").toLowerCase();
     if (search && !name.includes(search.toLowerCase())) return false;
     if (roleFilter.size > 0 && !m.roles.some((r) => roleFilter.has(r.id))) return false;
+    if (statusFilter.size > 0 && !statusFilter.has(m.status)) return false;
     return true;
   });
 
@@ -209,9 +233,32 @@ export default function AdminPage() {
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
-        {(search || roleFilter.size > 0) && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button className="flex items-center gap-1.5 border rounded-md px-3 py-2 text-sm hover:bg-accent transition-colors">
+              Filter by status
+              {statusFilter.size > 0 && (
+                <span className="ml-1 bg-foreground text-background rounded-full px-1.5 py-0.5 text-xs">
+                  {statusFilter.size}
+                </span>
+              )}
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            {MEMBER_STATUS_VALUES.map((status) => (
+              <DropdownMenuCheckboxItem
+                key={status}
+                checked={statusFilter.has(status)}
+                onCheckedChange={() => toggleStatusFilter(status)}
+              >
+                {MEMBER_STATUS_LABEL[status]}
+              </DropdownMenuCheckboxItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+        {(search || roleFilter.size > 0 || statusFilter.size > 0) && (
           <button
-            onClick={() => { setSearch(""); setRoleFilter(new Set()); }}
+            onClick={() => { setSearch(""); setRoleFilter(new Set()); setStatusFilter(new Set()); }}
             className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
           >
             <X size={14} /> Clear
@@ -236,6 +283,33 @@ export default function AdminPage() {
                   <span onClick={(e) => e.stopPropagation()}>
                     <PersonName userId={m.user_id} name={name} preloaded={m} className="font-medium text-sm" />
                   </span>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        onClick={(e) => e.stopPropagation()}
+                        className={`px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${
+                          m.status === "active"
+                            ? "bg-green-600/10 text-green-700 dark:text-green-400"
+                            : m.status === "blacklisted"
+                              ? "bg-red-600/10 text-red-700 dark:text-red-400"
+                              : "bg-foreground/10 text-muted-foreground"
+                        }`}
+                      >
+                        {MEMBER_STATUS_LABEL[m.status]}
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" onClick={(e) => e.stopPropagation()}>
+                      {MEMBER_STATUS_VALUES.map((status) => (
+                        <DropdownMenuCheckboxItem
+                          key={status}
+                          checked={m.status === status}
+                          onCheckedChange={() => setStatus(m, status)}
+                        >
+                          {MEMBER_STATUS_LABEL[status]}
+                        </DropdownMenuCheckboxItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                   {m.roles.map((r) => (
                     <span
                       key={r.id}

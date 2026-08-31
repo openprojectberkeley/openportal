@@ -24,6 +24,7 @@ import { ProjectApplicationModal } from "@/components/project-application-modal"
 import { useRoleSim } from "@/components/role-simulation-provider";
 import { type Difficulty, DIFFICULTY_LABELS } from "@/lib/projects";
 import { readableTextColor, DEFAULT_ACCENT } from "@/lib/portal-color";
+import { isReturningMember } from "@/lib/member-status";
 
 type ProjectType = "studio" | "launch";
 
@@ -69,9 +70,10 @@ export default function ApplicationPage() {
   const [submitted, setSubmitted] = useState(false);
   // No application period is currently open — the flow is gated shut.
   const [closed, setClosed] = useState(false);
-  // Returning members (active) may apply to OP Studio; first-timers (inactive)
-  // are limited to OP Launch. Board/exec (staff) are always eligible.
-  const [memberActive, setMemberActive] = useState(false);
+  // Returning members (status active or inactive) may apply to OP Studio;
+  // first-timers (non_member) are limited to OP Launch. Board/exec (staff) are
+  // always eligible. Mirrors is_returning_member() in the DB.
+  const [memberReturning, setMemberReturning] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [pmMap, setPmMap] = useState<Record<string, Pm[]>>({});
   const [chattedWith, setChattedWith] = useState<Set<string>>(new Set());
@@ -148,10 +150,10 @@ export default function ApplicationPage() {
         .select("member_id")
         .eq("applicant_id", user.id)
         .eq("complete", true),
-      supabase.from("members").select("active").eq("user_id", user.id).maybeSingle(),
+      supabase.from("members").select("status").eq("user_id", user.id).maybeSingle(),
     ]);
 
-    setMemberActive(!!memberRow?.active);
+    setMemberReturning(isReturningMember(memberRow?.status));
 
     const map: Record<string, Pm[]> = {};
     for (const row of pmRows ?? []) {
@@ -228,7 +230,7 @@ export default function ApplicationPage() {
     if (ranked.includes(projectId) || ranked.length >= RANK_COUNT) return;
     // First-timers can't rank OP Studio projects (mirrors the RLS gate).
     const proj = projects.find((p) => p.id === projectId);
-    if (proj?.type === "studio" && !(memberActive || isBoardOrExec)) return;
+    if (proj?.type === "studio" && !(memberReturning || isBoardOrExec)) return;
     const aId = await ensureApp();
     if (!aId) { setError("Couldn't start your application."); return; }
     const index = atIndex ?? ranked.length;
@@ -421,9 +423,9 @@ export default function ApplicationPage() {
     );
   }
 
-  // First-time members (inactive) may only apply to OP Launch; returning members
-  // (active) and staff (board/exec) may also apply to OP Studio.
-  const studioEligible = memberActive || isBoardOrExec;
+  // First-time members (non_member) may only apply to OP Launch; returning
+  // members (active/inactive) and staff (board/exec) may also apply to OP Studio.
+  const studioEligible = memberReturning || isBoardOrExec;
   const available = projects.filter((p) => !ranked.includes(p.id));
   const studioAvailable = studioEligible ? available.filter((p) => p.type === "studio") : [];
   const launchAvailable = available.filter((p) => p.type === "launch");

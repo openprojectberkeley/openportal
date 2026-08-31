@@ -18,7 +18,7 @@ export async function GET(
     supabase
       .from("members")
       .select(
-        "user_id, preferred_firstname, lastname, email, major, grad_year, phone, linkedin, github, interests, active, avatar_url",
+        "user_id, preferred_firstname, lastname, email, major, grad_year, phone, linkedin, github, interests, status, avatar_url",
       )
       .eq("user_id", userId)
       .maybeSingle(),

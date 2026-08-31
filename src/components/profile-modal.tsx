@@ -5,6 +5,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { ScrollArea } from "@/components/overlay-scrollbar";
 import { initials, ProjectBadge, type OpenTarget, type PublicProfile } from "@/components/person-profile-provider";
 import { sortRoles } from "@/lib/role-order";
+import { MEMBER_STATUS_BADGE_LABEL } from "@/lib/member-status";
 
 type Props = {
   target: OpenTarget | null;
@@ -117,9 +118,9 @@ export function ProfileModal({ target, cached, onLoaded, onClose }: Props) {
                 {projects.map((p) => (
                   <ProjectBadge key={p.id} project={p} />
                 ))}
-                {merged.active === false && (
+                {merged.status && MEMBER_STATUS_BADGE_LABEL[merged.status] && (
                   <span className="px-2 py-0.5 rounded-full bg-foreground/10 text-muted-foreground text-xs font-medium">
-                    Inactive
+                    {MEMBER_STATUS_BADGE_LABEL[merged.status]}
                   </span>
                 )}
               </div>

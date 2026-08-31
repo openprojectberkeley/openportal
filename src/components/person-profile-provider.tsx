@@ -23,7 +23,7 @@ export type PublicProfile = {
   linkedin: string | null;
   github: string | null;
   interests: string | null;
-  active: boolean | null;
+  status: "active" | "inactive" | "non_member" | "blacklisted" | null;
   avatar_url: string | null;
   roles: Role[];
   projects: MemberProject[];

@@ -10,6 +10,7 @@ import { PortalCard, type PortalSummary } from "@/components/portal-card";
 import { CalendarPanel } from "@/components/calendar-panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PortalGridSkeleton, CalendarSkeleton } from "@/components/skeletons";
+import { getHomeView, shouldShowReapplyBanner } from "@/lib/member-status";
 
 type CompletionState = {
   coffeeChat: boolean;
@@ -21,11 +22,12 @@ export default function HomePage() {
   const router = useRouter();
   const { ready, isExec, isBoardOrExec, simulating, persona } = useRoleSim();
 
-  // "dashboard" for active members + board/exec, "checklist" for applicants.
+  // "dashboard" for anyone who's ever been a member (active/inactive/blacklisted)
+  // + board/exec, "checklist" for true first-time applicants (non_member).
   const [view, setView] = useState<"dashboard" | "checklist" | null>(null);
   const [firstName, setFirstName] = useState<string | null>(null);
   const [portals, setPortals] = useState<PortalSummary[] | null>(null);
-  // A returning member (active, non-staff) who hasn't re-applied to the currently
+  // A currently-active member (non-staff) who hasn't re-applied to the currently
   // open period yet — drives the non-blocking re-apply banner on the dashboard.
   const [reapply, setReapply] = useState<{ periodName: string; infosessionDone: boolean } | null>(null);
   const [completed, setCompleted] = useState<CompletionState>({
@@ -49,7 +51,7 @@ export default function HomePage() {
 
       const { data: member } = await supabase
         .from("members")
-        .select("preferred_firstname, active, email")
+        .select("preferred_firstname, status, email")
         .eq("user_id", user.id)
         .maybeSingle();
 
@@ -68,9 +70,10 @@ export default function HomePage() {
           .eq("user_id", user.id);
       }
 
-      // Applicants (inactive, non-staff) get the checklist; active members and
+      // True first-time applicants (non_member, non-staff) get the checklist;
+      // anyone who's ever been a member (active/inactive/blacklisted) and
       // board/exec get the portal dashboard.
-      if (!member.active && !isBoardOrExec) {
+      if (getHomeView(member.status, isBoardOrExec) === "checklist") {
         setView("checklist");
         // .limit(1) + length check instead of .maybeSingle(): a stray
         // duplicate row (e.g. an applicant claiming two infosession codes)
@@ -94,10 +97,10 @@ export default function HomePage() {
       setView("dashboard");
       setFirstName(member.preferred_firstname);
 
-      // Returning members (active, non-staff) must re-apply each open round. Show
-      // a non-blocking prompt when a period is open and they haven't applied to it
+      // Active members (non-staff) must re-apply each open round. Show a
+      // non-blocking prompt when a period is open and they haven't applied to it
       // yet. Board/exec don't apply, so skip them.
-      if (member.active && !isBoardOrExec) {
+      if (shouldShowReapplyBanner(member.status, isBoardOrExec)) {
         const { data: openPeriods } = await supabase
           .from("application_periods")
           .select("id, name")
