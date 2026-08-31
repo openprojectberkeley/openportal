@@ -1,10 +1,6 @@
 "use client";
 
 import { getAuthCallbackUrl } from "@/lib/auth-callback-url";
-import {
-  BERKELEY_EMAIL_REQUIRED_MESSAGE,
-  isBerkeleyEmail,
-} from "@/lib/berkeley-email";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,10 +11,12 @@ import { useState, type FormEvent } from "react";
 
 type Mode = "sign-in" | "sign-up";
 
+const EMAIL_DOMAIN = "berkeley.edu";
+
 export function EmailPasswordForm({ disabled }: { disabled?: boolean }) {
   const router = useRouter();
   const [mode, setMode] = useState<Mode>("sign-in");
-  const [email, setEmail] = useState("");
+  const [localPart, setLocalPart] = useState("");
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,10 +29,12 @@ export function EmailPasswordForm({ disabled }: { disabled?: boolean }) {
     event.preventDefault();
     setError(null);
 
-    if (!isBerkeleyEmail(email)) {
-      setError(BERKELEY_EMAIL_REQUIRED_MESSAGE);
+    const trimmedLocalPart = localPart.trim();
+    if (!trimmedLocalPart) {
+      setError("Enter your Berkeley username.");
       return;
     }
+    const email = `${trimmedLocalPart}@${EMAIL_DOMAIN}`;
 
     setIsLoading(true);
     const supabase = createClient();
@@ -83,16 +83,25 @@ export function EmailPasswordForm({ disabled }: { disabled?: boolean }) {
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-3">
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="email">Email</Label>
-        <Input
-          id="email"
-          type="email"
-          autoComplete="email"
-          required
-          disabled={disabled || isLoading}
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-        />
+        <Label htmlFor="email">Berkeley email</Label>
+        <div className="flex items-stretch overflow-hidden rounded-md border border-input has-[input:focus-visible]:ring-1 has-[input:focus-visible]:ring-ring">
+          <Input
+            id="email"
+            type="text"
+            autoComplete="username"
+            required
+            disabled={disabled || isLoading}
+            value={localPart}
+            onChange={(event) =>
+              setLocalPart(event.target.value.replace(/[@\s].*$/, ""))
+            }
+            className="rounded-none border-0 shadow-none focus-visible:ring-0"
+            placeholder="username"
+          />
+          <span className="flex items-center whitespace-nowrap border-l border-input bg-muted px-3 text-sm text-muted-foreground">
+            @{EMAIL_DOMAIN}
+          </span>
+        </div>
       </div>
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="password">Password</Label>
