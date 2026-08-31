@@ -42,9 +42,11 @@ export type ProjectQuestion = {
   required: boolean;
 };
 
-// The essay is a fixed, required long-answer at the top of every project's
-// application modal. 150-200 words is the *suggested* length; any non-empty
-// essay can be saved, but under ESSAY_WARN_WORDS we show a gentle warning.
+// The essay is a long-answer question at the top of every project's
+// application modal; its prompt text and required-ness are per-project
+// (projects.essay_prompt / essay_required), editable via ProjectQuestionsDialog.
+// 150-200 words is the *suggested* length; any non-empty essay can be saved,
+// but under ESSAY_WARN_WORDS we show a gentle warning.
 export const ESSAY_MIN_WORDS = 150;
 export const ESSAY_MAX_WORDS = 200;
 export const ESSAY_WARN_WORDS = 100;

@@ -40,6 +40,8 @@ const emptyDraft = (): Draft => ({ id: null, type: "short_answer", prompt: "", o
 
 // Google-Forms-style builder for a project's custom application questions.
 // Writable by exec or the project's PMs (RLS enforces; see migration 0020).
+const DEFAULT_ESSAY_PROMPT = "Why do you want to work on this project?";
+
 export function ProjectQuestionsDialog({ projectId, open, onOpenChange }: Props) {
   const [questions, setQuestions] = useState<ProjectQuestion[]>([]);
   const [loading, setLoading] = useState(true);
@@ -47,22 +49,61 @@ export function ProjectQuestionsDialog({ projectId, open, onOpenChange }: Props)
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // The fixed essay question's per-project settings (prompt wording + whether
+  // it's required); everything else about it (position, 150-200 word
+  // suggestion) stays fixed. Saved on blur/toggle, not via the draft form below.
+  const [essayPrompt, setEssayPrompt] = useState(DEFAULT_ESSAY_PROMPT);
+  const [essayRequired, setEssayRequired] = useState(true);
+  const [essayError, setEssayError] = useState<string | null>(null);
+
   useEffect(() => {
     if (!open) return;
     setLoading(true);
     setDraft(null);
     setError(null);
+    setEssayError(null);
     const supabase = createClient();
-    supabase
-      .from("project_questions")
-      .select("id, project_id, position, type, prompt, options, required")
-      .eq("project_id", projectId)
-      .order("position")
-      .then(({ data }) => {
-        setQuestions((data ?? []) as ProjectQuestion[]);
-        setLoading(false);
-      });
+    Promise.all([
+      supabase
+        .from("project_questions")
+        .select("id, project_id, position, type, prompt, options, required")
+        .eq("project_id", projectId)
+        .order("position"),
+      supabase.from("projects").select("essay_prompt, essay_required").eq("id", projectId).maybeSingle(),
+    ]).then(([{ data }, { data: project }]) => {
+      setQuestions((data ?? []) as ProjectQuestion[]);
+      setEssayPrompt(project?.essay_prompt ?? DEFAULT_ESSAY_PROMPT);
+      setEssayRequired(project?.essay_required ?? true);
+      setLoading(false);
+    });
   }, [open, projectId]);
+
+  const saveEssayPrompt = async () => {
+    const prompt = essayPrompt.trim();
+    if (!prompt) {
+      setEssayError("Essay prompt is required.");
+      setEssayPrompt(DEFAULT_ESSAY_PROMPT);
+      return;
+    }
+    setEssayError(null);
+    if (prompt !== essayPrompt) setEssayPrompt(prompt);
+    const supabase = createClient();
+    const { error: updateError } = await supabase
+      .from("projects")
+      .update({ essay_prompt: prompt })
+      .eq("id", projectId);
+    if (updateError) setEssayError(updateError.message);
+  };
+
+  const saveEssayRequired = async (required: boolean) => {
+    setEssayRequired(required);
+    const supabase = createClient();
+    const { error: updateError } = await supabase
+      .from("projects")
+      .update({ essay_required: required })
+      .eq("id", projectId);
+    if (updateError) setEssayError(updateError.message);
+  };
 
   const openAdd = () => { setError(null); setDraft(emptyDraft()); };
   const openEdit = (q: ProjectQuestion) => {
@@ -151,13 +192,43 @@ export function ProjectQuestionsDialog({ projectId, open, onOpenChange }: Props)
         </DialogHeader>
 
         <div className="flex flex-col gap-4">
-          <p className="text-xs text-muted-foreground">
-            These appear in the applicant&apos;s modal for this project, after the required 150–200 word essay.
-          </p>
-
           {loading ? (
             <p className="text-sm text-muted-foreground">Loading…</p>
-          ) : questions.length === 0 ? (
+          ) : (
+            <div className="flex flex-col gap-3 border rounded-lg p-4 bg-accent/10">
+              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                Essay question
+              </span>
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="essay-prompt">Prompt</Label>
+                <Input
+                  id="essay-prompt"
+                  value={essayPrompt}
+                  onChange={(e) => setEssayPrompt(e.target.value)}
+                  onBlur={saveEssayPrompt}
+                />
+                <span className="text-[11px] text-muted-foreground">
+                  Always first in the applicant&apos;s modal. 150–200 words is suggested; any non-empty answer saves.
+                </span>
+              </div>
+              <label className="flex items-center gap-2 text-sm cursor-pointer w-fit">
+                <Checkbox
+                  checked={essayRequired}
+                  onCheckedChange={(v) => saveEssayRequired(v === true)}
+                />
+                Required
+              </label>
+              {essayError && <p className="text-sm text-red-500">{essayError}</p>}
+            </div>
+          )}
+
+          {!loading && (
+            <p className="text-xs text-muted-foreground">
+              These appear in the applicant&apos;s modal for this project, after the essay above.
+            </p>
+          )}
+
+          {loading ? null : questions.length === 0 ? (
             <p className="text-sm text-muted-foreground border rounded-lg px-4 py-6 text-center">
               No custom questions yet.
             </p>
