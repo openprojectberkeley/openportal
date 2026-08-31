@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/supabase/client";
 import { useEffect, useState } from "react";
-import { ChevronDown, Check, X } from "lucide-react";
+import { ChevronDown, Check, X, FileText } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   DropdownMenu,
@@ -35,6 +35,12 @@ type AnswerRow = {
   question: { id: string; prompt: string; position: number } | null;
 };
 
+// The applicant's uploaded resume (in the team's Google Drive folder).
+type Profile = {
+  resume_drive_url: string | null;
+  resume_filename: string | null;
+};
+
 // Board/exec review of one submitted application: read the applicant's ranked
 // projects + essays + answers, then accept (placing them on a chosen project via
 // the accept_application RPC) or reject. `onReviewed` reports the new status so
@@ -57,6 +63,7 @@ export function ApplicationReviewModal({
   const [loading, setLoading] = useState(true);
   const [rankings, setRankings] = useState<RankingRow[]>([]);
   const [answersByRanking, setAnswersByRanking] = useState<Record<string, AnswerRow[]>>({});
+  const [profile, setProfile] = useState<Profile | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -68,6 +75,13 @@ export function ApplicationReviewModal({
     const supabase = createClient();
 
     const load = async () => {
+      const { data: appRow } = await supabase
+        .from("applications")
+        .select("resume_drive_url, resume_filename")
+        .eq("id", applicationId)
+        .maybeSingle();
+      setProfile((appRow as Profile | null) ?? null);
+
       const { data: rankRows } = await supabase
         .from("application_rankings")
         .select("id, rank, essay, project:projects(id, name, type)")
@@ -144,6 +158,8 @@ export function ApplicationReviewModal({
           <ProjectApplicationModalSkeleton />
         ) : (
           <div className="flex flex-col gap-6">
+            <ResumeLink profile={profile} />
+
             {rankings.length === 0 ? (
               <p className="text-sm text-muted-foreground">No ranked projects on this application.</p>
             ) : (
@@ -219,5 +235,27 @@ export function ApplicationReviewModal({
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+// A link to the applicant's resume in the team's Google Drive folder.
+function ResumeLink({ profile }: { profile: Profile | null }) {
+  return (
+    <div className="flex flex-col gap-2 rounded-xl border bg-muted/30 p-4">
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Resume</h3>
+      {profile?.resume_drive_url ? (
+        <a
+          href={profile.resume_drive_url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 self-start rounded-md border bg-background px-3 py-1.5 text-sm hover:bg-accent transition-colors"
+        >
+          <FileText size={14} className="text-muted-foreground" />
+          {profile.resume_filename || "View resume"}
+        </a>
+      ) : (
+        <p className="text-sm italic text-muted-foreground">No resume uploaded.</p>
+      )}
+    </div>
   );
 }

@@ -3,7 +3,7 @@
 import { createClient } from "@/lib/supabase/client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Check, Pencil, X, AlertTriangle, Coffee, ChevronDown, Plus } from "lucide-react";
+import { Check, Pencil, X, AlertTriangle, Coffee, ChevronDown, Plus, FileText, Upload, Loader2 } from "lucide-react";
 import {
   DndContext,
   DragOverlay,
@@ -18,12 +18,14 @@ import {
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
 import { ApplicationPageSkeleton } from "@/components/skeletons";
 import { ProjectApplicationModal } from "@/components/project-application-modal";
 import { useRoleSim } from "@/components/role-simulation-provider";
 import { type Difficulty, DIFFICULTY_LABELS } from "@/lib/projects";
-import { readableTextColor, DEFAULT_ACCENT } from "@/lib/portal-color";
+import { readableTextColor } from "@/lib/portal-color";
 import { isReturningMember } from "@/lib/member-status";
+import { uploadResumeToDrive, deleteResumeFromDrive } from "@/lib/resume-drive";
 
 type ProjectType = "studio" | "launch";
 
@@ -94,6 +96,12 @@ export default function ApplicationPage() {
   const [rankingIdByProject, setRankingIdByProject] = useState<Record<string, string>>({});
   const [completedByProject, setCompletedByProject] = useState<Record<string, boolean>>({});
 
+  // Optional resume, uploaded to a shared Google Drive folder (the team's native
+  // reviewer reads that folder); we keep the returned link on the application.
+  const [resume, setResume] = useState<{ url: string; filename: string } | null>(null);
+  const [resumeUploading, setResumeUploading] = useState(false);
+  const [resumeError, setResumeError] = useState<string | null>(null);
+
   const [modalProject, setModalProject] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -133,7 +141,7 @@ export default function ApplicationPage() {
 
     const { data: app } = await supabase
       .from("applications")
-      .select("id, status")
+      .select("id, status, resume_drive_url, resume_filename")
       .eq("applicant_id", user.id)
       .eq("period_id", periodId)
       .maybeSingle();
@@ -171,6 +179,11 @@ export default function ApplicationPage() {
     setProjects((projectRows ?? []) as Project[]);
     setPmMap(map);
     setChattedWith(new Set((chatRows ?? []).map((c) => c.member_id)));
+
+    // Hydrate an existing draft's uploaded resume link.
+    if (app) {
+      setResume(app.resume_drive_url ? { url: app.resume_drive_url, filename: app.resume_filename ?? "Resume" } : null);
+    }
 
     // Hydrate an existing draft's ranking.
     if (app?.id) {
@@ -339,6 +352,29 @@ export default function ApplicationPage() {
     await syncRanks(next, nextMap);
   };
 
+  // ---- Resume upload (to a shared Google Drive folder) --------------------
+  const onResumeSelected = async (file: File) => {
+    const pid = periodIdRef.current;
+    if (!pid) return;
+    setResumeUploading(true);
+    setResumeError(null);
+    try {
+      const { url, filename } = await uploadResumeToDrive(createClient(), pid, file);
+      setResume({ url, filename });
+    } catch (e) {
+      setResumeError(e instanceof Error ? e.message : "Upload failed.");
+    } finally {
+      setResumeUploading(false);
+    }
+  };
+
+  const onResumeRemove = async () => {
+    const pid = periodIdRef.current;
+    setResume(null);
+    setResumeError(null);
+    if (pid) { try { await deleteResumeFromDrive(createClient(), pid); } catch { /* best-effort */ } }
+  };
+
   const projectById = (id: string) => projects.find((p) => p.id === id);
   const studioMet = (projectId: string) => (pmMap[projectId] ?? []).some((pm) => chattedWith.has(pm.user_id));
   const studioBlocked = ranked.filter((id) => projectById(id)?.type === "studio" && !studioMet(id));
@@ -497,6 +533,23 @@ export default function ApplicationPage() {
           Your progress saves automatically.
         </p>
       </div>
+
+      {/* Resume — optional, uploaded to the team's Drive folder. */}
+      <section className="flex flex-col gap-2 border rounded-xl p-5">
+        <div className="flex flex-col gap-0.5">
+          <Label className="text-sm font-medium">Resume</Label>
+          <span className="text-xs text-muted-foreground">
+            Highly recommended · PDF or Word (.pdf, .doc, .docx), up to 8 MB.
+          </span>
+        </div>
+        <ResumeField
+          resume={resume}
+          uploading={resumeUploading}
+          error={resumeError}
+          onSelect={onResumeSelected}
+          onRemove={onResumeRemove}
+        />
+      </section>
 
       <DndContext
         sensors={sensors}
@@ -744,7 +797,7 @@ function ProjectCard(props: CardProps) {
   const box = (
     <div
       onClick={() => setOpen((o) => !o)}
-      className={`group relative overflow-hidden border rounded-xl p-3 pl-4 transition-colors hover:bg-accent ${
+      className={`group relative overflow-hidden border rounded-xl p-3 transition-colors hover:bg-accent ${
         completed ? "border-green-600/40 bg-green-600/5" : "bg-background"
       }`}
     >
@@ -802,13 +855,6 @@ function CardContent({
   const meta = metaLine(project);
   return (
     <>
-      {/* Accent color as a slim tab on the card's left edge. */}
-      <div
-        className="absolute inset-y-0 left-0 w-1.5 pointer-events-none"
-        style={{ backgroundColor: project.color || DEFAULT_ACCENT }}
-        aria-hidden
-      />
-
       <div className="relative z-10 flex flex-col gap-1.5">
         <div className="flex items-center gap-2">
           <ChevronDown
@@ -820,7 +866,6 @@ function CardContent({
 
           {variant === "available" ? (
             <>
-              {project.client && <span className="text-xs text-muted-foreground flex-shrink-0">{project.client}</span>}
               <button
                 type="button"
                 disabled={full}
@@ -879,6 +924,10 @@ function CardContent({
           )}
         </div>
 
+        {project.client && (
+          <p className="text-xs text-muted-foreground pl-6">Client: {project.client}</p>
+        )}
+
         {open && (
           <>
             {project.description && <p className="text-sm text-muted-foreground pl-6">{project.description}</p>}
@@ -936,16 +985,92 @@ function ProjectIcon({ project }: { project: Project }) {
   return null;
 }
 
+// A discrete 1–5 scale: buttons fill up to the selected value; the parent clears
+// it when the current value is tapped again.
+// Plain resume file picker. Sends the raw File up to the page, which uploads it
+// to the team's Google Drive folder via the upload-resume-drive edge function.
+function ResumeField({
+  resume,
+  uploading,
+  error,
+  onSelect,
+  onRemove,
+}: {
+  resume: { url: string; filename: string } | null;
+  uploading: boolean;
+  error: string | null;
+  onSelect: (file: File) => void;
+  onRemove: () => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  return (
+    <div className="flex flex-col gap-1.5">
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) onSelect(f);
+          e.target.value = ""; // allow re-picking the same file
+        }}
+      />
+      {resume ? (
+        <div className="flex items-center gap-2 border rounded-md px-3 py-2 text-sm bg-background">
+          <FileText size={16} className="text-muted-foreground flex-shrink-0" />
+          <a
+            href={resume.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex-1 min-w-0 truncate hover:underline"
+          >
+            {resume.filename}
+          </a>
+          <button
+            type="button"
+            onClick={() => inputRef.current?.click()}
+            disabled={uploading}
+            className="text-xs font-medium text-muted-foreground hover:text-foreground disabled:opacity-50"
+          >
+            {uploading ? "Uploading…" : "Replace"}
+          </button>
+          <button
+            type="button"
+            onClick={onRemove}
+            disabled={uploading}
+            aria-label="Remove resume"
+            className="text-muted-foreground hover:text-red-500 disabled:opacity-50 flex-shrink-0"
+          >
+            <X size={15} />
+          </button>
+        </div>
+      ) : (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="self-start"
+          disabled={uploading}
+          onClick={() => inputRef.current?.click()}
+        >
+          {uploading ? (
+            <><Loader2 size={14} className="mr-1.5 animate-spin" /> Uploading…</>
+          ) : (
+            <><Upload size={14} className="mr-1.5" /> Upload resume</>
+          )}
+        </Button>
+      )}
+      {error && <p className="text-xs text-red-500">{error}</p>}
+    </div>
+  );
+}
+
 // The card rendered under the pointer while dragging (via DragOverlay) — mirrors
 // the collapsed card look so moving between lists feels seamless.
 function DragPreview({ project }: { project: Project }) {
   return (
-    <div className="relative overflow-hidden rounded-xl border bg-background p-3 pl-4 shadow-lg cursor-grabbing flex items-center gap-2">
-      <div
-        className="absolute inset-y-0 left-0 w-1.5 pointer-events-none"
-        style={{ backgroundColor: project.color || DEFAULT_ACCENT }}
-        aria-hidden
-      />
+    <div className="relative overflow-hidden rounded-xl border bg-background p-3 shadow-lg cursor-grabbing flex items-center gap-2">
       <div className="relative z-10 flex items-center gap-2 min-w-0">
         <ProjectIcon project={project} />
         <span className="font-medium text-sm truncate">{project.name}</span>
