@@ -23,11 +23,13 @@ import { buildInvite, type IcsAttendee, type IcsMethod } from "./ics.ts";
 const SMTP2GO_ENDPOINT = "https://api.smtp2go.com/v3/email/send";
 
 const ORGANIZER_NAME = "Open Portal";
-const ORGANIZER_EMAIL = "noreply@openprojectberkeley.com";
+const ORGANIZER_EMAIL = "support@openprojectberkeley.com";
 const EVENT_SUMMARY = "Coffee chat — Open Project";
 
 // Every coffee-chat type carries a calendar action: REQUEST adds/updates the
 // shared slot event, CANCEL removes the leaver's copy (see method rule below).
+// REQUEST invites solicit RSVP replies to ORGANIZER_EMAIL, which must be able to
+// receive mail (a receiving/discard inbox) or accepts/declines bounce.
 const CALENDAR_TYPES = new Set([
   "chat_booked",
   "location_added",
@@ -146,8 +148,9 @@ Deno.serve(async (req) => {
 
   // Build a group calendar invite for the SLOT (host + meeting_time). All seats
   // of a slot share one UID, so a new booker is added to the same event; each
-  // ATTENDEE line is one party. REQUEST adds/updates; CANCEL removes the leaver's
-  // copy. The slot is identified by the notification's member_id + meeting_time.
+  // ATTENDEE line is one party. REQUEST adds/updates (and lets the recipient
+  // RSVP); CANCEL removes the leaver's copy. The slot is identified by the
+  // notification's member_id + meeting_time.
   let icsInvite: string | null = null;
   let icsMethod: IcsMethod = "REQUEST";
   let gcalHtml = "";

@@ -2,13 +2,12 @@
 //
 // A framework-free sibling of src/lib/ics.ts. Emits a group event: one UID per
 // SLOT (host + meeting_time) shared by every seat, an ORGANIZER, and one ATTENDEE
-// line per party (host + booked applicants). METHOD:REQUEST adds/updates the
-// shared event — a new booker is added to the same event rather than getting a
-// duplicate; METHOD:CANCEL removes one recipient's copy when they leave.
+// line per party (host + booked applicants, listed informationally).
 //
-// REQUEST solicits RSVP replies to the ORGANIZER address, so that address MUST be
-// able to receive mail (see the plan's prerequisite) or accepts/declines bounce.
-// RSVP=FALSE reduces the prompt but does not eliminate manual replies.
+// METHOD:REQUEST (add/update) auto-adds the event and lets the recipient RSVP;
+// METHOD:CANCEL removes it. REQUEST sends the recipient's accept/decline reply to
+// the ORGANIZER address, so that address MUST be able to receive mail (a
+// receiving/discard inbox on organizerEmail's domain) or replies bounce.
 //
 // Times are emitted as UTC (Z); every calendar renders them in the recipient's
 // own zone, so the invite is timezone-correct on its own.
@@ -70,7 +69,7 @@ export function buildInvite(inv: IcsInvite): string {
 
   for (const a of inv.attendees) {
     lines.push(
-      `ATTENDEE;CN=${escapeIcsText(a.name)};ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=FALSE:mailto:${a.email}`,
+      `ATTENDEE;CN=${escapeIcsText(a.name)};ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:${a.email}`,
     );
   }
 
