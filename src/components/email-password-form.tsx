@@ -40,7 +40,7 @@ export function EmailPasswordForm({ disabled }: { disabled?: boolean }) {
     const supabase = createClient();
 
     if (mode === "sign-up") {
-      const { error } = await supabase.auth.signUp({
+      const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: { emailRedirectTo: getAuthCallbackUrl() },
@@ -49,6 +49,14 @@ export function EmailPasswordForm({ disabled }: { disabled?: boolean }) {
       if (error) {
         setError(error.message);
         setIsLoading(false);
+        return;
+      }
+
+      // If email confirmation is off, signUp already returns a live session
+      // instead of requiring a click-through, so there's nothing to "check
+      // your email" for.
+      if (data.session) {
+        router.replace("/");
         return;
       }
 
