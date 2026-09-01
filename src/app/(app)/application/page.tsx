@@ -22,10 +22,8 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ApplicationPageSkeleton } from "@/components/skeletons";
 import { ProjectApplicationModal } from "@/components/project-application-modal";
-import { useRoleSim } from "@/components/role-simulation-provider";
 import { type Difficulty, DIFFICULTY_LABELS } from "@/lib/projects";
 import { readableTextColor } from "@/lib/portal-color";
-import { isReturningMember } from "@/lib/member-status";
 import { uploadResume, deleteResume, resumeSignedUrl } from "@/lib/resume-upload";
 import { TECH_AREAS, TECH_CLASSES, TECH_CLASS_NA } from "@/lib/application-profile";
 
@@ -76,15 +74,10 @@ const metaLine = (p: Project) =>
 const sameOrder = (a: string[], b: string[]) => a.length === b.length && a.every((x, i) => x === b[i]);
 
 export default function ApplicationPage() {
-  const { isBoardOrExec } = useRoleSim();
   const [loading, setLoading] = useState(true);
   const [submitted, setSubmitted] = useState(false);
   // No application period is currently open — the flow is gated shut.
   const [closed, setClosed] = useState(false);
-  // Returning members (status active or inactive) may apply to OP Studio;
-  // first-timers (non_member) are limited to OP Launch. Board/exec (staff) are
-  // always eligible. Mirrors is_returning_member() in the DB.
-  const [memberReturning, setMemberReturning] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [pmMap, setPmMap] = useState<Record<string, Pm[]>>({});
   const [chattedWith, setChattedWith] = useState<Set<string>>(new Set());
@@ -170,10 +163,9 @@ export default function ApplicationPage() {
         .select("member_id")
         .eq("applicant_id", user.id)
         .eq("complete", true),
-      supabase.from("members").select("status, resume_path, resume_filename").eq("user_id", user.id).maybeSingle(),
+      supabase.from("members").select("resume_path, resume_filename").eq("user_id", user.id).maybeSingle(),
     ]);
 
-    setMemberReturning(isReturningMember(memberRow?.status));
     setResume(
       memberRow?.resume_path
         ? { path: memberRow.resume_path as string, filename: (memberRow.resume_filename as string | null) ?? "Resume" }
@@ -298,9 +290,6 @@ export default function ApplicationPage() {
   // The `+` button on an available card — append to the ranking.
   const addProject = async (projectId: string) => {
     if (ranked.includes(projectId) || ranked.length >= RANK_COUNT) return;
-    // First-timers can't rank OP Studio projects (mirrors the RLS gate).
-    const proj = projects.find((p) => p.id === projectId);
-    if (proj?.type === "studio" && !(memberReturning || isBoardOrExec)) return;
     const aId = await ensureApp();
     if (!aId) { setError("Couldn't start your application."); return; }
     const newRanked = [...ranked, projectId];
@@ -468,10 +457,6 @@ export default function ApplicationPage() {
   const rankingReady = ranked.length === RANK_COUNT && allCompleted && studioBlocked.length === 0;
   const canSubmit = rankingReady && !SUBMISSIONS_LOCKED;
 
-  // First-time members (non_member) may only apply to OP Launch; returning
-  // members (active/inactive) and staff (board/exec) may also apply to OP Studio.
-  const studioEligible = memberReturning || isBoardOrExec;
-
   // ---- Drag orchestration (multi-container sortable) ----------------------
   // Both lists are sortable containers; `dragRanked` is mutated live on hover so
   // a card can be dropped into any slot (first/last included) and reflows under
@@ -492,8 +477,6 @@ export default function ApplicationPage() {
 
     // Available → ranking: insert at the hovered slot.
     if (!inRanked && overRanked) {
-      const proj = projectById(activeIdStr);
-      if (proj?.type === "studio" && !studioEligible) return;
       if (base.length >= RANK_COUNT) return;
       let newIndex: number;
       if (overId === RANKED_ZONE) {
@@ -601,7 +584,7 @@ export default function ApplicationPage() {
   // While a drag is live, render from the working copy so the list reflows.
   const rankedView = dragRanked ?? ranked;
   const availableProjects = projects.filter((p) => !rankedView.includes(p.id));
-  const studioAvailable = studioEligible ? availableProjects.filter((p) => p.type === "studio") : [];
+  const studioAvailable = availableProjects.filter((p) => p.type === "studio");
   const launchAvailable = availableProjects.filter((p) => p.type === "launch");
   const availableIds = [...studioAvailable, ...launchAvailable].map((p) => p.id);
   const full = rankedView.length >= RANK_COUNT;
@@ -705,7 +688,6 @@ export default function ApplicationPage() {
           <AvailableZone
             studioAvailable={studioAvailable}
             launchAvailable={launchAvailable}
-            studioEligible={studioEligible}
             availableIds={availableIds}
             pmMap={pmMap}
             studioMet={studioMet}
@@ -796,7 +778,6 @@ export default function ApplicationPage() {
 function AvailableZone({
   studioAvailable,
   launchAvailable,
-  studioEligible,
   availableIds,
   pmMap,
   studioMet,
@@ -805,7 +786,6 @@ function AvailableZone({
 }: {
   studioAvailable: Project[];
   launchAvailable: Project[];
-  studioEligible: boolean;
   availableIds: string[];
   pmMap: Record<string, Pm[]>;
   studioMet: (id: string) => boolean;
@@ -818,16 +798,12 @@ function AvailableZone({
     <div ref={setNodeRef} className="flex flex-col gap-4 rounded-xl">
       <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Projects</h2>
       <SortableContext items={availableIds} strategy={verticalListSortingStrategy}>
-        {studioEligible ? (
+        <div className="flex flex-col gap-2">
           <AvailableGroup title={TYPE_LABELS.studio} list={studioAvailable} pmMap={pmMap} studioMet={studioMet} full={full} onAdd={onAdd} />
-        ) : (
-          <div className="flex flex-col gap-1.5">
-            <h3 className="text-xs font-semibold text-muted-foreground">{TYPE_LABELS.studio}</h3>
-            <p className="rounded-lg border border-dashed px-3 py-2.5 text-xs text-muted-foreground">
-              OP Studio is open to returning members only. First-time applicants can apply to OP Launch projects.
-            </p>
-          </div>
-        )}
+          <p className="text-xs text-muted-foreground">
+            Returning members are prioritized for OP Studio projects.
+          </p>
+        </div>
         <AvailableGroup title={TYPE_LABELS.launch} list={launchAvailable} pmMap={pmMap} studioMet={studioMet} full={full} onAdd={onAdd} />
       </SortableContext>
     </div>
