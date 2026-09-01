@@ -36,6 +36,12 @@ export async function GET(request: NextRequest) {
     redirect(errorUrl(BERKELEY_EMAIL_REQUIRED_MESSAGE));
   }
 
+  // Password recovery links must land on the set-new-password screen, not be
+  // dropped straight into the app.
+  if (type === "recovery") {
+    redirect("/auth/update-password");
+  }
+
   const { data: member } = await supabase
     .from("members")
     .select("user_id")

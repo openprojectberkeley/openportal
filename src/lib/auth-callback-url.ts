@@ -8,3 +8,14 @@ export function getAuthCallbackUrl() {
     window.location.origin,
   ).href;
 }
+
+export function getPasswordResetRedirectUrl() {
+  if (typeof window === "undefined") {
+    return "/auth/update-password";
+  }
+
+  return new URL(
+    "/auth/update-password",
+    window.location.origin,
+  ).href;
+}

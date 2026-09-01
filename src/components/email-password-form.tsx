@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Eye, EyeOff } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 
@@ -149,7 +150,17 @@ export function EmailPasswordForm({ disabled }: { disabled?: boolean }) {
         </div>
       </div>
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="password">Password</Label>
+        <div className="flex items-center justify-between">
+          <Label htmlFor="password">Password</Label>
+          {mode === "sign-in" && (
+            <Link
+              href="/auth/forgot-password"
+              className="text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground"
+            >
+              Forgot password?
+            </Link>
+          )}
+        </div>
         <div className="relative">
           <Input
             id="password"
