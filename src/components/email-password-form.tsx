@@ -24,10 +24,14 @@ export function EmailPasswordForm({ disabled }: { disabled?: boolean }) {
   const [confirmationSentTo, setConfirmationSentTo] = useState<string | null>(
     null,
   );
+  const [existingAccount, setExistingAccount] = useState<
+    null | "google" | "password"
+  >(null);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
+    setExistingAccount(null);
 
     const trimmedLocalPart = localPart.trim();
     if (!trimmedLocalPart) {
@@ -40,6 +44,28 @@ export function EmailPasswordForm({ disabled }: { disabled?: boolean }) {
     const supabase = createClient();
 
     if (mode === "sign-up") {
+      // Steer returning users to the right sign-in method before creating an
+      // account. With email-enumeration protection on, signUp for an email that
+      // already exists silently no-ops (no confirmation email is sent), so
+      // without this pre-check the form would wrongly tell them to check their
+      // inbox. Most accounts here were created with Google, so distinguish that.
+      const { data: statusRows } = await supabase.rpc("account_exists", {
+        p_email: email,
+      });
+      const status = (
+        Array.isArray(statusRows) ? statusRows[0] : statusRows
+      ) as
+        | { found: boolean; has_password: boolean; has_google: boolean }
+        | null
+        | undefined;
+      if (status?.found) {
+        setExistingAccount(
+          status.has_google && !status.has_password ? "google" : "password",
+        );
+        setIsLoading(false);
+        return;
+      }
+
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
@@ -57,6 +83,16 @@ export function EmailPasswordForm({ disabled }: { disabled?: boolean }) {
       // your email" for.
       if (data.session) {
         router.replace("/");
+        return;
+      }
+
+      // Fallback for a race (account created between the check above and here)
+      // or if enumeration protection is toggled off later: enumeration
+      // protection returns a user with an empty identities array rather than an
+      // error when the email already exists.
+      if ((data.user?.identities?.length ?? 0) === 0) {
+        setExistingAccount("password");
+        setIsLoading(false);
         return;
       }
 
@@ -100,9 +136,10 @@ export function EmailPasswordForm({ disabled }: { disabled?: boolean }) {
             required
             disabled={disabled || isLoading}
             value={localPart}
-            onChange={(event) =>
-              setLocalPart(event.target.value.replace(/[@\s].*$/, ""))
-            }
+            onChange={(event) => {
+              setLocalPart(event.target.value.replace(/[@\s].*$/, ""));
+              setExistingAccount(null);
+            }}
             className="rounded-none border-0 shadow-none focus-visible:ring-0"
             placeholder="username"
           />
@@ -143,6 +180,26 @@ export function EmailPasswordForm({ disabled }: { disabled?: boolean }) {
         </div>
       </div>
       {error && <p className="text-sm text-red-500">{error}</p>}
+      {existingAccount && (
+        <div className="flex flex-col gap-2 rounded-md border border-input bg-muted/50 p-3 text-sm">
+          <p className="text-muted-foreground">
+            {existingAccount === "google"
+              ? "This email already has an account created with Google. Use the “Continue with Google” button above to sign in."
+              : "An account with this email already exists. Sign in with your password instead."}
+          </p>
+          <button
+            type="button"
+            className="self-start font-medium underline underline-offset-4 hover:text-foreground"
+            onClick={() => {
+              setMode("sign-in");
+              setExistingAccount(null);
+              setError(null);
+            }}
+          >
+            Sign in instead
+          </button>
+        </div>
+      )}
       <Button type="submit" className="w-full" disabled={disabled || isLoading}>
         {isLoading
           ? "Please wait..."
@@ -157,6 +214,7 @@ export function EmailPasswordForm({ disabled }: { disabled?: boolean }) {
         onClick={() => {
           setMode(mode === "sign-in" ? "sign-up" : "sign-in");
           setError(null);
+          setExistingAccount(null);
         }}
       >
         {mode === "sign-in"
