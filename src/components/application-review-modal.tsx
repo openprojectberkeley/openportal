@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ProjectApplicationModalSkeleton } from "@/components/skeletons";
 import { resumeSignedUrl } from "@/lib/resume-upload";
+import { techAreaLabel, techClassLabel } from "@/lib/application-profile";
 
 export type ReviewStatus = "submitted" | "accepted" | "rejected";
 
@@ -36,8 +37,13 @@ type AnswerRow = {
   question: { id: string; prompt: string; position: number } | null;
 };
 
-// The applicant's uploaded resume (member-level, in the private bucket).
+// The applicant's optional "About you" answers (on the application) + their
+// uploaded resume (member-level, in the private bucket).
 type Profile = {
+  tech_area_rankings: Record<string, number> | null;
+  tech_classes: string[] | null;
+  tech_classes_other: string | null;
+  about_note: string | null;
   resume_path: string | null;
   resume_filename: string | null;
 };
@@ -86,13 +92,25 @@ export function ApplicationReviewModal({
     const supabase = createClient();
 
     const load = async () => {
-      // Resume lives on the applicant's member row (one per person).
+      // "About you" answers are on the application; the resume is member-level.
       const { data: appRow } = await supabase
         .from("applications")
-        .select("applicant:members!applications_applicant_id_fkey(resume_path, resume_filename)")
+        .select("tech_area_rankings, tech_classes, tech_classes_other, about_note, applicant:members!applications_applicant_id_fkey(resume_path, resume_filename)")
         .eq("id", applicationId)
         .maybeSingle();
-      setProfile(((appRow?.applicant as unknown as Profile | null) ?? null));
+      const applicant = (appRow?.applicant as unknown as { resume_path: string | null; resume_filename: string | null } | null) ?? null;
+      setProfile(
+        appRow
+          ? {
+              tech_area_rankings: (appRow.tech_area_rankings as Record<string, number> | null) ?? null,
+              tech_classes: (appRow.tech_classes as string[] | null) ?? null,
+              tech_classes_other: (appRow.tech_classes_other as string | null) ?? null,
+              about_note: (appRow.about_note as string | null) ?? null,
+              resume_path: applicant?.resume_path ?? null,
+              resume_filename: applicant?.resume_filename ?? null,
+            }
+          : null,
+      );
 
       const { data: rankRows } = await supabase
         .from("application_rankings")
@@ -170,7 +188,7 @@ export function ApplicationReviewModal({
           <ProjectApplicationModalSkeleton />
         ) : (
           <div className="flex flex-col gap-6">
-            <ResumeLink profile={profile} onOpen={openResume} opening={resumeOpening} />
+            <ApplicantDetails profile={profile} onOpenResume={openResume} resumeOpening={resumeOpening} />
 
             {rankings.length === 0 ? (
               <p className="text-sm text-muted-foreground">No ranked projects on this application.</p>
@@ -250,31 +268,81 @@ export function ApplicationReviewModal({
   );
 }
 
-// The applicant's uploaded resume, opened via a short-lived signed URL.
-function ResumeLink({
+// The applicant's optional "About you" answers + their uploaded resume (opened
+// via a short-lived signed URL), above their rankings.
+function ApplicantDetails({
   profile,
-  onOpen,
-  opening,
+  onOpenResume,
+  resumeOpening,
 }: {
   profile: Profile | null;
-  onOpen: () => void;
-  opening: boolean;
+  onOpenResume: () => void;
+  resumeOpening: boolean;
 }) {
+  const ratedAreas = Object.entries(profile?.tech_area_rankings ?? {})
+    .filter(([, v]) => typeof v === "number" && v > 0)
+    .sort((a, b) => b[1] - a[1]);
+  const classes = profile?.tech_classes ?? [];
+  const other = profile?.tech_classes_other?.trim();
+  const note = profile?.about_note?.trim();
+  const hasResume = !!profile?.resume_path;
+  const hasAny = ratedAreas.length > 0 || classes.length > 0 || !!other || !!note || hasResume;
+
   return (
-    <div className="flex flex-col gap-2 rounded-xl border bg-muted/30 p-4">
-      <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Resume</h3>
-      {profile?.resume_path ? (
-        <button
-          type="button"
-          onClick={onOpen}
-          disabled={opening}
-          className="inline-flex items-center gap-1.5 self-start rounded-md border bg-background px-3 py-1.5 text-sm hover:bg-accent transition-colors disabled:opacity-50"
-        >
-          <FileText size={14} className="text-muted-foreground" />
-          {opening ? "Opening…" : profile.resume_filename || "View resume"}
-        </button>
+    <div className="flex flex-col gap-3 rounded-xl border bg-muted/30 p-4">
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Applicant details</h3>
+
+      {!hasAny ? (
+        <p className="text-sm italic text-muted-foreground">No additional details provided.</p>
       ) : (
-        <p className="text-sm italic text-muted-foreground">No resume uploaded.</p>
+        <>
+          {ratedAreas.length > 0 && (
+            <div className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-muted-foreground">Technical areas of interest</span>
+              <div className="flex flex-wrap gap-1.5">
+                {ratedAreas.map(([key, v]) => (
+                  <span key={key} className="inline-flex items-center gap-1 rounded-full bg-foreground/10 px-2 py-0.5 text-xs">
+                    {techAreaLabel(key)} <span className="tabular-nums text-muted-foreground">{v}/5</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {(classes.length > 0 || other) && (
+            <div className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-muted-foreground">Tech classes</span>
+              <div className="flex flex-wrap gap-1.5">
+                {classes.map((c) => (
+                  <span key={c} className="rounded-full bg-foreground/10 px-2 py-0.5 text-xs">{techClassLabel(c)}</span>
+                ))}
+              </div>
+              {other && <p className="text-sm text-foreground/90">Other: {other}</p>}
+            </div>
+          )}
+
+          {hasResume && (
+            <div className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-muted-foreground">Resume</span>
+              <button
+                type="button"
+                onClick={onOpenResume}
+                disabled={resumeOpening}
+                className="inline-flex items-center gap-1.5 self-start rounded-md border bg-background px-3 py-1.5 text-sm hover:bg-accent transition-colors disabled:opacity-50"
+              >
+                <FileText size={14} className="text-muted-foreground" />
+                {resumeOpening ? "Opening…" : profile?.resume_filename || "View resume"}
+              </button>
+            </div>
+          )}
+
+          {note && (
+            <div className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-muted-foreground">Anything else</span>
+              <p className="text-sm whitespace-pre-wrap text-foreground/90">{note}</p>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
