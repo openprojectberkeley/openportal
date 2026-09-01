@@ -19,6 +19,7 @@ import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } 
 import { CSS } from "@dnd-kit/utilities";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { ApplicationPageSkeleton } from "@/components/skeletons";
 import { ProjectApplicationModal } from "@/components/project-application-modal";
 import { useRoleSim } from "@/components/role-simulation-provider";
@@ -26,6 +27,7 @@ import { type Difficulty, DIFFICULTY_LABELS } from "@/lib/projects";
 import { readableTextColor } from "@/lib/portal-color";
 import { isReturningMember } from "@/lib/member-status";
 import { uploadResumeToDrive, deleteResumeFromDrive } from "@/lib/resume-drive";
+import { TECH_AREAS, TECH_CLASSES, TECH_CLASS_NA } from "@/lib/application-profile";
 
 type ProjectType = "studio" | "launch";
 
@@ -96,6 +98,11 @@ export default function ApplicationPage() {
   const [rankingIdByProject, setRankingIdByProject] = useState<Record<string, string>>({});
   const [completedByProject, setCompletedByProject] = useState<Record<string, boolean>>({});
 
+  // "About you" section (all optional, auto-saved onto the applications row).
+  const [techAreas, setTechAreas] = useState<Record<string, number>>({});
+  const [techClasses, setTechClasses] = useState<string[]>([]);
+  const [techClassesOther, setTechClassesOther] = useState("");
+  const [aboutNote, setAboutNote] = useState("");
   // Optional resume, uploaded to a shared Google Drive folder (the team's native
   // reviewer reads that folder); we keep the returned link on the application.
   const [resume, setResume] = useState<{ url: string; filename: string } | null>(null);
@@ -141,7 +148,7 @@ export default function ApplicationPage() {
 
     const { data: app } = await supabase
       .from("applications")
-      .select("id, status, resume_drive_url, resume_filename")
+      .select("id, status, tech_area_rankings, tech_classes, tech_classes_other, about_note, resume_drive_url, resume_filename")
       .eq("applicant_id", user.id)
       .eq("period_id", periodId)
       .maybeSingle();
@@ -180,8 +187,12 @@ export default function ApplicationPage() {
     setPmMap(map);
     setChattedWith(new Set((chatRows ?? []).map((c) => c.member_id)));
 
-    // Hydrate an existing draft's uploaded resume link.
+    // Hydrate an existing draft's "About you" answers + resume link.
     if (app) {
+      setTechAreas((app.tech_area_rankings as Record<string, number> | null) ?? {});
+      setTechClasses((app.tech_classes as string[] | null) ?? []);
+      setTechClassesOther(app.tech_classes_other ?? "");
+      setAboutNote(app.about_note ?? "");
       setResume(app.resume_drive_url ? { url: app.resume_drive_url, filename: app.resume_filename ?? "Resume" } : null);
     }
 
@@ -351,6 +362,63 @@ export default function ApplicationPage() {
     setRanked(next);
     await syncRanks(next, nextMap);
   };
+
+  // ---- "About you" persistence -------------------------------------------
+  // Discrete controls (a rating tap, a checkbox) save at once; the two free-text
+  // fields debounce through scheduleSave.
+  const saveAppFields = async (patch: Record<string, unknown>) => {
+    const aId = await ensureApp();
+    if (!aId) { setError("Couldn't save your changes."); return; }
+    const supabase = createClient();
+    await supabase.from("applications").update(patch).eq("id", aId);
+  };
+  // A ref to the latest saveAppFields, so the unmount flush isn't a stale closure.
+  const saveAppFieldsRef = useRef(saveAppFields);
+  saveAppFieldsRef.current = saveAppFields;
+
+  const pendingPatchRef = useRef<Record<string, unknown>>({});
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleSave = (patch: Record<string, unknown>) => {
+    pendingPatchRef.current = { ...pendingPatchRef.current, ...patch };
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      const patchToSave = pendingPatchRef.current;
+      pendingPatchRef.current = {};
+      saveTimerRef.current = null;
+      saveAppFieldsRef.current(patchToSave);
+    }, 600);
+  };
+  // Flush any pending debounced text save when leaving the page.
+  useEffect(() => () => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    const pending = pendingPatchRef.current;
+    if (Object.keys(pending).length) saveAppFieldsRef.current(pending);
+  }, []);
+
+  const setRating = (key: string, value: number) => {
+    const next = { ...techAreas };
+    if (next[key] === value) delete next[key]; // tap the current value to clear
+    else next[key] = value;
+    setTechAreas(next);
+    saveAppFields({ tech_area_rankings: next });
+  };
+
+  const toggleClass = (key: string) => {
+    // N/A is mutually exclusive with every other option.
+    const next =
+      key === TECH_CLASS_NA
+        ? techClasses.includes(TECH_CLASS_NA)
+          ? []
+          : [TECH_CLASS_NA]
+        : techClasses.includes(key)
+          ? techClasses.filter((k) => k !== key)
+          : [...techClasses.filter((k) => k !== TECH_CLASS_NA), key];
+    setTechClasses(next);
+    saveAppFields({ tech_classes: next });
+  };
+
+  const onOtherChange = (v: string) => { setTechClassesOther(v); scheduleSave({ tech_classes_other: v }); };
+  const onAboutChange = (v: string) => { setAboutNote(v); scheduleSave({ about_note: v }); };
 
   // ---- Resume upload (to a shared Google Drive folder) --------------------
   const onResumeSelected = async (file: File) => {
@@ -534,6 +602,63 @@ export default function ApplicationPage() {
         </p>
       </div>
 
+      {/* About you — optional background, above the project rankings. */}
+      <section className="flex flex-col gap-6 border rounded-xl p-5">
+        <div className="flex flex-col gap-0.5">
+          <h2 className="text-lg font-semibold">About you</h2>
+          <p className="text-sm text-muted-foreground">
+            A few optional questions to help us match you to projects. Answers save automatically.
+          </p>
+        </div>
+
+        {/* Technical areas of interest */}
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-0.5">
+            <Label className="text-sm font-medium">
+              Rank the technical areas you&apos;re interested in working on
+            </Label>
+            <span className="text-xs text-muted-foreground">
+              Optional · 1 (least) – 5 (most). Tap a number again to clear it.
+            </span>
+          </div>
+          <div className="flex flex-col divide-y">
+            {TECH_AREAS.map((a) => (
+              <div key={a.key} className="flex items-center justify-between gap-3 py-2">
+                <span className="text-sm">{a.label}</span>
+                <RatingScale value={techAreas[a.key] ?? 0} onChange={(v) => setRating(a.key, v)} />
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Tech classes taken */}
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-0.5">
+            <Label className="text-sm font-medium">
+              Which of the following tech classes (or equivalent) have you taken or are enrolled in?
+            </Label>
+            <span className="text-xs text-muted-foreground">
+              Optional · Include lower/upper-div classes relevant to the projects you want. List any others below.
+            </span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {TECH_CLASSES.map((c) => (
+              <label key={c.key} className="flex items-center gap-2 text-sm cursor-pointer">
+                <Checkbox checked={techClasses.includes(c.key)} onCheckedChange={() => toggleClass(c.key)} />
+                {c.label}
+              </label>
+            ))}
+          </div>
+          <textarea
+            value={techClassesOther}
+            onChange={(e) => onOtherChange(e.target.value)}
+            placeholder="Other relevant classes (comma-separated)…"
+            rows={2}
+            className="border rounded-md px-3 py-2 text-sm w-full resize-y bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+        </div>
+      </section>
+
       {/* Resume — optional, uploaded to the team's Drive folder. */}
       <section className="flex flex-col gap-2 border rounded-xl p-5">
         <div className="flex flex-col gap-0.5">
@@ -596,6 +721,21 @@ export default function ApplicationPage() {
           {activeProject ? <DragPreview project={activeProject} /> : null}
         </DragOverlay>
       </DndContext>
+
+      {/* Free-text — after the project rankings. */}
+      <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-0.5">
+          <Label className="text-sm font-medium">Anything else you&apos;d like us to know?</Label>
+          <span className="text-xs text-muted-foreground">Optional</span>
+        </div>
+        <textarea
+          value={aboutNote}
+          onChange={(e) => onAboutChange(e.target.value)}
+          placeholder="Share anything else you'd like the team to know…"
+          rows={4}
+          className="border rounded-md px-3 py-2 text-sm w-full resize-y bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+        />
+      </div>
 
       <div className="flex flex-col gap-2 border-t pt-6">
         {error && <p className="text-sm text-red-500">{error}</p>}
@@ -987,6 +1127,31 @@ function ProjectIcon({ project }: { project: Project }) {
 
 // A discrete 1–5 scale: buttons fill up to the selected value; the parent clears
 // it when the current value is tapped again.
+// A 1–5 segmented rating for a single technical area (tap the current value to
+// clear). No slider primitive exists, and discrete 1–5 reads better as buttons.
+function RatingScale({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  return (
+    <div className="flex items-center gap-1 flex-shrink-0">
+      {[1, 2, 3, 4, 5].map((n) => (
+        <button
+          key={n}
+          type="button"
+          onClick={() => onChange(n)}
+          aria-label={`Rate ${n} of 5`}
+          aria-pressed={value === n}
+          className={`h-7 w-7 rounded-md border text-xs font-medium transition-colors ${
+            value > 0 && value >= n
+              ? "bg-foreground text-background border-foreground"
+              : "bg-background text-muted-foreground hover:bg-accent"
+          }`}
+        >
+          {n}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 // Plain resume file picker. Sends the raw File up to the page, which uploads it
 // to the team's Google Drive folder via the upload-resume-drive edge function.
 function ResumeField({

@@ -52,11 +52,14 @@ function serializeAnswers(map: Record<string, AnswerValue>): string {
   return JSON.stringify(Object.keys(out).sort().map((k) => [k, out[k]]));
 }
 
-// The applicant's per-project application: the fixed 150-200 word essay first,
-// then the project's custom questions. Persists to the current draft.
+// The applicant's per-project application: the project's essay question first
+// (prompt/required set per-project, 150-200 words suggested), then its custom
+// questions. Persists to the current draft.
 export function ProjectApplicationModal({ projectId, projectName, rankingId, open, onOpenChange, onSaved }: Props) {
   const [loading, setLoading] = useState(true);
   const [questions, setQuestions] = useState<ProjectQuestion[]>([]);
+  const [essayPrompt, setEssayPrompt] = useState("Why do you want to work on this project?");
+  const [essayRequired, setEssayRequired] = useState(true);
   const [essay, setEssay] = useState("");
   const [answers, setAnswers] = useState<Record<string, AnswerValue>>({});
   const [saving, setSaving] = useState(false);
@@ -72,7 +75,7 @@ export function ProjectApplicationModal({ projectId, projectName, rankingId, ope
     const supabase = createClient();
 
     const load = async () => {
-      const [{ data: qRows }, { data: ranking }, { data: answerRows }] = await Promise.all([
+      const [{ data: qRows }, { data: ranking }, { data: answerRows }, { data: project }] = await Promise.all([
         supabase
           .from("project_questions")
           .select("id, project_id, position, type, prompt, options, required")
@@ -80,9 +83,12 @@ export function ProjectApplicationModal({ projectId, projectName, rankingId, ope
           .order("position"),
         supabase.from("application_rankings").select("essay").eq("id", rankingId).maybeSingle(),
         supabase.from("application_answers").select("question_id, answer, answer_options").eq("ranking_id", rankingId),
+        supabase.from("projects").select("essay_prompt, essay_required").eq("id", projectId).maybeSingle(),
       ]);
 
       setQuestions((qRows ?? []) as ProjectQuestion[]);
+      setEssayPrompt(project?.essay_prompt ?? "Why do you want to work on this project?");
+      setEssayRequired(project?.essay_required ?? true);
       setEssay(ranking?.essay ?? "");
 
       const map: Record<string, AnswerValue> = {};
@@ -117,7 +123,7 @@ export function ProjectApplicationModal({ projectId, projectName, rankingId, ope
   // question is answered. Saving is always allowed — an incomplete save just
   // keeps the project marked not-done.
   const isComplete =
-    essayHasText(essay) && questions.every((q) => answerComplete(q, answers[q.id]));
+    (!essayRequired || essayHasText(essay)) && questions.every((q) => answerComplete(q, answers[q.id]));
 
   const save = async () => {
     setSaving(true);
@@ -178,10 +184,10 @@ export function ProjectApplicationModal({ projectId, projectName, rankingId, ope
           <ProjectApplicationModalSkeleton />
         ) : (
           <div className="flex flex-col gap-5">
-            {/* Fixed essay */}
+            {/* Essay: prompt/required are per-project, editable via ProjectQuestionsDialog */}
             <div className="flex flex-col gap-1">
-              <Label htmlFor="app-essay" className="mb-1.5">
-                Why do you want to work on this project? <span className="text-red-500">*</span>
+              <Label htmlFor="app-essay" className="mb-1.5 whitespace-pre-wrap">
+                {essayPrompt} {essayRequired && <span className="text-red-500">*</span>}
               </Label>
               <textarea
                 id="app-essay"
@@ -206,7 +212,7 @@ export function ProjectApplicationModal({ projectId, projectName, rankingId, ope
               const v = getAnswer(q.id);
               return (
                 <div key={q.id} className="flex flex-col gap-2.5">
-                  <Label>
+                  <Label className="whitespace-pre-wrap">
                     {q.prompt} {q.required && <span className="text-red-500">*</span>}
                   </Label>
 
