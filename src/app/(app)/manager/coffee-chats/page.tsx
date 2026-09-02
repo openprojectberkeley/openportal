@@ -5,7 +5,7 @@ import { fetchBusyIntervals, requestFreeBusyToken } from "@/lib/google-calendar"
 import Link from "next/link";
 import Script from "next/script";
 import { useCallback, useEffect, useState } from "react";
-import { CalendarCheck, Check, ChevronLeft, ChevronRight, Lock, MapPin, X } from "lucide-react";
+import { CalendarCheck, Check, ChevronLeft, ChevronRight, Lock, MapPin, UserX, X } from "lucide-react";
 import { useRoleSim } from "@/components/role-simulation-provider";
 import { usePersonProfile, initials } from "@/components/person-profile-provider";
 import { ScrollArea } from "@/components/overlay-scrollbar";
@@ -131,7 +131,7 @@ type UpcomingSlot = {
   capacity: number;
   filled: number;
   location: string | null;
-  attendees: { id: string; name: string; user_id: string; email: string | null; avatarUrl: string | null; complete: boolean; message: string | null }[];
+  attendees: { id: string; name: string; user_id: string; email: string | null; avatarUrl: string | null; complete: boolean; no_show: boolean; message: string | null }[];
 };
 
 // Hover tooltip listing every booked sub-slot inside an hour cell.
@@ -308,11 +308,11 @@ export default function ManagerCoffeeChatsPage() {
     // slots are silently dropped. meeting_time isn't unique across seats, so
     // add id as a stable tiebreaker to keep paging deterministic.
     const PAGE_SIZE = 1000;
-    const rows: { id: string; meeting_time: string; applicant_id: string | null; complete: boolean; duration_minutes: number; location: string | null; message: string | null }[] = [];
+    const rows: { id: string; meeting_time: string; applicant_id: string | null; complete: boolean; no_show: boolean; duration_minutes: number; location: string | null; message: string | null }[] = [];
     for (let from = 0; ; from += PAGE_SIZE) {
       const { data: page } = await supabase
         .from("coffee_chats")
-        .select("id, meeting_time, applicant_id, complete, duration_minutes, location, message")
+        .select("id, meeting_time, applicant_id, complete, no_show, duration_minutes, location, message")
         .eq("member_id", user.id)
         .gte("meeting_time", rangeStart.toISOString())
         .lt("meeting_time", addDays(rangeEnd, 1).toISOString())
@@ -339,12 +339,12 @@ export default function ManagerCoffeeChatsPage() {
     }
 
     // Build upcoming slots grouped by the exact sub-slot meeting_time.
-    const grouped = new Map<string, { id: string; applicant_id: string | null; complete: boolean; message: string | null }[]>();
+    const grouped = new Map<string, { id: string; applicant_id: string | null; complete: boolean; no_show: boolean; message: string | null }[]>();
     const exactDuration = new Map<string, number>();
     const exactLocation = new Map<string, string | null>();
     for (const row of rows) {
       if (!grouped.has(row.meeting_time)) grouped.set(row.meeting_time, []);
-      grouped.get(row.meeting_time)!.push({ id: row.id, applicant_id: row.applicant_id, complete: row.complete, message: row.message });
+      grouped.get(row.meeting_time)!.push({ id: row.id, applicant_id: row.applicant_id, complete: row.complete, no_show: row.no_show, message: row.message });
       if (!exactDuration.has(row.meeting_time)) exactDuration.set(row.meeting_time, row.duration_minutes);
       if (row.location) exactLocation.set(row.meeting_time, row.location);
     }
@@ -369,7 +369,7 @@ export default function ManagerCoffeeChatsPage() {
     const upcoming: UpcomingSlot[] = [];
     const past: UpcomingSlot[] = [];
     for (const [meeting_time, entries] of grouped) {
-      const filled = entries.filter((e): e is { id: string; applicant_id: string; complete: boolean; message: string | null } => e.applicant_id !== null);
+      const filled = entries.filter((e): e is { id: string; applicant_id: string; complete: boolean; no_show: boolean; message: string | null } => e.applicant_id !== null);
       const slot: UpcomingSlot = {
         meeting_time,
         duration_minutes: exactDuration.get(meeting_time) ?? 30,
@@ -383,6 +383,7 @@ export default function ManagerCoffeeChatsPage() {
           email: emailMap.get(e.applicant_id) ?? null,
           avatarUrl: avatarMap.get(e.applicant_id) ?? null,
           complete: e.complete,
+          no_show: e.no_show,
           message: e.message,
         })),
       };
@@ -706,15 +707,37 @@ export default function ManagerCoffeeChatsPage() {
     setSaving(false);
   };
 
+  // complete and no_show are mutually exclusive states, so marking one clears
+  // the other. Either toggle patches both slot lists optimistically.
   const toggleComplete = async (rowId: string, meetingTime: string, next: boolean) => {
     const supabase = createClient();
-    const { error } = await supabase.from("coffee_chats").update({ complete: next }).eq("id", rowId);
+    const { error } = await supabase
+      .from("coffee_chats")
+      .update({ complete: next, ...(next ? { no_show: false } : {}) })
+      .eq("id", rowId);
     if (error) return;
     const patch = (prev: UpcomingSlot[]) =>
       prev.map((slot) =>
         slot.meeting_time !== meetingTime
           ? slot
-          : { ...slot, attendees: slot.attendees.map((a) => (a.id === rowId ? { ...a, complete: next } : a)) },
+          : { ...slot, attendees: slot.attendees.map((a) => (a.id === rowId ? { ...a, complete: next, no_show: next ? false : a.no_show } : a)) },
+      );
+    setUpcomingSlots(patch);
+    setPastSlots(patch);
+  };
+
+  const toggleNoShow = async (rowId: string, meetingTime: string, next: boolean) => {
+    const supabase = createClient();
+    const { error } = await supabase
+      .from("coffee_chats")
+      .update({ no_show: next, ...(next ? { complete: false } : {}) })
+      .eq("id", rowId);
+    if (error) return;
+    const patch = (prev: UpcomingSlot[]) =>
+      prev.map((slot) =>
+        slot.meeting_time !== meetingTime
+          ? slot
+          : { ...slot, attendees: slot.attendees.map((a) => (a.id === rowId ? { ...a, no_show: next, complete: next ? false : a.complete } : a)) },
       );
     setUpcomingSlots(patch);
     setPastSlots(patch);
@@ -927,14 +950,28 @@ export default function ManagerCoffeeChatsPage() {
                 <button
                   type="button"
                   onClick={() => toggleComplete(a.id, slot.meeting_time, !a.complete)}
-                  title={a.complete ? "Mark as not complete" : "Mark complete"}
-                  className={`flex items-center justify-center w-4 h-4 rounded-full transition-colors ${
+                  title={a.complete ? "Attended — click to undo" : "Mark as attended"}
+                  aria-pressed={a.complete}
+                  className={`flex items-center justify-center w-5 h-5 rounded-md transition-colors ${
                     a.complete
-                      ? "bg-green-500 text-white"
-                      : "border border-foreground/30 text-transparent hover:border-foreground/60"
+                      ? "bg-green-500 text-white shadow-sm"
+                      : "border border-green-600/40 bg-green-500/10 text-green-700 hover:bg-green-500/20 dark:text-green-400"
                   }`}
                 >
-                  <Check size={10} />
+                  <Check size={12} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => toggleNoShow(a.id, slot.meeting_time, !a.no_show)}
+                  title={a.no_show ? "No-show — click to undo" : "Mark as no-show"}
+                  aria-pressed={a.no_show}
+                  className={`flex items-center justify-center w-5 h-5 rounded-md transition-colors ${
+                    a.no_show
+                      ? "bg-red-500 text-white shadow-sm"
+                      : "border border-red-500/40 bg-red-500/10 text-red-600 hover:bg-red-500/20 dark:text-red-400"
+                  }`}
+                >
+                  <UserX size={12} />
                 </button>
                 {!isPast && (
                   <button

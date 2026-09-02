@@ -4,8 +4,9 @@ import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
-import { ShieldCheck, ArrowRight, Check, Coffee, FileText, Users } from "lucide-react";
+import { ShieldCheck, ArrowRight, Check, Coffee, FileText, Users, X } from "lucide-react";
 import { useRoleSim } from "@/components/role-simulation-provider";
+import { initials } from "@/components/person-profile-provider";
 import { PortalCard, type PortalSummary } from "@/components/portal-card";
 import { CalendarPanel } from "@/components/calendar-panel";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -17,6 +18,26 @@ type CompletionState = {
   infosession: boolean;
   application: boolean;
 };
+
+// A past coffee chat this user hosted (applicant booked) that the host hasn't
+// yet confirmed as completed or marked as a no-show.
+type PendingChat = {
+  id: string;
+  meeting_time: string;
+  location: string | null;
+  name: string;
+  avatarUrl: string | null;
+};
+
+function formatChatTime(iso: string): string {
+  return new Date(iso).toLocaleString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
 
 export default function HomePage() {
   const router = useRouter();
@@ -30,6 +51,8 @@ export default function HomePage() {
   // A currently-active member (non-staff) who hasn't re-applied to the currently
   // open period yet — drives the non-blocking re-apply banner on the dashboard.
   const [reapply, setReapply] = useState<{ periodName: string; infosessionDone: boolean } | null>(null);
+  // Past coffee chats this host hasn't confirmed yet (board/exec/PM only).
+  const [pendingChats, setPendingChats] = useState<PendingChat[] | null>(null);
   const [completed, setCompleted] = useState<CompletionState>({
     coffeeChat: false,
     infosession: false,
@@ -96,6 +119,47 @@ export default function HomePage() {
 
       setView("dashboard");
       setFirstName(member.preferred_firstname);
+
+      // Hosts (board/exec/PM) confirm each coffee chat after it happens. Surface
+      // the ones that are past but still unconfirmed so they can settle them
+      // (attended → complete, or didn't happen → no-show). Only hosts have
+      // coffee_chats rows keyed to them, so gate on isBoardOrExec to skip the
+      // query for everyone else.
+      if (isBoardOrExec) {
+        const { data: chatRows } = await supabase
+          .from("coffee_chats")
+          .select("id, meeting_time, applicant_id, location")
+          .eq("member_id", user.id)
+          .not("applicant_id", "is", null)
+          .lt("meeting_time", new Date().toISOString())
+          .eq("complete", false)
+          .eq("no_show", false)
+          .order("meeting_time", { ascending: false });
+
+        const rows = chatRows ?? [];
+        const applicantIds = [...new Set(rows.map((r) => r.applicant_id).filter((id): id is string => id !== null))];
+        const nameMap = new Map<string, string>();
+        const avatarMap = new Map<string, string | null>();
+        if (applicantIds.length > 0) {
+          const { data: attendees } = await supabase
+            .from("members")
+            .select("user_id, preferred_firstname, lastname, avatar_url")
+            .in("user_id", applicantIds);
+          for (const m of attendees ?? []) {
+            nameMap.set(m.user_id, [m.preferred_firstname, m.lastname].filter(Boolean).join(" ") || "Unknown");
+            avatarMap.set(m.user_id, m.avatar_url ?? null);
+          }
+        }
+        setPendingChats(
+          rows.map((r) => ({
+            id: r.id,
+            meeting_time: r.meeting_time,
+            location: r.location,
+            name: r.applicant_id ? nameMap.get(r.applicant_id) ?? "Unknown" : "Unknown",
+            avatarUrl: r.applicant_id ? avatarMap.get(r.applicant_id) ?? null : null,
+          })),
+        );
+      }
 
       // Active members (non-staff) must re-apply each open round. Show a
       // non-blocking prompt when a period is open and they haven't applied to it
@@ -188,6 +252,19 @@ export default function HomePage() {
     load();
   }, [router, ready, isExec, isBoardOrExec]);
 
+  // Settle a past coffee chat: attended (complete) or didn't happen (no_show).
+  // The two flags are mutually exclusive, and either way the chat drops off the
+  // pending list. Mirrors the manager page's optimistic update — ignore on error.
+  const resolveChat = async (id: string, outcome: "complete" | "no_show") => {
+    const supabase = createClient();
+    const patch = outcome === "complete"
+      ? { complete: true, no_show: false }
+      : { no_show: true, complete: false };
+    const { error } = await supabase.from("coffee_chats").update(patch).eq("id", id);
+    if (error) return;
+    setPendingChats((prev) => (prev ? prev.filter((c) => c.id !== id) : prev));
+  };
+
   if (view === "checklist") {
     return <ApplicantChecklist completed={completed} simulating={simulating} persona={persona} />;
   }
@@ -220,6 +297,61 @@ export default function HomePage() {
           <h1 className="text-3xl font-bold">{`Hi ${firstName}!`}</h1>
         ) : (
           <Skeleton className="h-9 w-48" />
+        )}
+
+        {pendingChats && pendingChats.length > 0 && (
+          <div className="flex flex-col gap-3 rounded-xl border border-foreground/15 bg-foreground/[0.03] p-4">
+            <div className="flex items-center gap-2">
+              <Coffee size={16} className="shrink-0 text-muted-foreground" />
+              <div className="flex flex-col gap-0.5">
+                <h2 className="text-sm font-semibold">Confirm your past coffee chats</h2>
+                <p className="text-xs text-muted-foreground">
+                  Let us know whether each of these chats actually happened.
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-col gap-2">
+              {pendingChats.map((chat) => (
+                <div
+                  key={chat.id}
+                  className="flex flex-wrap items-center gap-3 rounded-lg border bg-background px-3 py-2"
+                >
+                  {chat.avatarUrl ? (
+                    <img src={chat.avatarUrl} alt={chat.name} className="h-8 w-8 rounded-full object-cover flex-shrink-0" />
+                  ) : (
+                    <span className="flex h-8 w-8 items-center justify-center rounded-full bg-foreground/10 text-[11px] font-semibold flex-shrink-0">
+                      {initials(chat.name)}
+                    </span>
+                  )}
+                  <div className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate text-sm font-medium">{chat.name}</span>
+                    <span className="truncate text-xs text-muted-foreground">
+                      {formatChatTime(chat.meeting_time)}
+                      {chat.location ? ` · ${chat.location}` : ""}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => resolveChat(chat.id, "complete")}
+                      className="inline-flex items-center gap-1 rounded-lg border border-green-600/30 bg-green-600/10 px-2.5 py-1.5 text-xs font-medium text-green-700 hover:bg-green-600/20 dark:text-green-400 transition-colors"
+                    >
+                      <Check size={14} />
+                      Yes
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => resolveChat(chat.id, "no_show")}
+                      className="inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:border-red-500/40 hover:text-red-600 dark:hover:text-red-400 transition-colors"
+                    >
+                      <X size={14} />
+                      No, didn&apos;t happen
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         )}
 
         {reapply && (

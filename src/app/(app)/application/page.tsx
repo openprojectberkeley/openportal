@@ -449,10 +449,11 @@ export default function ApplicationPage() {
 
   const projectById = (id: string) => projects.find((p) => p.id === id);
   const studioMet = (projectId: string) => (pmMap[projectId] ?? []).some((pm) => chattedWith.has(pm.user_id));
-  const studioBlocked = ranked.filter((id) => projectById(id)?.type === "studio" && !studioMet(id));
+  // Coffee chats are encouraged for OP Studio picks — the card badges warn when
+  // one is still needed — but they no longer block submission.
   // Only the top REQUIRED_COUNT ranked projects need their writing finished.
   const allCompleted = ranked.length > 0 && ranked.slice(0, REQUIRED_COUNT).every((id) => completedByProject[id]);
-  const rankingReady = ranked.length === RANK_COUNT && allCompleted && studioBlocked.length === 0;
+  const rankingReady = ranked.length === RANK_COUNT && allCompleted;
   const canSubmit = rankingReady;
 
   // ---- Drag orchestration (multi-container sortable) ----------------------
@@ -742,9 +743,7 @@ export default function ApplicationPage() {
           <p className="text-xs text-muted-foreground">
             {ranked.length !== RANK_COUNT
               ? `Rank exactly ${RANK_COUNT} projects (${ranked.length} selected).`
-              : studioBlocked.length > 0
-                ? "Complete the required coffee chat(s) for your OP Studio picks."
-                : `Complete the questions for your top ${REQUIRED_COUNT} ranked projects.`}
+              : `Complete the questions for your top ${REQUIRED_COUNT} ranked projects.`}
           </p>
         )}
         <div className="flex justify-end">

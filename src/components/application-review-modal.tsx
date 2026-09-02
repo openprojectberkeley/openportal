@@ -93,12 +93,22 @@ export function ApplicationReviewModal({
 
     const load = async () => {
       // "About you" answers are on the application; the resume is member-level.
+      // applicant_id is the auth user id (no FK to `members`), so read the resume
+      // in a second query keyed on members.user_id.
       const { data: appRow } = await supabase
         .from("applications")
-        .select("tech_area_rankings, tech_classes, tech_classes_other, about_note, applicant:members!applications_applicant_id_fkey(resume_path, resume_filename)")
+        .select("applicant_id, tech_area_rankings, tech_classes, tech_classes_other, about_note")
         .eq("id", applicationId)
         .maybeSingle();
-      const applicant = (appRow?.applicant as unknown as { resume_path: string | null; resume_filename: string | null } | null) ?? null;
+      let applicant: { resume_path: string | null; resume_filename: string | null } | null = null;
+      if (appRow?.applicant_id) {
+        const { data: mem } = await supabase
+          .from("members")
+          .select("resume_path, resume_filename")
+          .eq("user_id", appRow.applicant_id as string)
+          .maybeSingle();
+        applicant = (mem as { resume_path: string | null; resume_filename: string | null } | null) ?? null;
+      }
       setProfile(
         appRow
           ? {

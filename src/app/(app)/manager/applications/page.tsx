@@ -17,12 +17,15 @@ import { Button } from "@/components/ui/button";
 import { ApplicationListSkeleton } from "@/components/skeletons";
 import { ApplicationPeriodsDialog, type ApplicationPeriod } from "@/components/application-periods-dialog";
 import { ApplicationReviewModal, type ReviewStatus } from "@/components/application-review-modal";
+import { ApplicationStats, type Stats } from "@/components/application-stats";
+
+type Applicant = { user_id: string; preferred_firstname: string | null; lastname: string | null };
 
 type AppRow = {
   id: string;
   status: ReviewStatus;
   submitted_at: string | null;
-  applicant: { user_id: string; preferred_firstname: string | null; lastname: string | null } | null;
+  applicant: Applicant | null;
   application_rankings: { rank: number; ranked: boolean; project: { name: string } | null }[];
 };
 
@@ -63,8 +66,16 @@ export default function ManagerApplicationsPage() {
   const [periods, setPeriods] = useState<ApplicationPeriod[] | null>(null);
   const [selectedPeriodId, setSelectedPeriodId] = useState<string | null>(null);
   const [apps, setApps] = useState<AppRow[] | null>(null);
+  const [stats, setStats] = useState<Stats | null>(null);
   const [periodsDialogOpen, setPeriodsDialogOpen] = useState(false);
   const [reviewFor, setReviewFor] = useState<{ id: string; name: string; status: ReviewStatus } | null>(null);
+
+  // Exec-only period funnel stats, shown above the list.
+  const loadStats = useCallback(async (periodId: string) => {
+    const supabase = createClient();
+    const { data } = await supabase.rpc("application_period_stats", { p_period_id: periodId });
+    setStats((data?.[0] as Stats) ?? null);
+  }, []);
 
   const loadPeriods = useCallback(async () => {
     const supabase = createClient();
@@ -80,26 +91,53 @@ export default function ManagerApplicationsPage() {
   useEffect(() => { loadPeriods(); }, [loadPeriods]);
 
   useEffect(() => {
-    if (!selectedPeriodId) { setApps([]); return; }
+    if (!selectedPeriodId) { setApps([]); setStats(null); return; }
     const supabase = createClient();
     setApps(null);
-    supabase
-      .from("applications")
-      .select(
-        `id, status, submitted_at,
-         applicant:members!applications_applicant_id_fkey(user_id, preferred_firstname, lastname),
-         application_rankings(rank, ranked, project:projects(name))`,
-      )
-      .eq("period_id", selectedPeriodId)
-      .in("status", ["submitted", "accepted", "rejected"])
-      .order("submitted_at", { ascending: true })
-      .then(({ data }) => setApps((data ?? []) as unknown as AppRow[]));
-  }, [selectedPeriodId]);
+    // applicant_id is the auth user id (no FK to `members`), so fetch the rows
+    // first, then resolve names in a second pass keyed on members.user_id.
+    (async () => {
+      const { data } = await supabase
+        .from("applications")
+        .select(
+          `id, status, submitted_at, applicant_id,
+           application_rankings(rank, ranked, project:projects(name))`,
+        )
+        .eq("period_id", selectedPeriodId)
+        .in("status", ["submitted", "accepted", "rejected"])
+        .order("submitted_at", { ascending: true });
+
+      const rows = (data ?? []) as unknown as (Omit<AppRow, "applicant"> & { applicant_id: string | null })[];
+      const ids = [...new Set(rows.map((r) => r.applicant_id).filter((id): id is string => !!id))];
+      const byId: Record<string, Applicant> = {};
+      if (ids.length) {
+        const { data: mem } = await supabase
+          .from("members")
+          .select("user_id, preferred_firstname, lastname")
+          .in("user_id", ids);
+        for (const m of (mem ?? []) as Applicant[]) byId[m.user_id] = m;
+      }
+
+      setApps(
+        rows.map(({ applicant_id, ...r }) => ({
+          ...r,
+          applicant: applicant_id
+            ? byId[applicant_id] ?? { user_id: applicant_id, preferred_firstname: null, lastname: null }
+            : null,
+        })),
+      );
+    })();
+
+    if (isExec) { setStats(null); loadStats(selectedPeriodId); }
+    else setStats(null);
+  }, [selectedPeriodId, isExec, loadStats]);
 
   const selectedPeriod = periods?.find((p) => p.id === selectedPeriodId) ?? null;
 
-  const onReviewed = (id: string, status: ReviewStatus) =>
+  const onReviewed = (id: string, status: ReviewStatus) => {
     setApps((prev) => (prev ? prev.map((a) => (a.id === id ? { ...a, status } : a)) : prev));
+    if (isExec && selectedPeriodId) loadStats(selectedPeriodId);
+  };
 
   return (
     <div className="w-full max-w-3xl mx-auto p-5 flex flex-col gap-6">
@@ -145,6 +183,9 @@ export default function ManagerApplicationsPage() {
           </Button>
         )}
       </div>
+
+      {/* Exec-only period funnel stats */}
+      {isExec && selectedPeriodId && <ApplicationStats stats={stats} />}
 
       {/* Applications list */}
       {apps === null ? (
