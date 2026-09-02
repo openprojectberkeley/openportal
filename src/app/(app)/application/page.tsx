@@ -57,12 +57,6 @@ const RANK_COUNT = 7;
 const RANKED_ZONE = "ranked-zone";
 const AVAILABLE_ZONE = "available-zone";
 
-// TEMPORARY: submissions are manually locked while we prep the next cycle.
-// The application page stays fully browsable — members can still rank projects
-// and fill out their answers (drafts save) — but the "Submit application"
-// button is disabled. Set to false to restore normal submission.
-const SUBMISSIONS_LOCKED = true;
-
 const metaLine = (p: Project) =>
   [
     p.difficulty ? DIFFICULTY_LABELS[p.difficulty] : null,
@@ -454,10 +448,8 @@ export default function ApplicationPage() {
   const studioMet = (projectId: string) => (pmMap[projectId] ?? []).some((pm) => chattedWith.has(pm.user_id));
   const studioBlocked = ranked.filter((id) => projectById(id)?.type === "studio" && !studioMet(id));
   const allCompleted = ranked.length > 0 && ranked.every((id) => completedByProject[id]);
-  // The ranking is otherwise complete and ready — used to decide which hint to
-  // show when submissions are locked.
   const rankingReady = ranked.length === RANK_COUNT && allCompleted && studioBlocked.length === 0;
-  const canSubmit = rankingReady && !SUBMISSIONS_LOCKED;
+  const canSubmit = rankingReady;
 
   // ---- Drag orchestration (multi-container sortable) ----------------------
   // Both lists are sortable containers; `dragRanked` is mutated live on hover so
@@ -742,26 +734,18 @@ export default function ApplicationPage() {
 
       <div className="flex flex-col gap-2 border-t pt-6">
         {error && <p className="text-sm text-red-500">{error}</p>}
-        {SUBMISSIONS_LOCKED ? (
+        {!canSubmit && (
           <p className="text-xs text-muted-foreground">
-            Submissions are temporarily closed. You can still rank projects and
-            fill out your answers — your progress saves automatically, so you can
-            submit once we reopen.
+            {ranked.length !== RANK_COUNT
+              ? `Rank exactly ${RANK_COUNT} projects (${ranked.length} selected).`
+              : studioBlocked.length > 0
+                ? "Complete the required coffee chat(s) for your OP Studio picks."
+                : "Open each ranked project and complete its questions."}
           </p>
-        ) : (
-          !canSubmit && (
-            <p className="text-xs text-muted-foreground">
-              {ranked.length !== RANK_COUNT
-                ? `Rank exactly ${RANK_COUNT} projects (${ranked.length} selected).`
-                : studioBlocked.length > 0
-                  ? "Complete the required coffee chat(s) for your OP Studio picks."
-                  : "Open each ranked project and complete its questions."}
-            </p>
-          )
         )}
         <div className="flex justify-end">
           <Button onClick={() => setShowDuesConfirm(true)} disabled={!canSubmit || submitting}>
-            {SUBMISSIONS_LOCKED ? "Submissions closed" : submitting ? "Submitting…" : "Submit application"}
+            {submitting ? "Submitting…" : "Submit application"}
           </Button>
         </div>
       </div>
