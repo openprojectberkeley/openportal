@@ -100,6 +100,10 @@ export default function HomePage() {
       // Active members (non-staff) must re-apply each open round. Show a
       // non-blocking prompt when a period is open and they haven't applied to it
       // yet. Board/exec don't apply, so skip them.
+      // Reset first: this effect reruns on every persona switch (isBoardOrExec
+      // changes), and without clearing, a banner shown while simulating
+      // "member" would otherwise persist after switching back to PM/exec.
+      setReapply(null);
       if (shouldShowReapplyBanner(member.status, isBoardOrExec)) {
         const { data: openPeriods } = await supabase
           .from("application_periods")
