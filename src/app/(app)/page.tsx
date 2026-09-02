@@ -227,10 +227,13 @@ export default function HomePage() {
             <div className="flex flex-col gap-0.5">
               <h2 className="text-sm font-semibold">Applications are open for {reapply.periodName}</h2>
               <p className="text-xs text-muted-foreground">
-                Returning members re-apply each round. Complete the steps below to apply.
+                Returning members re-apply each round. Complete the steps below to apply. Coffee
+                chats aren&apos;t required unless you&apos;re applying to a project that requires
+                one (like the OP Studio projects).
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
+              <ReapplyStep label="Coffee Chat" href="/coffee-chat" done={true} icon={Coffee} />
               <ReapplyStep label="Infosession" href="/infosession" done={reapply.infosessionDone} icon={Users} />
               <ReapplyStep label="Application" href="/application" done={false} icon={FileText} />
             </div>
