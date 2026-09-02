@@ -1,7 +1,7 @@
 "use client";
 
 import { createClient } from "@/lib/supabase/client";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Check, Pencil, X, AlertTriangle, Coffee, ChevronDown, Plus, FileText, Upload, Loader2 } from "lucide-react";
 import {
@@ -885,18 +885,30 @@ function RankZone({
             const p = projectById(id);
             if (!p) return null;
             return (
-              <ProjectCard
-                key={id}
-                project={p}
-                variant="ranked"
-                rankNumber={i + 1}
-                required={i < REQUIRED_COUNT}
-                completed={!!completedByProject[id]}
-                studioNeedsChat={p.type === "studio" && !studioMet(id)}
-                pms={pmMap[id] ?? []}
-                onOpen={() => onOpen(id)}
-                onRemove={() => onRemove(id)}
-              />
+              <Fragment key={id}>
+                {/* Once a 6th project is ranked, mark where the writing
+                    requirement ends so the bottom picks read as ranking-only. */}
+                {i === REQUIRED_COUNT && (
+                  <div className="flex items-center gap-2 pt-1 pb-0.5" aria-hidden>
+                    <div className="h-px flex-1 bg-border" />
+                    <span className="text-[11px] font-medium text-muted-foreground whitespace-nowrap">
+                      No questions needed below
+                    </span>
+                    <div className="h-px flex-1 bg-border" />
+                  </div>
+                )}
+                <ProjectCard
+                  project={p}
+                  variant="ranked"
+                  rankNumber={i + 1}
+                  required={i < REQUIRED_COUNT}
+                  completed={!!completedByProject[id]}
+                  studioNeedsChat={p.type === "studio" && !studioMet(id)}
+                  pms={pmMap[id] ?? []}
+                  onOpen={() => onOpen(id)}
+                  onRemove={() => onRemove(id)}
+                />
+              </Fragment>
             );
           })}
         </SortableContext>

@@ -3,7 +3,7 @@
 import { createClient } from "@/lib/supabase/client";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { ChevronDown, SlidersHorizontal } from "lucide-react";
+import { ChevronDown, SlidersHorizontal, Coffee, Check, Clock, RotateCcw } from "lucide-react";
 import { useRoleSim } from "@/components/role-simulation-provider";
 import { PersonName } from "@/components/person-profile-provider";
 import {
@@ -21,11 +21,18 @@ import { ApplicationStats, type Stats } from "@/components/application-stats";
 
 type Applicant = { user_id: string; preferred_firstname: string | null; lastname: string | null };
 
+// Coffee-chat progress for the applicant: "done" once any chat is completed,
+// "booked" while one is booked but not yet completed, "none" if never booked.
+type CoffeeState = "done" | "booked" | "none";
+
 type AppRow = {
   id: string;
   status: ReviewStatus;
   submitted_at: string | null;
   applicant: Applicant | null;
+  coffee: CoffeeState;
+  // Applicant was a member before (status active/inactive) vs. a first-timer.
+  returning: boolean;
   application_rankings: { rank: number; ranked: boolean; project: { name: string } | null }[];
 };
 
@@ -46,6 +53,34 @@ function StatusBadge({ status }: { status: ReviewStatus }) {
   if (status === "accepted") return <Badge className="bg-green-600 hover:bg-green-600">Accepted</Badge>;
   if (status === "rejected") return <Badge variant="destructive">Rejected</Badge>;
   return <Badge variant="secondary">Submitted</Badge>;
+}
+
+// Coffee cup with a check once the applicant has completed a chat, a clock while
+// one is only booked, and nothing if they've never booked.
+function CoffeeChatIndicator({ state }: { state: CoffeeState }) {
+  if (state === "none") return null;
+  const done = state === "done";
+  return (
+    <span
+      title={done ? "Completed a coffee chat" : "Coffee chat booked"}
+      aria-label={done ? "Completed a coffee chat" : "Coffee chat booked"}
+      className={`inline-flex items-center gap-0.5 ${done ? "text-green-600" : "text-amber-600"}`}
+    >
+      <Coffee size={14} />
+      {done ? <Check size={12} className="stroke-[3]" /> : <Clock size={12} />}
+    </span>
+  );
+}
+
+// Small badge marking an applicant who was a member in a previous semester.
+function ReturningIndicator({ returning }: { returning: boolean }) {
+  if (!returning) return null;
+  return (
+    <Badge variant="outline" className="gap-1 border-indigo-300 text-indigo-600" title="Returning member">
+      <RotateCcw size={11} />
+      Returning
+    </Badge>
+  );
 }
 
 function PeriodStatusText({ period }: { period: ApplicationPeriod }) {
@@ -107,15 +142,27 @@ export default function ManagerApplicationsPage() {
         .in("status", ["submitted", "accepted", "rejected"])
         .order("submitted_at", { ascending: true });
 
-      const rows = (data ?? []) as unknown as (Omit<AppRow, "applicant"> & { applicant_id: string | null })[];
+      const rows = (data ?? []) as unknown as (Omit<AppRow, "applicant" | "coffee"> & { applicant_id: string | null })[];
       const ids = [...new Set(rows.map((r) => r.applicant_id).filter((id): id is string => !!id))];
       const byId: Record<string, Applicant> = {};
+      const returningById: Record<string, boolean> = {};
+      const coffeeById: Record<string, CoffeeState> = {};
       if (ids.length) {
-        const { data: mem } = await supabase
-          .from("members")
-          .select("user_id, preferred_firstname, lastname")
-          .in("user_id", ids);
-        for (const m of (mem ?? []) as Applicant[]) byId[m.user_id] = m;
+        const [{ data: mem }, { data: chats }] = await Promise.all([
+          supabase.from("members").select("user_id, preferred_firstname, lastname, status").in("user_id", ids),
+          // A booked chat has applicant_id set; `complete` marks it done. Open
+          // (unbooked) slots have a null applicant_id and won't match.
+          supabase.from("coffee_chats").select("applicant_id, complete").in("applicant_id", ids),
+        ]);
+        for (const m of (mem ?? []) as (Applicant & { status: string | null })[]) {
+          byId[m.user_id] = m;
+          // A past member (active or rolled-off) is "returning"; mirrors is_returning_member().
+          returningById[m.user_id] = m.status === "active" || m.status === "inactive";
+        }
+        for (const ch of (chats ?? []) as { applicant_id: string; complete: boolean }[]) {
+          if (ch.complete) coffeeById[ch.applicant_id] = "done";
+          else if (coffeeById[ch.applicant_id] !== "done") coffeeById[ch.applicant_id] = "booked";
+        }
       }
 
       setApps(
@@ -124,6 +171,8 @@ export default function ManagerApplicationsPage() {
           applicant: applicant_id
             ? byId[applicant_id] ?? { user_id: applicant_id, preferred_firstname: null, lastname: null }
             : null,
+          coffee: (applicant_id && coffeeById[applicant_id]) || "none",
+          returning: !!applicant_id && !!returningById[applicant_id],
         })),
       );
     })();
@@ -205,6 +254,8 @@ export default function ManagerApplicationsPage() {
                   <div className="flex items-center gap-2">
                     <PersonName userId={a.applicant?.user_id} name={name} className="text-sm font-medium" />
                     <StatusBadge status={a.status} />
+                    <ReturningIndicator returning={a.returning} />
+                    <CoffeeChatIndicator state={a.coffee} />
                   </div>
                   <span className="text-xs text-muted-foreground truncate">
                     {ranked.length} ranked project{ranked.length === 1 ? "" : "s"}
