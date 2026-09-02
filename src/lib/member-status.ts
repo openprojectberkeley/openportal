@@ -28,10 +28,11 @@ export function getHomeView(
   return "dashboard";
 }
 
-// Mirrors the (app)/page.tsx re-apply banner: only a currently-active,
-// non-staff member is prompted to re-apply each open round.
+// Mirrors the (app)/page.tsx re-apply banner: any returning (active or
+// rolled-off/inactive), non-staff member is prompted to re-apply each open
+// round.
 export function shouldShowReapplyBanner(status: MemberStatus, isBoardOrExec: boolean): boolean {
-  return status === "active" && !isBoardOrExec;
+  return isReturningMember(status) && !isBoardOrExec;
 }
 
 // Profile-modal badge copy. No entry for "active" — the default, unremarkable

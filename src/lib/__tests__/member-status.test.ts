@@ -68,11 +68,12 @@ describe("getHomeView", () => {
 });
 
 describe("shouldShowReapplyBanner", () => {
-  // Only a currently-active, non-staff member gets the re-apply prompt.
+  // Any returning (active or rolled-off/inactive), non-staff member gets the
+  // re-apply prompt.
   const cases: [MemberStatus, boolean, boolean][] = [
     ["active", false, true],
     ["active", true, false],
-    ["inactive", false, false],
+    ["inactive", false, true],
     ["inactive", true, false],
     ["non_member", false, false],
     ["non_member", true, false],
