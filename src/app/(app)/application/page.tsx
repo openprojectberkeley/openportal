@@ -52,6 +52,9 @@ const TYPE_LABELS: Record<ProjectType, string> = {
 };
 
 const RANK_COUNT = 7;
+// Writing questions are only required for the top choices; lower-ranked
+// projects (positions beyond this count) can be submitted without answers.
+const REQUIRED_COUNT = 5;
 
 // The two drop zones the DnD arranges items between.
 const RANKED_ZONE = "ranked-zone";
@@ -447,7 +450,8 @@ export default function ApplicationPage() {
   const projectById = (id: string) => projects.find((p) => p.id === id);
   const studioMet = (projectId: string) => (pmMap[projectId] ?? []).some((pm) => chattedWith.has(pm.user_id));
   const studioBlocked = ranked.filter((id) => projectById(id)?.type === "studio" && !studioMet(id));
-  const allCompleted = ranked.length > 0 && ranked.every((id) => completedByProject[id]);
+  // Only the top REQUIRED_COUNT ranked projects need their writing finished.
+  const allCompleted = ranked.length > 0 && ranked.slice(0, REQUIRED_COUNT).every((id) => completedByProject[id]);
   const rankingReady = ranked.length === RANK_COUNT && allCompleted && studioBlocked.length === 0;
   const canSubmit = rankingReady;
 
@@ -593,8 +597,8 @@ export default function ApplicationPage() {
         <Link href="/" className="text-sm text-muted-foreground hover:text-foreground">← Back</Link>
         <h1 className="text-2xl font-bold">Application</h1>
         <p className="text-sm text-muted-foreground">
-          Drag projects into your ranking (top {RANK_COUNT}), then open each to complete its questions.
-          Your progress saves automatically.
+          Drag projects into your ranking (top {RANK_COUNT}), then complete the questions for your
+          top {REQUIRED_COUNT} choices. Your progress saves automatically.
         </p>
       </div>
 
@@ -740,7 +744,7 @@ export default function ApplicationPage() {
               ? `Rank exactly ${RANK_COUNT} projects (${ranked.length} selected).`
               : studioBlocked.length > 0
                 ? "Complete the required coffee chat(s) for your OP Studio picks."
-                : "Open each ranked project and complete its questions."}
+                : `Complete the questions for your top ${REQUIRED_COUNT} ranked projects.`}
           </p>
         )}
         <div className="flex justify-end">
@@ -887,6 +891,7 @@ function RankZone({
                 project={p}
                 variant="ranked"
                 rankNumber={i + 1}
+                required={i < REQUIRED_COUNT}
                 completed={!!completedByProject[id]}
                 studioNeedsChat={p.type === "studio" && !studioMet(id)}
                 pms={pmMap[id] ?? []}
@@ -909,6 +914,7 @@ type CardProps = {
   met?: boolean;
   pms?: Pm[];
   rankNumber?: number;
+  required?: boolean;
   completed?: boolean;
   studioNeedsChat?: boolean;
   onOpen?: () => void;
@@ -979,6 +985,7 @@ function CardContent({
   onAdd,
   met,
   pms,
+  required,
   completed,
   studioNeedsChat,
   onOpen,
@@ -1012,7 +1019,7 @@ function CardContent({
             </>
           ) : (
             <>
-              {!completed && (
+              {required && !completed && (
                 <span
                   className="text-red-500 font-semibold flex-shrink-0"
                   title="Required questions unfinished"
@@ -1024,8 +1031,8 @@ function CardContent({
               <span className="px-2 py-0.5 rounded-full bg-foreground/10 text-foreground text-[11px] font-medium flex-shrink-0">
                 {TYPE_LABELS[project.type]}
               </span>
-              {/* Edit: the rounded square flashes while questions are unfinished;
-                  the pencil glyph itself stays solid. */}
+              {/* Edit: the rounded square flashes only while REQUIRED questions
+                  are unfinished; the pencil glyph itself stays solid. */}
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); onOpen?.(); }}
@@ -1035,7 +1042,7 @@ function CardContent({
               >
                 <span
                   className={`absolute inset-0 rounded-md border ${
-                    completed
+                    completed || !required
                       ? "border-border bg-background"
                       : "border-amber-500/70 bg-amber-500/10 animate-slow-flash"
                   }`}
