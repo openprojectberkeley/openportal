@@ -22,6 +22,7 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ApplicationPageSkeleton } from "@/components/skeletons";
 import { ProjectApplicationModal } from "@/components/project-application-modal";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { type Difficulty, DIFFICULTY_LABELS } from "@/lib/projects";
 import { readableTextColor } from "@/lib/portal-color";
 import { uploadResume, deleteResume, resumeSignedUrl } from "@/lib/resume-upload";
@@ -105,6 +106,7 @@ export default function ApplicationPage() {
   const [modalProject, setModalProject] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showDuesConfirm, setShowDuesConfirm] = useState(false);
   // The id currently being dragged, so the DragOverlay can render a 1:1 preview.
   const [activeId, setActiveId] = useState<string | null>(null);
   // A working copy of `ranked` mutated live while a drag is in flight (so the
@@ -525,8 +527,10 @@ export default function ApplicationPage() {
     setDrag(null);
   };
 
-  const submit = async () => {
-    if (!canSubmit || !appIdRef.current) return;
+  // Called from the dues-confirmation dialog. Returning false keeps the dialog
+  // open so the applicant sees the error instead of it vanishing silently.
+  const submit = async (): Promise<boolean> => {
+    if (!canSubmit || !appIdRef.current) return false;
     setSubmitting(true);
     setError(null);
     const supabase = createClient();
@@ -540,9 +544,10 @@ export default function ApplicationPage() {
       .from("applications")
       .update({ status: "submitted", submitted_at: new Date().toISOString() })
       .eq("id", appIdRef.current);
-    if (submitError) { setError(submitError.message); setSubmitting(false); return; }
+    if (submitError) { setError(submitError.message); setSubmitting(false); return false; }
     setSubmitting(false);
     setSubmitted(true);
+    return true;
   };
 
   if (loading) return <ApplicationPageSkeleton />;
@@ -755,11 +760,22 @@ export default function ApplicationPage() {
           )
         )}
         <div className="flex justify-end">
-          <Button onClick={submit} disabled={!canSubmit || submitting}>
+          <Button onClick={() => setShowDuesConfirm(true)} disabled={!canSubmit || submitting}>
             {SUBMISSIONS_LOCKED ? "Submissions closed" : submitting ? "Submitting…" : "Submit application"}
           </Button>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={showDuesConfirm}
+        onOpenChange={setShowDuesConfirm}
+        title="Before you submit"
+        description="Submitting your application means you're joining a project this semester. That comes with $35 in club dues, which cover project costs, events, and socials."
+        confirmLabel="I understand, submit"
+        cancelLabel="Cancel"
+        destructive={false}
+        onConfirm={submit}
+      />
 
       {modalProject && rankingIdByProject[modalProject] && (
         <ProjectApplicationModal
