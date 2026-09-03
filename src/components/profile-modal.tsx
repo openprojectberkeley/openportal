@@ -105,7 +105,12 @@ export function ProfileModal({ target, cached, onLoaded, onClose }: Props) {
               </div>
             )}
             <div className="flex flex-col gap-1.5 min-w-0">
-              <DialogTitle className="truncate">{name}</DialogTitle>
+              <div className="flex flex-wrap items-baseline gap-x-2 min-w-0">
+                <DialogTitle className="truncate">{name}</DialogTitle>
+                {merged.pronouns && (
+                  <span className="text-sm text-muted-foreground">{merged.pronouns}</span>
+                )}
+              </div>
               <div className="flex flex-wrap items-center gap-1">
                 {roles.map((r) => (
                   <span

@@ -18,6 +18,8 @@ import { ChevronDown, X } from "lucide-react";
 
 const CLASS_YEARS = ["Freshman", "Sophomore", "Junior", "Senior", "Postgrad"] as const;
 import { AvatarPicker } from "@/components/avatar-picker";
+import { Checkbox } from "@/components/ui/checkbox";
+import { PronounsPicker } from "@/components/pronouns-field";
 
 type ProfileFields = {
   preferred_firstname: string;
@@ -28,6 +30,7 @@ type ProfileFields = {
   linkedin: string;
   github: string;
   interests: string;
+  pronouns: string;
 };
 
 const EMPTY: ProfileFields = {
@@ -39,6 +42,7 @@ const EMPTY: ProfileFields = {
   linkedin: "",
   github: "",
   interests: "",
+  pronouns: "",
 };
 
 const LABELS: Record<keyof ProfileFields, string> = {
@@ -50,6 +54,7 @@ const LABELS: Record<keyof ProfileFields, string> = {
   linkedin: "LinkedIn",
   github: "GitHub",
   interests: "Interests",
+  pronouns: "Pronouns",
 };
 
 type Props = {
@@ -61,6 +66,7 @@ type Props = {
 
 export function ProfileDialog({ open, onOpenChange, userId, onSave }: Props) {
   const [fields, setFields] = useState<ProfileFields>(EMPTY);
+  const [pronounsPublic, setPronounsPublic] = useState(true);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -74,7 +80,7 @@ export function ProfileDialog({ open, onOpenChange, userId, onSave }: Props) {
     const supabase = createClient();
     supabase
       .from("members")
-      .select("preferred_firstname, lastname, major, grad_year, phone, linkedin, github, interests, avatar_url")
+      .select("preferred_firstname, lastname, major, grad_year, phone, linkedin, github, interests, pronouns, pronouns_public, avatar_url")
       .eq("user_id", userId)
       .maybeSingle()
       .then(({ data }) => {
@@ -88,7 +94,9 @@ export function ProfileDialog({ open, onOpenChange, userId, onSave }: Props) {
             linkedin: data.linkedin ?? "",
             github: data.github ?? "",
             interests: data.interests ?? "",
+            pronouns: data.pronouns ?? "",
           });
+          setPronounsPublic(data.pronouns_public ?? true);
           setAvatarUrl(data.avatar_url ?? null);
         }
       });
@@ -107,7 +115,7 @@ export function ProfileDialog({ open, onOpenChange, userId, onSave }: Props) {
     const supabase = createClient();
     const { error: updateError } = await supabase
       .from("members")
-      .update({ ...fields, avatar_url: avatarUrl })
+      .update({ ...fields, pronouns_public: pronounsPublic, avatar_url: avatarUrl })
       .eq("user_id", userId);
 
     if (updateError) {
@@ -126,7 +134,14 @@ export function ProfileDialog({ open, onOpenChange, userId, onSave }: Props) {
   const renderField = (key: keyof ProfileFields) => (
     <div key={key} className="flex flex-col gap-1">
       <Label htmlFor={key}>{LABELS[key]}</Label>
-      {key === "interests" ? (
+      {key === "pronouns" ? (
+        <PronounsPicker
+          value={fields[key]}
+          onChange={(v) => setFields((f) => ({ ...f, pronouns: v }))}
+          triggerClassName="flex h-9 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 text-sm shadow-sm transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          inputClassName="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        />
+      ) : key === "interests" ? (
         <textarea
           id={key}
           value={fields[key]}
@@ -197,10 +212,24 @@ export function ProfileDialog({ open, onOpenChange, userId, onSave }: Props) {
             name={[fields.preferred_firstname, fields.lastname].filter(Boolean).join(" ")}
             onChange={setAvatarUrl}
           />
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-3 gap-3">
             {renderField("preferred_firstname")}
             {renderField("lastname")}
+            {renderField("pronouns")}
           </div>
+          <label className="flex items-start gap-2 text-sm">
+            <Checkbox
+              className="mt-0.5"
+              checked={pronounsPublic}
+              onCheckedChange={(v) => setPronounsPublic(v === true)}
+            />
+            <span>
+              Show my pronouns on my profile
+              <span className="block text-xs text-muted-foreground">
+                Visible to everyone. Turn this off to keep them private.
+              </span>
+            </span>
+          </label>
           <div className="grid grid-cols-3 gap-3">
             {renderField("major")}
             {renderField("grad_year")}
