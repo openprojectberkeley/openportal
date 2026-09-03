@@ -29,7 +29,7 @@ export default function HomePage() {
   const [portals, setPortals] = useState<PortalSummary[] | null>(null);
   // A currently-active member (non-staff) who hasn't re-applied to the currently
   // open period yet — drives the non-blocking re-apply banner on the dashboard.
-  const [reapply, setReapply] = useState<{ periodName: string; infosessionDone: boolean } | null>(null);
+  const [reapply, setReapply] = useState<{ periodName: string; infosessionDone: boolean; applicationDone: boolean } | null>(null);
   const [completed, setCompleted] = useState<CompletionState>({
     coffeeChat: false,
     infosession: false,
@@ -98,8 +98,10 @@ export default function HomePage() {
       setFirstName(member.preferred_firstname);
 
       // Active members (non-staff) must re-apply each open round. Show a
-      // non-blocking prompt when a period is open and they haven't applied to it
-      // yet. Board/exec don't apply, so skip them.
+      // non-blocking prompt for the whole open period, even after they've
+      // submitted (the Application step just flips to done), so returning
+      // members always have somewhere to check their re-apply progress.
+      // Board/exec don't apply, so skip them.
       // Reset first: this effect reruns on every persona switch (isBoardOrExec
       // changes), and without clearing, a banner shown while simulating
       // "member" would otherwise persist after switching back to PM/exec.
@@ -123,9 +125,11 @@ export default function HomePage() {
               .limit(1),
             supabase.from("infosesh_attendance").select("applicant_id").eq("applicant_id", user.id).limit(1),
           ]);
-          if (!appliedRows?.length) {
-            setReapply({ periodName: period.name, infosessionDone: !!infoRows?.length });
-          }
+          setReapply({
+            periodName: period.name,
+            infosessionDone: !!infoRows?.length,
+            applicationDone: !!appliedRows?.length,
+          });
         }
       }
 
@@ -239,7 +243,7 @@ export default function HomePage() {
             <div className="flex flex-wrap gap-2">
               <ReapplyStep label="Coffee Chat" href="/coffee-chat" done={true} icon={Coffee} />
               <ReapplyStep label="Infosession" href="/infosession" done={reapply.infosessionDone} icon={Users} />
-              <ReapplyStep label="Application" href="/application" done={false} icon={FileText} />
+              <ReapplyStep label="Application" href="/application" done={reapply.applicationDone} icon={FileText} />
             </div>
           </div>
         )}
