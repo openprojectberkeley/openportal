@@ -12,8 +12,8 @@
 //   SUPABASE_SERVICE_ROLE_KEY=<service_role key> \
 //   npx vitest run src/lib/__tests__/booking.db.test.ts
 //
-// The migrations (0035 + 0038, which adds the optional booker message) must
-// already be applied to that database.
+// The migrations (0035 + 0038, which adds the optional booker message, + 0055,
+// which adds coffee_chats.location_is_custom) must already be applied.
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
@@ -223,20 +223,23 @@ describe.skipIf(!RUN)("book_coffee_chat RPC", () => {
 });
 
 // Integration tests for set_default_chat_location
-// (supabase/migrations/0036_apply_default_chat_location.sql). Same gating and
+// (supabase/migrations/0055_coffee_chat_location_is_custom.sql). Same gating and
 // setup as above.
 describe.skipIf(!RUN)("set_default_chat_location RPC", () => {
   let h: TestUser;
-  let u1: TestUser; // chat with no location
-  let u2: TestUser; // chat still on the old default
-  let u3: TestUser; // chat with a custom location
+  let u1: TestUser; // chat with no location (inherited)
+  let u2: TestUser; // chat still on the old default (inherited)
+  let u3: TestUser; // chat with a manual custom location
+  let u4: TestUser; // chat whose value drifted from the default but is inherited
   const uids: string[] = [];
   const T1 = new Date(Date.now() + 48 * 60 * 60 * 1000);
   const T2 = new Date(Date.now() + 49 * 60 * 60 * 1000);
   const T3 = new Date(Date.now() + 50 * 60 * 60 * 1000);
+  const T4 = new Date(Date.now() + 51 * 60 * 60 * 1000);
   const OLD = "https://old.example.com/room";
   const NEW = "https://new.example.com/room";
   const CUSTOM = "In person — Moffitt 4th floor";
+  const DRIFT = "https://stale.example.com/room";
 
   // Book one seat at `time` for host as `who`, returning the booked row id.
   async function book(who: TestUser, time: Date): Promise<string> {
@@ -254,6 +257,11 @@ describe.skipIf(!RUN)("set_default_chat_location RPC", () => {
     return data?.location as string | null;
   };
 
+  const customOf = async (id: string) => {
+    const { data } = await admin.from("coffee_chats").select("location_is_custom").eq("id", id).single();
+    return data?.location_is_custom as boolean;
+  };
+
   beforeAll(async () => {
     await admin.from("app_settings").upsert({
       id: 1,
@@ -264,7 +272,8 @@ describe.skipIf(!RUN)("set_default_chat_location RPC", () => {
     u1 = await makeUser("dl-u1");
     u2 = await makeUser("dl-u2");
     u3 = await makeUser("dl-u3");
-    uids.push(h.id, u1.id, u2.id, u3.id);
+    u4 = await makeUser("dl-u4");
+    uids.push(h.id, u1.id, u2.id, u3.id, u4.id);
     // The RPC updates members where user_id = auth.uid(); the host needs a row.
     await admin.from("members").upsert({ user_id: h.id }, { onConflict: "user_id" });
   });
@@ -275,23 +284,48 @@ describe.skipIf(!RUN)("set_default_chat_location RPC", () => {
     for (const uid of uids) await admin.auth.admin.deleteUser(uid).catch(() => {});
   });
 
-  it("propagates to no-location and old-default chats, preserves custom, and notifies", async () => {
+  it("book_coffee_chat leaves an inherited seat non-custom and preserves a pre-set custom seat", async () => {
+    await admin.from("members").update({ default_chat_location: OLD }).eq("user_id", h.id);
+
+    // Fresh open seat: booking freezes the default and leaves it non-custom.
+    const c1 = await book(u1, T1);
+    expect(await locOf(c1)).toBe(OLD);
+    expect(await customOf(c1)).toBe(false);
+
+    // A seat with a manual per-slot location keeps it and stays custom on booking.
+    const [openId] = await seedSeats(h.id, T2, 1);
+    await admin.from("coffee_chats").update({ location: CUSTOM, location_is_custom: true }).eq("id", openId);
+    const { data: c2, error } = await u2.client.rpc("book_coffee_chat", { p_member_id: h.id, p_meeting_time: iso(T2) });
+    expect(error).toBeNull();
+    expect(await locOf(c2 as string)).toBe(CUSTOM);
+    expect(await customOf(c2 as string)).toBe(true);
+
+    await admin.from("notifications").delete().eq("member_id", h.id);
+    await admin.from("coffee_chats").delete().eq("member_id", h.id);
+  });
+
+  it("propagates to every non-custom chat regardless of value, preserves custom, and notifies", async () => {
     const c1 = await book(u1, T1);
     const c2 = await book(u2, T2);
     const c3 = await book(u3, T3);
+    const c4 = await book(u4, T4);
     // Force each row into its starting state and set the host's current default.
-    await admin.from("coffee_chats").update({ location: null }).eq("id", c1);
-    await admin.from("coffee_chats").update({ location: OLD }).eq("id", c2);
-    await admin.from("coffee_chats").update({ location: CUSTOM }).eq("id", c3);
+    // c4's value has drifted from the default yet is still inherited — the case
+    // the old value heuristic stranded; it must still be rewritten.
+    await admin.from("coffee_chats").update({ location: null, location_is_custom: false }).eq("id", c1);
+    await admin.from("coffee_chats").update({ location: OLD, location_is_custom: false }).eq("id", c2);
+    await admin.from("coffee_chats").update({ location: CUSTOM, location_is_custom: true }).eq("id", c3);
+    await admin.from("coffee_chats").update({ location: DRIFT, location_is_custom: false }).eq("id", c4);
     await admin.from("members").update({ default_chat_location: OLD }).eq("user_id", h.id);
 
     const { data: count, error } = await h.client.rpc("set_default_chat_location", { p_location: NEW });
     expect(error).toBeNull();
-    expect(count).toBe(2); // c1 (added) + c2 (updated); c3 preserved
+    expect(count).toBe(3); // c1 (added) + c2 + c4 (updated); c3 preserved
 
     expect(await locOf(c1)).toBe(NEW);
     expect(await locOf(c2)).toBe(NEW);
     expect(await locOf(c3)).toBe(CUSTOM);
+    expect(await locOf(c4)).toBe(NEW);
 
     const { data: me } = await admin.from("members").select("default_chat_location").eq("user_id", h.id).single();
     expect(me?.default_chat_location).toBe(NEW);
@@ -307,6 +341,7 @@ describe.skipIf(!RUN)("set_default_chat_location RPC", () => {
     };
     expect(await notifOf(u1.id, c1)).toContain("location_added");
     expect(await notifOf(u2.id, c2)).toContain("location_updated");
+    expect(await notifOf(u4.id, c4)).toContain("location_updated");
     expect(await notifOf(u3.id, c3)).toHaveLength(0);
 
     await admin.from("notifications").delete().eq("member_id", h.id);
@@ -316,8 +351,8 @@ describe.skipIf(!RUN)("set_default_chat_location RPC", () => {
   it("clearing the default resets non-custom rows to null without notifying", async () => {
     const c1 = await book(u1, T1);
     const c3 = await book(u3, T3);
-    await admin.from("coffee_chats").update({ location: OLD }).eq("id", c1);
-    await admin.from("coffee_chats").update({ location: CUSTOM }).eq("id", c3);
+    await admin.from("coffee_chats").update({ location: OLD, location_is_custom: false }).eq("id", c1);
+    await admin.from("coffee_chats").update({ location: CUSTOM, location_is_custom: true }).eq("id", c3);
     await admin.from("members").update({ default_chat_location: OLD }).eq("user_id", h.id);
 
     const { data: count, error } = await h.client.rpc("set_default_chat_location", { p_location: "" });

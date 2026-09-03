@@ -833,16 +833,21 @@ export default function ManagerCoffeeChatsPage() {
   };
 
   // Set / update the meeting location for one booked sub-slot (all its seats),
-  // then notify each attendee.
+  // then notify each attendee. Setting a value marks the seat as a manual
+  // override (location_is_custom = true) so a later default change won't touch
+  // it; clearing it reverts to following the host default (location_is_custom =
+  // false, location reset to the current default) rather than blanking the
+  // booker's view. See migration 0055_coffee_chat_location_is_custom.sql.
   const saveSlotLocation = async () => {
     if (!locationTarget) return false;
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return false;
-    const value = locationDraft.trim() || null;
+    const raw = locationDraft.trim() || null;
+    const value = raw ?? (defaultLocation.trim() || null);
     const { error } = await supabase
       .from("coffee_chats")
-      .update({ location: value })
+      .update({ location: value, location_is_custom: raw !== null })
       .eq("member_id", user.id)
       .eq("meeting_time", locationTarget.meeting_time);
     if (error) return false;
@@ -861,10 +866,10 @@ export default function ManagerCoffeeChatsPage() {
     if (!user) return;
     setSavingDefaultLocation(true);
     const value = draftDefaultLocation.trim() || null;
-    // Sets the host default AND propagates it to existing upcoming booked chats
-    // that have no location or still match the old default (custom per-slot
-    // locations are preserved), notifying affected attendees. See migration
-    // 0036_apply_default_chat_location.sql.
+    // Sets the host default AND propagates it to every upcoming booked chat that
+    // is following the default (location_is_custom = false), regardless of its
+    // current value; manual per-slot overrides are preserved. Affected attendees
+    // are notified. See migration 0055_coffee_chat_location_is_custom.sql.
     await supabase.rpc("set_default_chat_location", { p_location: value });
     setDefaultLocation(value ?? "");
     setSavingDefaultLocation(false);
