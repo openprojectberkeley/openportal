@@ -3,7 +3,7 @@
 import { createClient } from "@/lib/supabase/client";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { ChevronDown, SlidersHorizontal, Coffee, Check, Clock, RotateCcw } from "lucide-react";
+import { ChevronDown, SlidersHorizontal, Coffee, Check, Clock, RotateCcw, Presentation } from "lucide-react";
 import { useRoleSim } from "@/components/role-simulation-provider";
 import { PersonName } from "@/components/person-profile-provider";
 import { canReviewAllProjects } from "@/lib/roles";
@@ -40,6 +40,8 @@ type AppRow = {
   returning: boolean;
   // This applicant's rank (1-7) for the currently selected project.
   rank: number;
+  // Applicant checked in to at least one info session.
+  infosession: boolean;
 };
 
 const RANK_LABELS: Record<number, string> = {
@@ -94,6 +96,22 @@ function ReturningIndicator({ returning }: { returning: boolean }) {
       <RotateCcw size={11} />
       Returning
     </Badge>
+  );
+}
+
+// Presentation icon with a check once the applicant has checked in to an info
+// session; nothing if they never attended one.
+function InfosessionIndicator({ attended }: { attended: boolean }) {
+  if (!attended) return null;
+  return (
+    <span
+      title="Attended an info session"
+      aria-label="Attended an info session"
+      className="inline-flex items-center gap-0.5 text-sky-600"
+    >
+      <Presentation size={14} />
+      <Check size={12} className="stroke-[3]" />
+    </span>
   );
 }
 
@@ -214,12 +232,20 @@ export default function ManagerApplicationsPage() {
       const byId: Record<string, Applicant> = {};
       const returningById: Record<string, boolean> = {};
       const coffeeById: Record<string, CoffeeState> = {};
+      const attendedInfo = new Set<string>();
       if (ids.length) {
-        const [{ data: mem }, { data: chats }] = await Promise.all([
+        const idSet = new Set(ids);
+        const [{ data: mem }, { data: chats }, { data: info }] = await Promise.all([
           supabase.from("members").select("user_id, preferred_firstname, lastname, status").in("user_id", ids),
           // A booked chat has applicant_id set; `complete` marks it done. Open
           // (unbooked) slots have a null applicant_id and won't match.
           supabase.from("coffee_chats").select("applicant_id, complete").in("applicant_id", ids),
+          // Attendance is recorded under member_id or applicant_id depending on
+          // whether they were a member at the time; both are auth user ids.
+          supabase
+            .from("infosesh_attendance")
+            .select("applicant_id, member_id")
+            .or(`applicant_id.in.(${ids.join(",")}),member_id.in.(${ids.join(",")})`),
         ]);
         for (const m of (mem ?? []) as (Applicant & { status: string | null })[]) {
           byId[m.user_id] = m;
@@ -229,6 +255,10 @@ export default function ManagerApplicationsPage() {
         for (const ch of (chats ?? []) as { applicant_id: string; complete: boolean }[]) {
           if (ch.complete) coffeeById[ch.applicant_id] = "done";
           else if (coffeeById[ch.applicant_id] !== "done") coffeeById[ch.applicant_id] = "booked";
+        }
+        for (const r of (info ?? []) as { applicant_id: string | null; member_id: string | null }[]) {
+          if (r.applicant_id && idSet.has(r.applicant_id)) attendedInfo.add(r.applicant_id);
+          if (r.member_id && idSet.has(r.member_id)) attendedInfo.add(r.member_id);
         }
       }
 
@@ -240,6 +270,7 @@ export default function ManagerApplicationsPage() {
             : null,
           coffee: (applicant_id && coffeeById[applicant_id]) || "none",
           returning: !!applicant_id && !!returningById[applicant_id],
+          infosession: !!applicant_id && attendedInfo.has(applicant_id),
         })),
       );
     })();
@@ -372,6 +403,7 @@ export default function ManagerApplicationsPage() {
                         <StatusBadge status={a.status} />
                         <ReturningIndicator returning={a.returning} />
                         <CoffeeChatIndicator state={a.coffee} />
+                        <InfosessionIndicator attended={a.infosession} />
                       </div>
                       <span className="text-xs text-muted-foreground truncate">
                         {a.submitted_at ? `Submitted ${new Date(a.submitted_at).toLocaleDateString()}` : ""}

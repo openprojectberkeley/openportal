@@ -16,6 +16,7 @@ import { ChevronDown } from "lucide-react";
 const CLASS_YEARS = ["Freshman", "Sophomore", "Junior", "Senior", "Postgrad"] as const;
 import { AvatarPicker } from "@/components/avatar-picker";
 import { Checkbox } from "@/components/ui/checkbox";
+import { PronounsPicker } from "@/components/pronouns-field";
 
 // Progressively formats digits as (xxx) xxx-xxxx while typing.
 function formatPhoneNumber(value: string): string {
@@ -43,6 +44,8 @@ export default function OnboardingPage() {
   const [linkedin, setLinkedin] = useState("");
   const [github, setGithub] = useState("");
   const [interests, setInterests] = useState("");
+  const [pronouns, setPronouns] = useState("");
+  const [pronounsPublic, setPronounsPublic] = useState(true);
   const [emailNotifications, setEmailNotifications] = useState(true);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -84,7 +87,7 @@ export default function OnboardingPage() {
       // pre-fill so re-submitting doesn't blank out their existing data.
       const { data: existing } = await supabase
         .from("members")
-        .select("preferred_firstname, lastname, major, grad_year, phone, linkedin, github, interests, email_notifications, avatar_url")
+        .select("preferred_firstname, lastname, major, grad_year, phone, linkedin, github, interests, pronouns, pronouns_public, email_notifications, avatar_url")
         .eq("user_id", user.id)
         .maybeSingle();
 
@@ -102,6 +105,8 @@ export default function OnboardingPage() {
         setLinkedin(existing.linkedin ?? "");
         setGithub(existing.github ?? "");
         setInterests(existing.interests ?? "");
+        setPronouns(existing.pronouns ?? "");
+        setPronounsPublic(existing.pronouns_public ?? true);
         setEmailNotifications(existing.email_notifications ?? true);
         setAvatarUrl(existing.avatar_url ?? null);
       }
@@ -132,6 +137,8 @@ export default function OnboardingPage() {
           linkedin: linkedin.trim(),
           github: github.trim(),
           interests: interests.trim(),
+          pronouns: pronouns.trim(),
+          pronouns_public: pronounsPublic,
           email_notifications: emailNotifications,
           avatar_url: avatarUrl,
         },
@@ -168,7 +175,7 @@ export default function OnboardingPage() {
               />
             )}
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-3 gap-3">
             <div className="flex flex-col gap-1">
               <label className="text-sm font-medium">Preferred first name</label>
               <input
@@ -191,7 +198,24 @@ export default function OnboardingPage() {
                 className="border bg-transparent rounded-md px-3 py-2 text-sm w-full"
               />
             </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-sm font-medium">Pronouns</label>
+              <PronounsPicker value={pronouns} onChange={setPronouns} />
+            </div>
           </div>
+          <label className="flex items-start gap-2 text-sm">
+            <Checkbox
+              className="mt-0.5"
+              checked={pronounsPublic}
+              onCheckedChange={(v) => setPronounsPublic(v === true)}
+            />
+            <span>
+              Show my pronouns on my profile
+              <span className="block text-xs text-muted-foreground">
+                Visible to everyone. Turn this off to keep them private.
+              </span>
+            </span>
+          </label>
           <div className="grid grid-cols-3 gap-3">
             <div className="flex flex-col gap-1">
               <label className="text-sm font-medium">Major(s)</label>
