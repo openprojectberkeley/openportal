@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ChevronDown, SlidersHorizontal, Coffee, Check, Clock, RotateCcw } from "lucide-react";
 import { useRoleSim } from "@/components/role-simulation-provider";
 import { PersonName } from "@/components/person-profile-provider";
+import { canReviewAllProjects } from "@/lib/roles";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -25,6 +26,10 @@ type Applicant = { user_id: string; preferred_firstname: string | null; lastname
 // "booked" while one is booked but not yet completed, "none" if never booked.
 type CoffeeState = "done" | "booked" | "none";
 
+// The project currently under review: which project the reviewer is
+// assigned to (or, for a full-access reviewer, has picked from all of them).
+type ReviewableProject = { id: string; name: string };
+
 type AppRow = {
   id: string;
   status: ReviewStatus;
@@ -33,8 +38,17 @@ type AppRow = {
   coffee: CoffeeState;
   // Applicant was a member before (status active/inactive) vs. a first-timer.
   returning: boolean;
-  application_rankings: { rank: number; ranked: boolean; project: { name: string } | null }[];
+  // This applicant's rank (1-7) for the currently selected project.
+  rank: number;
 };
+
+const RANK_LABELS: Record<number, string> = {
+  1: "1st choice", 2: "2nd choice", 3: "3rd choice", 4: "4th choice",
+  5: "5th choice", 6: "6th choice", 7: "7th choice",
+};
+function rankLabel(rank: number): string {
+  return RANK_LABELS[rank] ?? `${rank}th choice`;
+}
 
 function isOpenNow(p: ApplicationPeriod): boolean {
   const now = Date.now();
@@ -105,6 +119,51 @@ export default function ManagerApplicationsPage() {
   const [periodsDialogOpen, setPeriodsDialogOpen] = useState(false);
   const [reviewFor, setReviewFor] = useState<{ id: string; name: string; status: ReviewStatus } | null>(null);
 
+  // Which project(s) the current viewer may review: every project if they hold
+  // a full-access role (VP Tech/President/VP of Projects), otherwise only the
+  // ones they PM. null = still loading.
+  const [reviewableProjects, setReviewableProjects] = useState<ReviewableProject[] | null>(null);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { setReviewableProjects([]); return; }
+
+      const { data: roleRows } = await supabase
+        .from("members_roles")
+        .select("roles(role_name)")
+        .eq("user_id", user.id);
+      const roles = ((roleRows ?? []) as unknown as { roles: { role_name: string | null } | null }[])
+        .flatMap((r) => (r.roles ? [r.roles] : []));
+      const fullAccess = canReviewAllProjects(roles);
+
+      if (fullAccess) {
+        const { data } = await supabase.from("projects").select("id, name").order("name");
+        setReviewableProjects((data ?? []) as ReviewableProject[]);
+      } else {
+        const { data } = await supabase
+          .from("project_members")
+          .select("project_id, projects(name)")
+          .eq("user_id", user.id)
+          .eq("is_pm", true);
+        const list = ((data ?? []) as unknown as { project_id: string; projects: { name: string } | null }[])
+          .map((r) => ({ id: r.project_id, name: r.projects?.name ?? "Untitled project" }))
+          .sort((a, b) => a.name.localeCompare(b.name));
+        setReviewableProjects(list);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    setSelectedProjectId((cur) => {
+      if (!reviewableProjects) return cur;
+      if (cur && reviewableProjects.some((p) => p.id === cur)) return cur;
+      return reviewableProjects[0]?.id ?? null;
+    });
+  }, [reviewableProjects]);
+
   // Exec-only period funnel stats, shown above the list.
   const loadStats = useCallback(async (periodId: string) => {
     const supabase = createClient();
@@ -127,22 +186,30 @@ export default function ManagerApplicationsPage() {
 
   useEffect(() => {
     if (!selectedPeriodId) { setApps([]); setStats(null); return; }
+    if (!reviewableProjects) { setApps(null); setStats(null); return; } // still loading review scope
+    if (!selectedProjectId) { setApps([]); setStats(null); return; } // no assigned projects to review
     const supabase = createClient();
     setApps(null);
     // applicant_id is the auth user id (no FK to `members`), so fetch the rows
     // first, then resolve names in a second pass keyed on members.user_id.
+    // `application_rankings!inner(...)` + the two `.eq` filters below turn the
+    // embed into an inner join, so only applicants who ranked the selected
+    // project come back, each carrying their rank for that project.
     (async () => {
       const { data } = await supabase
         .from("applications")
         .select(
           `id, status, submitted_at, applicant_id,
-           application_rankings(rank, ranked, project:projects(name))`,
+           application_rankings!inner(rank)`,
         )
         .eq("period_id", selectedPeriodId)
         .in("status", ["submitted", "accepted", "rejected"])
+        .eq("application_rankings.project_id", selectedProjectId)
+        .eq("application_rankings.ranked", true)
         .order("submitted_at", { ascending: true });
 
-      const rows = (data ?? []) as unknown as (Omit<AppRow, "applicant" | "coffee"> & { applicant_id: string | null })[];
+      const rows = ((data ?? []) as unknown as { id: string; status: ReviewStatus; submitted_at: string | null; applicant_id: string | null; application_rankings: { rank: number }[] }[])
+        .map(({ application_rankings, ...r }) => ({ ...r, rank: application_rankings[0]?.rank ?? 0 }));
       const ids = [...new Set(rows.map((r) => r.applicant_id).filter((id): id is string => !!id))];
       const byId: Record<string, Applicant> = {};
       const returningById: Record<string, boolean> = {};
@@ -179,9 +246,23 @@ export default function ManagerApplicationsPage() {
 
     if (isExec) { setStats(null); loadStats(selectedPeriodId); }
     else setStats(null);
-  }, [selectedPeriodId, isExec, loadStats]);
+  }, [selectedPeriodId, selectedProjectId, reviewableProjects, isExec, loadStats]);
 
   const selectedPeriod = periods?.find((p) => p.id === selectedPeriodId) ?? null;
+  const selectedProject = reviewableProjects?.find((p) => p.id === selectedProjectId) ?? null;
+
+  // Group applicants into rank sections (1st choice, 2nd choice, …) for the
+  // currently selected project, most-preferred first.
+  const groupedApps = apps
+    ? Object.entries(
+        apps.reduce<Record<number, AppRow[]>>((acc, a) => {
+          (acc[a.rank] ??= []).push(a);
+          return acc;
+        }, {}),
+      )
+        .map(([rank, list]) => [Number(rank), list] as [number, AppRow[]])
+        .sort((x, y) => x[0] - y[0])
+    : [];
 
   const onReviewed = (id: string, status: ReviewStatus) => {
     setApps((prev) => (prev ? prev.map((a) => (a.id === id ? { ...a, status } : a)) : prev));
@@ -233,46 +314,81 @@ export default function ManagerApplicationsPage() {
         )}
       </div>
 
+      {/* Project bar: which project's applicants you're reviewing */}
+      {reviewableProjects === null ? (
+        <div className="h-9 w-48 rounded-md bg-muted animate-pulse" />
+      ) : reviewableProjects.length === 0 ? null : reviewableProjects.length === 1 ? (
+        <span className="text-sm text-muted-foreground">
+          Reviewing for <span className="font-medium text-foreground">{reviewableProjects[0].name}</span>
+        </span>
+      ) : (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button className="flex items-center gap-2 self-start border rounded-md px-3 py-2 text-sm bg-background hover:bg-accent transition-colors">
+              <span className="text-muted-foreground">Reviewing for</span>
+              <span className="font-medium">{selectedProject?.name ?? "Select project"}</span>
+              <ChevronDown size={14} className="text-muted-foreground" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            {reviewableProjects.map((p) => (
+              <DropdownMenuItem key={p.id} onSelect={() => setSelectedProjectId(p.id)}>
+                {p.name}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+
       {/* Exec-only period funnel stats */}
       {isExec && selectedPeriodId && <ApplicationStats stats={stats} />}
 
-      {/* Applications list */}
-      {apps === null ? (
+      {/* Applications list, grouped by rank (1st choice, 2nd choice, …) for the
+          selected project */}
+      {reviewableProjects?.length === 0 ? (
+        <div className="px-4 py-10 text-center text-sm text-muted-foreground border rounded-xl">
+          You aren&apos;t assigned to review any projects.
+        </div>
+      ) : apps === null ? (
         <ApplicationListSkeleton rows={4} />
       ) : apps.length === 0 ? (
         <div className="px-4 py-10 text-center text-sm text-muted-foreground border rounded-xl">
-          No submitted applications for this period yet.
+          No submitted applications for this project yet.
         </div>
       ) : (
-        <div className="flex flex-col gap-2.5">
-          {apps.map((a) => {
-            const ranked = a.application_rankings.filter((r) => r.ranked).sort((x, y) => x.rank - y.rank);
-            const name = applicantName(a);
-            return (
-              <div key={a.id} className="flex items-center gap-3 border rounded-xl px-4 py-3">
-                <div className="flex flex-col gap-0.5 min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <PersonName userId={a.applicant?.user_id} name={name} className="text-sm font-medium" />
-                    <StatusBadge status={a.status} />
-                    <ReturningIndicator returning={a.returning} />
-                    <CoffeeChatIndicator state={a.coffee} />
+        <div className="flex flex-col gap-4">
+          {groupedApps.map(([rank, list]) => (
+            <div key={rank} className="flex flex-col gap-2.5">
+              <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                {rankLabel(rank)}
+              </h2>
+              {list.map((a) => {
+                const name = applicantName(a);
+                return (
+                  <div key={a.id} className="flex items-center gap-3 border rounded-xl px-4 py-3">
+                    <div className="flex flex-col gap-0.5 min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <PersonName userId={a.applicant?.user_id} name={name} className="text-sm font-medium" />
+                        <StatusBadge status={a.status} />
+                        <ReturningIndicator returning={a.returning} />
+                        <CoffeeChatIndicator state={a.coffee} />
+                      </div>
+                      <span className="text-xs text-muted-foreground truncate">
+                        {a.submitted_at ? `Submitted ${new Date(a.submitted_at).toLocaleDateString()}` : ""}
+                      </span>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setReviewFor({ id: a.id, name, status: a.status })}
+                    >
+                      Review
+                    </Button>
                   </div>
-                  <span className="text-xs text-muted-foreground truncate">
-                    {ranked.length} ranked project{ranked.length === 1 ? "" : "s"}
-                    {ranked[0]?.project?.name ? ` · top: ${ranked[0].project.name}` : ""}
-                    {a.submitted_at ? ` · ${new Date(a.submitted_at).toLocaleDateString()}` : ""}
-                  </span>
-                </div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => setReviewFor({ id: a.id, name, status: a.status })}
-                >
-                  Review
-                </Button>
-              </div>
-            );
-          })}
+                );
+              })}
+            </div>
+          ))}
         </div>
       )}
 
@@ -290,6 +406,7 @@ export default function ManagerApplicationsPage() {
           applicationId={reviewFor.id}
           applicantName={reviewFor.name}
           status={reviewFor.status}
+          contextProjectId={selectedProjectId}
           open={!!reviewFor}
           onOpenChange={(o) => { if (!o) setReviewFor(null); }}
           onReviewed={(status) => onReviewed(reviewFor.id, status)}

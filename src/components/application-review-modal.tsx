@@ -56,6 +56,7 @@ export function ApplicationReviewModal({
   applicationId,
   applicantName,
   status,
+  contextProjectId,
   open,
   onOpenChange,
   onReviewed,
@@ -63,6 +64,11 @@ export function ApplicationReviewModal({
   applicationId: string;
   applicantName: string;
   status: ReviewStatus;
+  // The project the reviewer is currently reviewing under (the manager page's
+  // project picker). Rankings for projects the reviewer can't review are
+  // already excluded by RLS, but when there's more than one visible ranking
+  // this decides which one the "Place on" dropdown defaults to.
+  contextProjectId?: string | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onReviewed: (status: ReviewStatus) => void;
@@ -131,7 +137,10 @@ export function ApplicationReviewModal({
 
       const rows = (rankRows ?? []) as unknown as RankingRow[];
       setRankings(rows);
-      setSelectedProjectId(rows[0]?.project?.id ?? null);
+      const defaultProjectId = rows.some((r) => r.project?.id === contextProjectId)
+        ? contextProjectId!
+        : (rows[0]?.project?.id ?? null);
+      setSelectedProjectId(defaultProjectId);
 
       const ids = rows.map((r) => r.id);
       const grouped: Record<string, AnswerRow[]> = {};
@@ -152,7 +161,7 @@ export function ApplicationReviewModal({
     };
 
     load();
-  }, [open, applicationId]);
+  }, [open, applicationId, contextProjectId]);
 
   const selectedProject = rankings.find((r) => r.project?.id === selectedProjectId)?.project ?? null;
 
