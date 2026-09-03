@@ -52,6 +52,11 @@ function rankLabel(rank: number): string {
   return RANK_LABELS[rank] ?? `${rank}th choice`;
 }
 
+// Temporarily disables the Review button so nobody accepts/rejects applicants
+// early while project assignments are still being finalized. Flip back to
+// true once review should reopen.
+const REVIEWING_ENABLED = false;
+
 function isOpenNow(p: ApplicationPeriod): boolean {
   const now = Date.now();
   return p.status === "open" && new Date(p.starts_at).getTime() <= now && now < new Date(p.ends_at).getTime();
@@ -412,6 +417,8 @@ export default function ManagerApplicationsPage() {
                     <Button
                       size="sm"
                       variant="outline"
+                      disabled={!REVIEWING_ENABLED}
+                      title={REVIEWING_ENABLED ? undefined : "Review is temporarily disabled"}
                       onClick={() => setReviewFor({ id: a.id, name, status: a.status })}
                     >
                       Review
