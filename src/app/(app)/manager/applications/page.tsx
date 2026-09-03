@@ -30,6 +30,9 @@ type CoffeeState = "done" | "booked" | "none";
 // assigned to (or, for a full-access reviewer, has picked from all of them).
 type ReviewableProject = { id: string; name: string };
 
+// A current member of the selected project (left-hand roster column).
+type RosterMember = { user_id: string; name: string; isPm: boolean };
+
 type AppRow = {
   id: string;
   status: ReviewStatus;
@@ -147,6 +150,8 @@ export default function ManagerApplicationsPage() {
   // ones they PM. null = still loading.
   const [reviewableProjects, setReviewableProjects] = useState<ReviewableProject[] | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  // Everyone currently on the selected project (left column). null = loading.
+  const [roster, setRoster] = useState<RosterMember[] | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -186,6 +191,29 @@ export default function ManagerApplicationsPage() {
       return reviewableProjects[0]?.id ?? null;
     });
   }, [reviewableProjects]);
+
+  // Roster of the selected project (left column) — who's already on the team.
+  const loadRoster = useCallback(async (projectId: string) => {
+    const supabase = createClient();
+    const { data } = await supabase
+      .from("project_members")
+      .select("user_id, is_pm, members(user_id, preferred_firstname, lastname)")
+      .eq("project_id", projectId);
+    const list = ((data ?? []) as unknown as { user_id: string; is_pm: boolean; members: Applicant | null }[])
+      .map((r) => ({
+        user_id: r.user_id,
+        name: [r.members?.preferred_firstname, r.members?.lastname].filter(Boolean).join(" ") || "Member",
+        isPm: r.is_pm,
+      }))
+      .sort((a, b) => (a.isPm !== b.isPm ? (a.isPm ? -1 : 1) : a.name.localeCompare(b.name)));
+    setRoster(list);
+  }, []);
+
+  useEffect(() => {
+    if (!selectedProjectId) { setRoster(null); return; }
+    setRoster(null);
+    loadRoster(selectedProjectId);
+  }, [selectedProjectId, loadRoster]);
 
   // Exec-only period funnel stats, shown above the list.
   const loadStats = useCallback(async (periodId: string) => {
@@ -303,10 +331,13 @@ export default function ManagerApplicationsPage() {
   const onReviewed = (id: string, status: ReviewStatus) => {
     setApps((prev) => (prev ? prev.map((a) => (a.id === id ? { ...a, status } : a)) : prev));
     if (isExec && selectedPeriodId) loadStats(selectedPeriodId);
+    // Accepting adds the applicant to project_members — refresh the roster so
+    // they show up on the left without a full page reload.
+    if (status === "accepted" && selectedProjectId) loadRoster(selectedProjectId);
   };
 
   return (
-    <div className="w-full max-w-3xl mx-auto p-5 flex flex-col gap-6">
+    <div className="w-full max-w-5xl mx-auto p-5 flex flex-col gap-6">
       <div className="flex flex-col gap-1">
         <Link href="/manager" className="text-sm text-muted-foreground hover:text-foreground">← Back</Link>
         <h1 className="text-2xl font-bold">Applications</h1>
@@ -379,55 +410,88 @@ export default function ManagerApplicationsPage() {
       {/* Exec-only period funnel stats */}
       {isExec && selectedPeriodId && <ApplicationStats stats={stats} />}
 
-      {/* Applications list, grouped by rank (1st choice, 2nd choice, …) for the
-          selected project */}
+      {/* Split view: current team on the left, applicants left to review
+          (grouped by rank: 1st choice, 2nd choice, …) on the right */}
       {reviewableProjects?.length === 0 ? (
         <div className="px-4 py-10 text-center text-sm text-muted-foreground border rounded-xl">
           You aren&apos;t assigned to review any projects.
         </div>
-      ) : apps === null ? (
-        <ApplicationListSkeleton rows={4} />
-      ) : apps.length === 0 ? (
-        <div className="px-4 py-10 text-center text-sm text-muted-foreground border rounded-xl">
-          No submitted applications for this project yet.
-        </div>
       ) : (
-        <div className="flex flex-col gap-4">
-          {groupedApps.map(([rank, list]) => (
-            <div key={rank} className="flex flex-col gap-2.5">
-              <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                {rankLabel(rank)}
-              </h2>
-              {list.map((a) => {
-                const name = applicantName(a);
-                return (
-                  <div key={a.id} className="flex items-center gap-3 border rounded-xl px-4 py-3">
-                    <div className="flex flex-col gap-0.5 min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <PersonName userId={a.applicant?.user_id} name={name} className="text-sm font-medium" />
-                        <StatusBadge status={a.status} />
-                        <ReturningIndicator returning={a.returning} />
-                        <CoffeeChatIndicator state={a.coffee} />
-                        <InfosessionIndicator attended={a.infosession} />
-                      </div>
-                      <span className="text-xs text-muted-foreground truncate">
-                        {a.submitted_at ? `Submitted ${new Date(a.submitted_at).toLocaleDateString()}` : ""}
-                      </span>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={!REVIEWING_ENABLED}
-                      title={REVIEWING_ENABLED ? undefined : "Review is temporarily disabled"}
-                      onClick={() => setReviewFor({ id: a.id, name, status: a.status })}
-                    >
-                      Review
-                    </Button>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+          {/* Left: who's already on the team */}
+          <div className="flex flex-col gap-2.5">
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              On the team{roster ? ` (${roster.length})` : ""}
+            </h2>
+            {roster === null ? (
+              <ApplicationListSkeleton rows={3} />
+            ) : roster.length === 0 ? (
+              <div className="px-4 py-10 text-center text-sm text-muted-foreground border rounded-xl">
+                No one on this project yet.
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2.5">
+                {roster.map((m) => (
+                  <div key={m.user_id} className="flex items-center gap-2 border rounded-xl px-4 py-3">
+                    <PersonName userId={m.user_id} name={m.name} className="text-sm font-medium" />
+                    {m.isPm && <Badge variant="outline">PM</Badge>}
                   </div>
-                );
-              })}
-            </div>
-          ))}
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Right: applicants left to pick from */}
+          <div className="flex flex-col gap-2.5">
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Left to review
+            </h2>
+            {apps === null ? (
+              <ApplicationListSkeleton rows={4} />
+            ) : apps.length === 0 ? (
+              <div className="px-4 py-10 text-center text-sm text-muted-foreground border rounded-xl">
+                No submitted applications for this project yet.
+              </div>
+            ) : (
+              <div className="flex flex-col gap-4">
+                {groupedApps.map(([rank, list]) => (
+                  <div key={rank} className="flex flex-col gap-2.5">
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      {rankLabel(rank)}
+                    </h3>
+                    {list.map((a) => {
+                      const name = applicantName(a);
+                      return (
+                        <div key={a.id} className="flex items-center gap-3 border rounded-xl px-4 py-3">
+                          <div className="flex flex-col gap-0.5 min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <PersonName userId={a.applicant?.user_id} name={name} className="text-sm font-medium" />
+                              <StatusBadge status={a.status} />
+                              <ReturningIndicator returning={a.returning} />
+                              <CoffeeChatIndicator state={a.coffee} />
+                              <InfosessionIndicator attended={a.infosession} />
+                            </div>
+                            <span className="text-xs text-muted-foreground truncate">
+                              {a.submitted_at ? `Submitted ${new Date(a.submitted_at).toLocaleDateString()}` : ""}
+                            </span>
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={!REVIEWING_ENABLED}
+                            title={REVIEWING_ENABLED ? undefined : "Review is temporarily disabled"}
+                            onClick={() => setReviewFor({ id: a.id, name, status: a.status })}
+                          >
+                            Review
+                          </Button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
