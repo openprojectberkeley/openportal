@@ -50,6 +50,7 @@ type Profile = {
   tech_classes: string[] | null;
   tech_classes_other: string | null;
   about_note: string | null;
+  portfolio_url: string | null;
   resume_path: string | null;
   resume_filename: string | null;
 };
@@ -109,7 +110,7 @@ export function ApplicationReviewModal({
       // in a second query keyed on members.user_id.
       const { data: appRow } = await supabase
         .from("applications")
-        .select("applicant_id, tech_area_rankings, tech_classes, tech_classes_other, about_note")
+        .select("applicant_id, tech_area_rankings, tech_classes, tech_classes_other, about_note, portfolio_url")
         .eq("id", applicationId)
         .maybeSingle();
       let applicant: { resume_path: string | null; resume_filename: string | null } | null = null;
@@ -128,6 +129,7 @@ export function ApplicationReviewModal({
               tech_classes: (appRow.tech_classes as string[] | null) ?? null,
               tech_classes_other: (appRow.tech_classes_other as string | null) ?? null,
               about_note: (appRow.about_note as string | null) ?? null,
+              portfolio_url: (appRow.portfolio_url as string | null) ?? null,
               resume_path: applicant?.resume_path ?? null,
               resume_filename: applicant?.resume_filename ?? null,
             }
@@ -319,8 +321,9 @@ function ApplicantDetails({
   const classes = profile?.tech_classes ?? [];
   const other = profile?.tech_classes_other?.trim();
   const note = profile?.about_note?.trim();
+  const portfolioUrl = profile?.portfolio_url?.trim();
   const hasResume = !!profile?.resume_path;
-  const hasAny = ratedAreas.length > 0 || classes.length > 0 || !!other || !!note || hasResume;
+  const hasAny = ratedAreas.length > 0 || classes.length > 0 || !!other || !!note || hasResume || !!portfolioUrl;
 
   return (
     <div className="flex flex-col gap-3 rounded-xl border bg-muted/30 p-4">
@@ -367,6 +370,20 @@ function ApplicantDetails({
                 <FileText size={14} className="text-muted-foreground" />
                 {resumeOpening ? "Opening…" : profile?.resume_filename || "View resume"}
               </button>
+            </div>
+          )}
+
+          {portfolioUrl && (
+            <div className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-muted-foreground">Portfolio</span>
+              <a
+                href={portfolioUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="self-start text-sm text-primary underline underline-offset-2 break-all"
+              >
+                {portfolioUrl}
+              </a>
             </div>
           )}
 

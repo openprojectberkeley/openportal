@@ -99,6 +99,8 @@ export default function ApplicationPage() {
   const [resume, setResume] = useState<{ path: string; filename: string } | null>(null);
   const [resumeUploading, setResumeUploading] = useState(false);
   const [resumeError, setResumeError] = useState<string | null>(null);
+  // Optional portfolio link (e.g. for design applicants) — a plain URL, auto-saved like about_note.
+  const [portfolioUrl, setPortfolioUrl] = useState("");
 
   const [modalProject, setModalProject] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -140,7 +142,7 @@ export default function ApplicationPage() {
 
     const { data: app } = await supabase
       .from("applications")
-      .select("id, status, tech_area_rankings, tech_classes, tech_classes_other, about_note")
+      .select("id, status, tech_area_rankings, tech_classes, tech_classes_other, about_note, portfolio_url")
       .eq("applicant_id", user.id)
       .eq("period_id", periodId)
       .maybeSingle();
@@ -189,6 +191,7 @@ export default function ApplicationPage() {
       setTechClasses((app.tech_classes as string[] | null) ?? []);
       setTechClassesOther(app.tech_classes_other ?? "");
       setAboutNote(app.about_note ?? "");
+      setPortfolioUrl(app.portfolio_url ?? "");
     }
 
     // Hydrate an existing draft's ranking.
@@ -411,6 +414,7 @@ export default function ApplicationPage() {
 
   const onOtherChange = (v: string) => { setTechClassesOther(v); scheduleSave({ tech_classes_other: v }); };
   const onAboutChange = (v: string) => { setAboutNote(v); scheduleSave({ about_note: v }); };
+  const onPortfolioChange = (v: string) => { setPortfolioUrl(v); scheduleSave({ portfolio_url: v }); };
 
   // ---- Resume upload (Supabase Storage, one per person) -------------------
   const onResumeSelected = async (file: File) => {
@@ -674,6 +678,21 @@ export default function ApplicationPage() {
           error={resumeError}
           onSelect={onResumeSelected}
           onRemove={onResumeRemove}
+        />
+        <div className="flex flex-col gap-0.5 pt-1">
+          <Label className="text-sm font-medium" htmlFor="portfolio-url">Portfolio link</Label>
+          <span className="text-xs text-muted-foreground">
+            Optional · Designers, share a link to your portfolio (Behance, Dribbble, personal site, etc.).
+          </span>
+        </div>
+        <input
+          id="portfolio-url"
+          type="url"
+          inputMode="url"
+          value={portfolioUrl}
+          onChange={(e) => onPortfolioChange(e.target.value)}
+          placeholder="https://your-portfolio.com"
+          className="border rounded-md px-3 py-2 text-sm w-full bg-background focus:outline-none focus:ring-1 focus:ring-ring"
         />
       </section>
 
