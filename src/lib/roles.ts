@@ -3,12 +3,12 @@
 // Must match the role_name value in the roles table exactly.
 export const VP_TECH_ROLE_NAME = "VP Tech";
 export const PRESIDENT_ROLE_NAME = "President";
-export const VP_OF_PROJECTS_ROLE_NAME = "VP of Projects";
+export const VP_PROJECTS_ROLE_NAME = "VP Projects";
 
 // Role names granted VP Tech's special in-app capabilities (the "view as" role
 // simulation toggle; the coffee-chat booking window admin gated server-side by
 // is_vp_tech_or_president() in supabase/migrations/0047_president_vp_tech_parity.sql).
-// Keep in sync with that migration. Deliberately does NOT include VP of
+// Keep in sync with that migration. Deliberately does NOT include VP
 // Projects — that role only widens application-review scope, below.
 export const ELEVATED_ROLE_NAMES: string[] = [VP_TECH_ROLE_NAME, PRESIDENT_ROLE_NAME];
 
@@ -18,12 +18,12 @@ export function hasElevatedRole(roles: { role_name: string | null }[]): boolean 
 
 // Role names that can review applications for every project, not just ones
 // they PM. Mirrors public.can_review_all_projects() in
-// supabase/migrations/0056_project_scoped_application_review.sql — keep in
+// supabase/migrations/0057_project_scoped_application_review.sql — keep in
 // sync with that migration.
 export const FULL_ACCESS_REVIEW_ROLE_NAMES: string[] = [
   VP_TECH_ROLE_NAME,
   PRESIDENT_ROLE_NAME,
-  VP_OF_PROJECTS_ROLE_NAME,
+  VP_PROJECTS_ROLE_NAME,
 ];
 
 export function canReviewAllProjects(roles: { role_name: string | null }[]): boolean {

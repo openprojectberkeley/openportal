@@ -141,7 +141,7 @@ export default function ManagerApplicationsPage() {
   const [reviewFor, setReviewFor] = useState<{ id: string; name: string; status: ReviewStatus } | null>(null);
 
   // Which project(s) the current viewer may review: every project if they hold
-  // a full-access role (VP Tech/President/VP of Projects), otherwise only the
+  // a full-access role (VP Tech/President/VP Projects), otherwise only the
   // ones they PM. null = still loading.
   const [reviewableProjects, setReviewableProjects] = useState<ReviewableProject[] | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);

@@ -4,12 +4,12 @@
 -- applicant across every project. Now a reviewer can only see/act on an
 -- applicant's ranking for a project they PM (project_members.is_pm), unless
 -- they hold one of three org-wide roles that keep full visibility: VP Tech,
--- President (both already special-cased in 0004/0047), and VP of Projects
+-- President (both already special-cased in 0004/0047), and VP Projects
 -- (new here).
 --
---   1. is_vp_of_projects(): mirrors is_president() (0047).
+--   1. is_vp_projects(): mirrors is_president() (0047).
 --   2. can_review_all_projects(): is_vp_tech() or is_president() or
---      is_vp_of_projects(). The "sees everything" combinator.
+--      is_vp_projects(). The "sees everything" combinator.
 --   3. can_review_project(p_project_id): can_review_all_projects() or PM of
 --      that specific project. The scoped combinator every policy/RPC below
 --      calls instead of is_board_or_exec().
@@ -30,12 +30,12 @@
 -- Not touched: is_board_or_exec() itself (still gates the /manager route tree
 -- and set_member_status — the general admin status editor is a separate tool
 -- from project-scoped review, out of scope here) and the "view as" simulation
--- role list (src/lib/roles.ts ELEVATED_ROLE_NAMES) which VP of Projects is
+-- role list (src/lib/roles.ts ELEVATED_ROLE_NAMES) which VP Projects is
 -- deliberately not added to.
 
 -- 1-3. Role/authorization helpers ---------------------------------------------
 
-create or replace function public.is_vp_of_projects()
+create or replace function public.is_vp_projects()
 returns boolean
 language sql
 security definer
@@ -47,11 +47,11 @@ as $$
     from public.members_roles mr
     join public.roles r on r.id = mr.role_id
     where mr.user_id = auth.uid()
-      and r.role_name = 'VP of Projects'
+      and r.role_name = 'VP Projects'
   );
 $$;
 
-grant execute on function public.is_vp_of_projects() to authenticated;
+grant execute on function public.is_vp_projects() to authenticated;
 
 create or replace function public.can_review_all_projects()
 returns boolean
@@ -60,7 +60,7 @@ security definer
 set search_path = public
 stable
 as $$
-  select public.is_vp_tech() or public.is_president() or public.is_vp_of_projects();
+  select public.is_vp_tech() or public.is_president() or public.is_vp_projects();
 $$;
 
 grant execute on function public.can_review_all_projects() to authenticated;
