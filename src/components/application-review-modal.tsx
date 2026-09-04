@@ -18,10 +18,11 @@ import { techAreaLabel, techClassLabel } from "@/lib/application-profile";
 
 export type ReviewStatus = "submitted" | "accepted" | "rejected";
 
-// Temporarily disables Accept so nobody places an applicant onto a project
-// early while project assignments are still being finalized. Reviewing and
-// rejecting stay available. Flip back to true once accepting should reopen.
-const ACCEPTING_ENABLED = false;
+// Temporarily disables Accept and Reject so nobody decides an applicant's
+// outcome early while project assignments are still being finalized.
+// Reviewing (reading the application) stays available. Flip back to true
+// once decisions should reopen.
+const DECISIONS_ENABLED = false;
 
 const PROJECT_TYPE_LABELS: Record<string, string> = {
   studio: "OP Studio",
@@ -276,14 +277,19 @@ export function ApplicationReviewModal({
                     ))}
                 </DropdownMenuContent>
               </DropdownMenu>
-              <Button variant="outline" onClick={reject} disabled={working}>
+              <Button
+                variant="outline"
+                onClick={reject}
+                disabled={working || !DECISIONS_ENABLED}
+                title={DECISIONS_ENABLED ? undefined : "Review decisions are temporarily disabled"}
+              >
                 <X size={16} className="mr-1" />
                 Reject
               </Button>
               <Button
                 onClick={accept}
-                disabled={working || !selectedProjectId || !ACCEPTING_ENABLED}
-                title={ACCEPTING_ENABLED ? undefined : "Accepting is temporarily disabled"}
+                disabled={working || !selectedProjectId || !DECISIONS_ENABLED}
+                title={DECISIONS_ENABLED ? undefined : "Review decisions are temporarily disabled"}
               >
                 <Check size={16} className="mr-1" />
                 {working ? "Working…" : "Accept"}
