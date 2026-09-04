@@ -9,7 +9,10 @@ import {
   ELEVATED_ROLE_NAMES,
   VP_TECH_ROLE_NAME,
   PRESIDENT_ROLE_NAME,
+  VP_PROJECTS_ROLE_NAME,
+  FULL_ACCESS_REVIEW_ROLE_NAMES,
   hasElevatedRole,
+  canReviewAllProjects,
   isPersona,
   accessIsBoardOrExec,
   accessIsExec,
@@ -54,6 +57,61 @@ describe("hasElevatedRole", () => {
   it("does not false-positive on a substring/case match", () => {
     expect(hasElevatedRole([{ role_name: "vp tech" }])).toBe(false);
     expect(hasElevatedRole([{ role_name: "Vice President" }])).toBe(false);
+  });
+});
+
+// canReviewAllProjects is the mechanism behind
+// supabase/migrations/0057_project_scoped_application_review.sql's
+// can_review_all_projects(): VP Tech, President, and VP Projects keep full
+// cross-project application-review visibility; everyone else (including a PM,
+// and including a plain "exec" access_level with none of these three roles)
+// is scoped to only the project(s) they PM. Keep this in sync with that
+// migration's role-name list.
+describe("FULL_ACCESS_REVIEW_ROLE_NAMES", () => {
+  it("is exactly VP Tech, President, and VP Projects, matching migration 0057's can_review_all_projects()", () => {
+    expect(FULL_ACCESS_REVIEW_ROLE_NAMES).toEqual(["VP Tech", "President", "VP Projects"]);
+    expect(FULL_ACCESS_REVIEW_ROLE_NAMES).toContain(VP_TECH_ROLE_NAME);
+    expect(FULL_ACCESS_REVIEW_ROLE_NAMES).toContain(PRESIDENT_ROLE_NAME);
+    expect(FULL_ACCESS_REVIEW_ROLE_NAMES).toContain(VP_PROJECTS_ROLE_NAME);
+  });
+});
+
+describe("canReviewAllProjects", () => {
+  it("is true for VP Tech", () => {
+    expect(canReviewAllProjects([{ role_name: "VP Tech" }])).toBe(true);
+  });
+
+  it("is true for President", () => {
+    expect(canReviewAllProjects([{ role_name: "President" }])).toBe(true);
+  });
+
+  it("is true for VP Projects", () => {
+    expect(canReviewAllProjects([{ role_name: "VP Projects" }])).toBe(true);
+  });
+
+  it("is true when the full-access role is one of several", () => {
+    expect(
+      canReviewAllProjects([{ role_name: "Member" }, { role_name: "PM" }, { role_name: "VP Projects" }]),
+    ).toBe(true);
+  });
+
+  it("is false for a plain PM or generic exec/board role — those are project-scoped, not full-access", () => {
+    expect(canReviewAllProjects([{ role_name: "PM" }])).toBe(false);
+    expect(canReviewAllProjects([{ role_name: "Exec" }])).toBe(false);
+    expect(canReviewAllProjects([{ role_name: "Board" }])).toBe(false);
+  });
+
+  it("is false for an empty role list", () => {
+    expect(canReviewAllProjects([])).toBe(false);
+  });
+
+  it("is false when every role_name is null", () => {
+    expect(canReviewAllProjects([{ role_name: null }, { role_name: null }])).toBe(false);
+  });
+
+  it("does not false-positive on a substring/case match", () => {
+    expect(canReviewAllProjects([{ role_name: "vp projects" }])).toBe(false);
+    expect(canReviewAllProjects([{ role_name: "VP of Projects" }])).toBe(false);
   });
 });
 

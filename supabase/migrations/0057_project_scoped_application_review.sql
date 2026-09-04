@@ -18,6 +18,11 @@
 --      per-row/joined can_review_project() check, so a scoped reviewer only
 --      ever sees rows tied to a project they can review. `ranked = true`
 --      only — an un-ranked (removed) choice isn't something to review.
+--      applications_select's check goes through the new SECURITY DEFINER
+--      application_has_reviewable_ranking() rather than a raw subquery on
+--      application_rankings, to avoid infinite RLS recursion (that table's own
+--      SELECT policy checks back into applications for the applicant-owner
+--      branch — same fix pattern as is_project_member() in 0033).
 --   5. accept_application(): now requires can_review_project(p_project_id)
 --      instead of is_board_or_exec() — a reviewer can only place an applicant
 --      onto a project they can review. Placement still sets members.status =
@@ -84,6 +89,31 @@ $$;
 
 grant execute on function public.can_review_project(uuid) to authenticated;
 
+-- application_has_reviewable_ranking(): SECURITY DEFINER so this inner read of
+-- application_rankings bypasses that table's own RLS — applications_select
+-- (below) needs to check application_rankings, and application_rankings_select
+-- (further below) needs to check applications right back; without a definer
+-- function breaking one side of that cycle, evaluating either policy recurses
+-- into the other forever ("infinite recursion detected in policy for relation
+-- application_rankings"). Same pattern as is_project_member() in
+-- 0033_project_members_scope.sql.
+create or replace function public.application_has_reviewable_ranking(p_application_id uuid)
+returns boolean
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select exists (
+    select 1 from public.application_rankings r
+    where r.application_id = p_application_id
+      and r.ranked
+      and public.can_review_project(r.project_id)
+  );
+$$;
+
+grant execute on function public.application_has_reviewable_ranking(uuid) to authenticated;
+
 -- 4. Scope SELECT policies to reviewable projects -----------------------------
 
 drop policy if exists "applications_select" on public.applications;
@@ -94,12 +124,7 @@ to authenticated
 using (
   applicant_id = auth.uid()
   or public.can_review_all_projects()
-  or exists (
-    select 1 from public.application_rankings r
-    where r.application_id = applications.id
-      and r.ranked
-      and public.can_review_project(r.project_id)
-  )
+  or public.application_has_reviewable_ranking(applications.id)
 );
 
 drop policy if exists "application_rankings_select" on public.application_rankings;
