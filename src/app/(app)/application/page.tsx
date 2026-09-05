@@ -467,7 +467,9 @@ export default function ApplicationPage() {
   const studioMet = (projectId: string) => (pmMap[projectId] ?? []).some((pm) => chattedWith.has(pm.user_id));
   // An OP Studio project may mark its coffee chat as required (per-project toggle,
   // set by its PM). A ranked project whose chat is required and not yet completed
-  // with one of its PMs blocks submission; recommended-only chats just warn.
+  // with one of its PMs no longer blocks submission — the applicant is warned in the
+  // submit dialog that they won't be considered for it without the chat. Recommended
+  // (non-required) chats just nudge on the card.
   const studioChatMissing = (projectId: string) => {
     const p = projectById(projectId);
     return !!p && p.type === "studio" && p.coffee_chat_required && !studioMet(projectId);
@@ -475,8 +477,10 @@ export default function ApplicationPage() {
   // Only the top requiredTarget ranked projects need their writing finished.
   const allCompleted = ranked.length > 0 && ranked.slice(0, requiredTarget).every((id) => completedByProject[id]);
   const rankingReady = ranked.length === rankTarget && allCompleted;
-  const coffeeChatsSatisfied = ranked.every((id) => !studioChatMissing(id));
-  const canSubmit = rankingReady && coffeeChatsSatisfied;
+  // Ranked projects with a required-but-incomplete coffee chat — surfaced as a
+  // warning in the submit dialog, but they don't prevent submitting.
+  const missingRequiredChats = ranked.filter((id) => studioChatMissing(id));
+  const canSubmit = rankingReady;
 
   // ---- Drag orchestration (multi-container sortable) ----------------------
   // Both lists are sortable containers; `dragRanked` is mutated live on hover so
@@ -800,13 +804,7 @@ export default function ApplicationPage() {
           <p className="text-xs text-muted-foreground">
             {ranked.length !== rankTarget
               ? `Rank ${rankTarget === RANK_COUNT ? "exactly" : "all"} ${rankTarget} project${rankTarget === 1 ? "" : "s"} (${ranked.length} selected).`
-              : !rankingReady
-                ? `Complete the questions for your top ${requiredTarget} ranked project${requiredTarget === 1 ? "" : "s"}.`
-                : `Book a coffee chat with a PM for ${ranked
-                    .filter((id) => studioChatMissing(id))
-                    .map((id) => projectById(id)?.name)
-                    .filter(Boolean)
-                    .join(", ")} before submitting.`}
+              : `Complete the questions for your top ${requiredTarget} ranked project${requiredTarget === 1 ? "" : "s"}.`}
           </p>
         )}
         <div className="flex justify-end">
@@ -825,7 +823,29 @@ export default function ApplicationPage() {
         cancelLabel="Cancel"
         destructive={false}
         onConfirm={submit}
-      />
+      >
+        {missingRequiredChats.length > 0 && (
+          <div className="flex items-start gap-2 text-xs rounded-md px-3 py-2.5 text-amber-600 dark:text-amber-500 bg-amber-500/10">
+            <AlertTriangle size={15} className="flex-shrink-0 mt-0.5" />
+            <p className="flex-1">
+              You haven&apos;t completed a required coffee chat for{" "}
+              {missingRequiredChats.map((id, i) => {
+                const pms = pmMap[id] ?? [];
+                return (
+                  <Fragment key={id}>
+                    {i > 0 && (i === missingRequiredChats.length - 1 ? " and " : ", ")}
+                    <span className="font-semibold">{projectById(id)?.name}</span>
+                    {pms.length > 0 && ` (${pms.map((pm) => pm.name).join(", ")})`}
+                  </Fragment>
+                );
+              })}
+              . You can still submit, but you must complete a coffee chat with a PM for{" "}
+              {missingRequiredChats.length === 1 ? "that project" : "those projects"} to be
+              considered for {missingRequiredChats.length === 1 ? "it" : "them"}.
+            </p>
+          </div>
+        )}
+      </ConfirmDialog>
 
       {modalProject && rankingIdByProject[modalProject] && (
         <ProjectApplicationModal

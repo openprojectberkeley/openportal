@@ -1,4 +1,5 @@
 import { AppNavbar } from "@/components/app-navbar";
+import { DeadlineCountdownBanner } from "@/components/deadline-countdown-banner";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { PortalMetaProvider } from "@/components/portal-meta-provider";
 import { NotificationsProvider } from "@/components/notifications-provider";
@@ -14,6 +15,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <TimezoneSync />
       <main className="flex min-h-svh flex-col">
         <AppNavbar />
+        <DeadlineCountdownBanner />
         {/* Content region fills the space between the sticky header and the
             footer. Fit pages use `flex-1` to fill/center it (no scroll); taller
             pages grow it and the window scrolls. */}
