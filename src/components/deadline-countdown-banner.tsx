@@ -44,12 +44,15 @@ export function DeadlineCountdownBanner() {
   const pathname = usePathname();
   const [mounted, setMounted] = useState(false);
   const [period, setPeriod] = useState<OpenPeriod | null>(null);
-  const [now, setNow] = useState(() => Date.now());
+  // Starts at 0 (stable for prerender); the real clock is read after mount to
+  // avoid Next's non-deterministic `Date.now()`-during-render warning.
+  const [now, setNow] = useState(0);
 
   const onManager = pathname?.startsWith("/manager") ?? false;
 
   useEffect(() => {
     setMounted(true);
+    setNow(Date.now());
   }, []);
 
   // Fetch the current open period (mirrors the query in application/page.tsx,

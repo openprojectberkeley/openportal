@@ -6,7 +6,7 @@ import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { ShieldCheck, ArrowRight, Check, Coffee, FileText, Users, X } from "lucide-react";
 import { useRoleSim } from "@/components/role-simulation-provider";
-import { initials } from "@/components/person-profile-provider";
+import { initials, PersonName } from "@/components/person-profile-provider";
 import { PortalCard, type PortalSummary } from "@/components/portal-card";
 import { CalendarPanel } from "@/components/calendar-panel";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -25,6 +25,7 @@ type PendingChat = {
   id: string;
   meeting_time: string;
   location: string | null;
+  userId: string;
   name: string;
   avatarUrl: string | null;
 };
@@ -155,6 +156,7 @@ export default function HomePage() {
             id: r.id,
             meeting_time: r.meeting_time,
             location: r.location,
+            userId: r.applicant_id as string,
             name: r.applicant_id ? nameMap.get(r.applicant_id) ?? "Unknown" : "Unknown",
             avatarUrl: r.applicant_id ? avatarMap.get(r.applicant_id) ?? null : null,
           })),
@@ -333,7 +335,12 @@ export default function HomePage() {
                     </span>
                   )}
                   <div className="flex min-w-0 flex-1 flex-col">
-                    <span className="truncate text-sm font-medium">{chat.name}</span>
+                    <PersonName
+                      userId={chat.userId}
+                      name={chat.name}
+                      preloaded={{ avatar_url: chat.avatarUrl }}
+                      className="truncate text-sm font-medium"
+                    />
                     <span className="truncate text-xs text-muted-foreground">
                       {formatChatTime(chat.meeting_time)}
                       {chat.location ? ` · ${chat.location}` : ""}
