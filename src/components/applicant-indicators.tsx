@@ -1,4 +1,4 @@
-import { Coffee, Check, Clock, Presentation } from "lucide-react";
+import { Coffee, Check, Clock, Presentation, FileCheck } from "lucide-react";
 
 // Coffee-chat progress for an applicant: "done" once any chat is completed,
 // "booked" while one is booked but not yet completed, "none" if never booked.
@@ -34,6 +34,22 @@ export function InfosessionIndicator({ attended }: { attended?: boolean | null }
     >
       <Presentation size={14} />
       <Check size={12} className="stroke-[3]" />
+    </span>
+  );
+}
+
+// File-with-check icon once the person has a submitted (non-draft) application in
+// the current application period; nothing otherwise (or when the value is absent,
+// e.g. a viewer who isn't an application manager).
+export function SubmittedApplicationIndicator({ submitted }: { submitted?: boolean | null }) {
+  if (!submitted) return null;
+  return (
+    <span
+      title="Submitted an application"
+      aria-label="Submitted an application"
+      className="inline-flex items-center gap-0.5 text-violet-600"
+    >
+      <FileCheck size={14} />
     </span>
   );
 }
