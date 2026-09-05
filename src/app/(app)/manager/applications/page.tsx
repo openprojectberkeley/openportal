@@ -3,7 +3,7 @@
 import { createClient } from "@/lib/supabase/client";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { ChevronDown, SlidersHorizontal, RotateCcw } from "lucide-react";
+import { ChevronDown, SlidersHorizontal, RotateCcw, BarChart3 } from "lucide-react";
 import { useRoleSim } from "@/components/role-simulation-provider";
 import { PersonName } from "@/components/person-profile-provider";
 import { canReviewAllProjects } from "@/lib/roles";
@@ -19,6 +19,10 @@ import { ApplicationListSkeleton } from "@/components/skeletons";
 import { ApplicationPeriodsDialog, type ApplicationPeriod } from "@/components/application-periods-dialog";
 import { ApplicationReviewModal, type ReviewStatus } from "@/components/application-review-modal";
 import { ApplicationStats, type Stats } from "@/components/application-stats";
+import { ApplicationAnalyticsModal } from "@/components/application-analytics-modal";
+import { ProjectRankDistribution } from "@/components/project-rank-distribution";
+import { ProjectAnalyticsModal } from "@/components/project-analytics-modal";
+import { rankLabel } from "@/lib/application-rank";
 import { CoffeeChatIndicator, InfosessionIndicator, type CoffeeState } from "@/components/applicant-indicators";
 
 type Applicant = { user_id: string; preferred_firstname: string | null; lastname: string | null };
@@ -43,14 +47,6 @@ type AppRow = {
   // Applicant checked in to at least one info session.
   infosession: boolean;
 };
-
-const RANK_LABELS: Record<number, string> = {
-  1: "1st choice", 2: "2nd choice", 3: "3rd choice", 4: "4th choice",
-  5: "5th choice", 6: "6th choice", 7: "7th choice",
-};
-function rankLabel(rank: number): string {
-  return RANK_LABELS[rank] ?? `${rank}th choice`;
-}
 
 function isOpenNow(p: ApplicationPeriod): boolean {
   const now = Date.now();
@@ -102,6 +98,8 @@ export default function ManagerApplicationsPage() {
   const [apps, setApps] = useState<AppRow[] | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
   const [periodsDialogOpen, setPeriodsDialogOpen] = useState(false);
+  const [analyticsOpen, setAnalyticsOpen] = useState(false);
+  const [projAnalyticsOpen, setProjAnalyticsOpen] = useState(false);
   const [reviewFor, setReviewFor] = useState<{ id: string; name: string; status: ReviewStatus } | null>(null);
 
   // Which project(s) the current viewer may review: every project if they hold
@@ -287,6 +285,10 @@ export default function ManagerApplicationsPage() {
         .sort((x, y) => x[0] - y[0])
     : [];
 
+  // Rank breakdown for the selected project (count of applicants per rank),
+  // shown inline in the left column below the roster.
+  const rankDistribution = groupedApps.map(([rank, list]) => ({ rank, count: list.length }));
+
   const onReviewed = (id: string, status: ReviewStatus) => {
     setApps((prev) => (prev ? prev.map((a) => (a.id === id ? { ...a, status } : a)) : prev));
     if (isExec && selectedPeriodId) loadStats(selectedPeriodId);
@@ -338,36 +340,72 @@ export default function ManagerApplicationsPage() {
             Manage periods
           </Button>
         )}
-      </div>
 
-      {/* Project bar: which project's applicants you're reviewing */}
-      {reviewableProjects === null ? (
-        <div className="h-9 w-48 rounded-md bg-muted animate-pulse" />
-      ) : reviewableProjects.length === 0 ? null : reviewableProjects.length === 1 ? (
-        <span className="text-sm text-muted-foreground">
-          Reviewing for <span className="font-medium text-foreground">{reviewableProjects[0].name}</span>
-        </span>
-      ) : (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button className="flex items-center gap-2 self-start border rounded-md px-3 py-2 text-sm bg-background hover:bg-accent transition-colors">
-              <span className="text-muted-foreground">Reviewing for</span>
-              <span className="font-medium">{selectedProject?.name ?? "Select project"}</span>
-              <ChevronDown size={14} className="text-muted-foreground" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start">
-            {reviewableProjects.map((p) => (
-              <DropdownMenuItem key={p.id} onSelect={() => setSelectedProjectId(p.id)}>
-                {p.name}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      )}
+        {isExec && selectedPeriodId && (
+          <Button variant="outline" size="sm" onClick={() => setAnalyticsOpen(true)}>
+            <BarChart3 size={14} className="mr-1.5" />
+            View analytics
+          </Button>
+        )}
+      </div>
 
       {/* Exec-only period funnel stats */}
       {isExec && selectedPeriodId && <ApplicationStats stats={stats} />}
+
+      {/* Project bar: which project's applicants you're reviewing — sits right
+          above the split view so it reads as a header for the applicant lists. */}
+      {reviewableProjects !== null && reviewableProjects.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3">
+          {reviewableProjects.length === 1 ? (
+            <span className="text-sm text-muted-foreground">
+              Reviewing for <span className="font-medium text-foreground">{reviewableProjects[0].name}</span>
+            </span>
+          ) : (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="flex items-center gap-2 self-start border rounded-md px-3 py-2 text-sm bg-background hover:bg-accent transition-colors">
+                  <span className="text-muted-foreground">Reviewing for</span>
+                  <span className="font-medium">{selectedProject?.name ?? "Select project"}</span>
+                  <ChevronDown size={14} className="text-muted-foreground" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                {reviewableProjects.map((p) => (
+                  <DropdownMenuItem key={p.id} onSelect={() => setSelectedProjectId(p.id)}>
+                    {p.name}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+
+          {isExec && selectedPeriodId && (
+            <Button variant="outline" size="sm" onClick={() => setProjAnalyticsOpen(true)}>
+              <BarChart3 size={14} className="mr-1.5" />
+              Project analytics
+            </Button>
+          )}
+        </div>
+      )}
+      {reviewableProjects === null && <div className="h-9 w-48 rounded-md bg-muted animate-pulse" />}
+
+      {isExec && (
+        <ProjectAnalyticsModal
+          open={projAnalyticsOpen}
+          onOpenChange={setProjAnalyticsOpen}
+          periodId={selectedPeriodId}
+          periodName={selectedPeriod?.name}
+        />
+      )}
+
+      {isExec && (
+        <ApplicationAnalyticsModal
+          open={analyticsOpen}
+          onOpenChange={setAnalyticsOpen}
+          periods={periods ?? []}
+          initialPeriodId={selectedPeriodId}
+        />
+      )}
 
       {/* Split view: current team on the left, applicants left to review
           (grouped by rank: 1st choice, 2nd choice, …) on the right */}
@@ -397,6 +435,10 @@ export default function ManagerApplicationsPage() {
                   </div>
                 ))}
               </div>
+            )}
+
+            {apps && apps.length > 0 && (
+              <ProjectRankDistribution distribution={rankDistribution} total={apps.length} />
             )}
           </div>
 
