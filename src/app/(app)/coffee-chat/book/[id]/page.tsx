@@ -155,7 +155,16 @@ function BookingPageInner() {
         setError("That time is no longer available. Please pick another.");
         await loadSlots();
         setSelected(null);
+      } else if (msg.includes("not_authenticated")) {
+        // The client thought we were signed in (getUser above passed), but the
+        // RPC saw auth.uid() as null — the session token wasn't attached to the
+        // request (expired/unrefreshed session, or storage blocked in an in-app
+        // browser). Tell the user how to recover rather than "try again".
+        setError("Your session has expired. Please sign out and sign in again to book.");
       } else {
+        // Unmapped failure. Surface the raw reason to the console so we can see
+        // what these bookings are actually hitting instead of masking it.
+        console.error("book_coffee_chat failed:", bookError);
         setError("Couldn't book that time. Please try again.");
       }
       setBooking(false);

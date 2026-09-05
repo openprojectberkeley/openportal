@@ -13,6 +13,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import { IconPicker } from "@/components/icon-picker";
 import { ColorPicker } from "@/components/color-picker";
 import { ProjectQuestionsDialog } from "@/components/project-questions-dialog";
@@ -37,6 +38,7 @@ type Fields = {
   icon: string;
   iconUrl: string | null;
   color: string;
+  coffeeChatRequired: boolean;
 };
 
 const toIntOrNull = (s: string) => {
@@ -70,7 +72,7 @@ export function ProjectEditDialog({ projectId, open, onOpenChange, onSaved, canE
     const supabase = createClient();
     supabase
       .from("projects")
-      .select("name, client, description, type, difficulty, estimated_members, num_subteams, icon, icon_url, color")
+      .select("name, client, description, type, difficulty, estimated_members, num_subteams, icon, icon_url, color, coffee_chat_required")
       .eq("id", projectId)
       .maybeSingle()
       .then(({ data }) => {
@@ -86,6 +88,7 @@ export function ProjectEditDialog({ projectId, open, onOpenChange, onSaved, canE
             icon: data.icon ?? "",
             iconUrl: (data.icon_url as string | null) ?? null,
             color: data.color ?? "",
+            coffeeChatRequired: (data.coffee_chat_required as boolean | null) ?? true,
           });
         }
         setLoading(false);
@@ -117,6 +120,7 @@ export function ProjectEditDialog({ projectId, open, onOpenChange, onSaved, canE
         icon: fields.icon.trim() || null,
         icon_url: fields.iconUrl || null,
         color: fields.color.trim() || null,
+        coffee_chat_required: fields.coffeeChatRequired,
         updated_at: new Date().toISOString(),
       })
       .eq("id", projectId);
@@ -194,6 +198,25 @@ export function ProjectEditDialog({ projectId, open, onOpenChange, onSaved, canE
                 placeholder={fields.type === "studio" ? "Required for OP Studio" : "Optional"}
               />
             </div>
+            {fields.type === "studio" && (
+              <div className="flex items-center justify-between gap-3 rounded-md border px-3 py-2">
+                <div className="flex flex-col">
+                  <Label htmlFor="pe-coffee" className="cursor-pointer">
+                    Coffee chat {fields.coffeeChatRequired ? "required" : "recommended"}
+                  </Label>
+                  <span className="text-xs text-muted-foreground">
+                    {fields.coffeeChatRequired
+                      ? "Applicants must chat with a PM before they can submit."
+                      : "Applicants are encouraged to chat with a PM, but it won't block them."}
+                  </span>
+                </div>
+                <Switch
+                  id="pe-coffee"
+                  checked={fields.coffeeChatRequired}
+                  onCheckedChange={(v) => setFields((f) => (f ? { ...f, coffeeChatRequired: v === true } : f))}
+                />
+              </div>
+            )}
             <div className="grid grid-cols-3 gap-3">
               <div className="flex flex-col gap-1">
                 <Label>Difficulty</Label>

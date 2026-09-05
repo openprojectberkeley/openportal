@@ -42,6 +42,7 @@ type Project = {
   icon: string | null;
   icon_url: string | null;
   color: string | null;
+  coffee_chat_required: boolean;
 };
 
 type Pm = { user_id: string; name: string };
@@ -153,7 +154,7 @@ export default function ApplicationPage() {
     const [{ data: projectRows }, { data: pmRows }, { data: chatRows }, { data: memberRow }] = await Promise.all([
       supabase
         .from("projects")
-        .select("id, name, type, client, description, difficulty, estimated_members, num_subteams, icon, icon_url, color")
+        .select("id, name, type, client, description, difficulty, estimated_members, num_subteams, icon, icon_url, color, coffee_chat_required")
         .order("name"),
       supabase
         .from("project_members")
@@ -453,12 +454,18 @@ export default function ApplicationPage() {
 
   const projectById = (id: string) => projects.find((p) => p.id === id);
   const studioMet = (projectId: string) => (pmMap[projectId] ?? []).some((pm) => chattedWith.has(pm.user_id));
-  // Coffee chats are encouraged for OP Studio picks — the card badges warn when
-  // one is still needed — but they no longer block submission.
+  // An OP Studio project may mark its coffee chat as required (per-project toggle,
+  // set by its PM). A ranked project whose chat is required and not yet completed
+  // with one of its PMs blocks submission; recommended-only chats just warn.
+  const studioChatMissing = (projectId: string) => {
+    const p = projectById(projectId);
+    return !!p && p.type === "studio" && p.coffee_chat_required && !studioMet(projectId);
+  };
   // Only the top REQUIRED_COUNT ranked projects need their writing finished.
   const allCompleted = ranked.length > 0 && ranked.slice(0, REQUIRED_COUNT).every((id) => completedByProject[id]);
   const rankingReady = ranked.length === RANK_COUNT && allCompleted;
-  const canSubmit = rankingReady;
+  const coffeeChatsSatisfied = ranked.every((id) => !studioChatMissing(id));
+  const canSubmit = rankingReady && coffeeChatsSatisfied;
 
   // ---- Drag orchestration (multi-container sortable) ----------------------
   // Both lists are sortable containers; `dragRanked` is mutated live on hover so
@@ -762,7 +769,13 @@ export default function ApplicationPage() {
           <p className="text-xs text-muted-foreground">
             {ranked.length !== RANK_COUNT
               ? `Rank exactly ${RANK_COUNT} projects (${ranked.length} selected).`
-              : `Complete the questions for your top ${REQUIRED_COUNT} ranked projects.`}
+              : !rankingReady
+                ? `Complete the questions for your top ${REQUIRED_COUNT} ranked projects.`
+                : `Book a coffee chat with a PM for ${ranked
+                    .filter((id) => studioChatMissing(id))
+                    .map((id) => projectById(id)?.name)
+                    .filter(Boolean)
+                    .join(", ")} before submitting.`}
           </p>
         )}
         <div className="flex justify-end">
@@ -1110,17 +1123,40 @@ function CardContent({
         )}
 
         {variant === "available" && project.type === "studio" && (
-          <div className={`flex items-center gap-1.5 text-[11px] pl-6 ${met ? "text-green-700 dark:text-green-400" : "text-amber-600 dark:text-amber-500"}`}>
+          <div
+            className={`flex items-center gap-1.5 text-[11px] pl-6 ${
+              met
+                ? "text-green-700 dark:text-green-400"
+                : project.coffee_chat_required
+                  ? "text-amber-600 dark:text-amber-500"
+                  : "text-muted-foreground"
+            }`}
+          >
             {met ? <Check size={12} /> : <Coffee size={12} />}
-            {met ? "Coffee chat complete" : "Coffee chat needed"}
+            {met
+              ? "Coffee chat complete"
+              : project.coffee_chat_required
+                ? "Coffee chat needed"
+                : "Coffee chat recommended"}
           </div>
         )}
 
         {variant === "ranked" && studioNeedsChat && (
-          <div className="flex items-center gap-2 text-xs text-amber-600 dark:text-amber-500 bg-amber-500/10 rounded-md px-3 py-2">
-            <AlertTriangle size={14} className="flex-shrink-0" />
+          <div
+            className={`flex items-center gap-2 text-xs rounded-md px-3 py-2 ${
+              project.coffee_chat_required
+                ? "text-amber-600 dark:text-amber-500 bg-amber-500/10"
+                : "text-muted-foreground bg-muted"
+            }`}
+          >
+            {project.coffee_chat_required ? (
+              <AlertTriangle size={14} className="flex-shrink-0" />
+            ) : (
+              <Coffee size={14} className="flex-shrink-0" />
+            )}
             <span className="flex-1">
-              Coffee chat with a PM{pms && pms.length ? ` (${pms.map((pm) => pm.name).join(", ")})` : ""} required.
+              Coffee chat with a PM{pms && pms.length ? ` (${pms.map((pm) => pm.name).join(", ")})` : ""}{" "}
+              {project.coffee_chat_required ? "required." : "recommended."}
             </span>
             <Link
               href="/coffee-chat"
