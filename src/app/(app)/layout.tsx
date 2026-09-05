@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { AppNavbar } from "@/components/app-navbar";
 import { DeadlineCountdownBanner } from "@/components/deadline-countdown-banner";
 import { ThemeSwitcher } from "@/components/theme-switcher";
@@ -15,7 +16,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <TimezoneSync />
       <main className="flex min-h-svh flex-col">
         <AppNavbar />
-        <DeadlineCountdownBanner />
+        {/* usePathname() inside the banner is dynamic; a Suspense boundary lets
+            the rest of the route prerender (fallback is null since the banner
+            renders nothing until mounted anyway). */}
+        <Suspense fallback={null}>
+          <DeadlineCountdownBanner />
+        </Suspense>
         {/* Content region fills the space between the sticky header and the
             footer. Fit pages use `flex-1` to fill/center it (no scroll); taller
             pages grow it and the window scrolls. */}
