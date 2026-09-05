@@ -68,17 +68,19 @@ describe("getHomeView", () => {
 });
 
 describe("shouldShowReapplyBanner", () => {
-  // Any returning (active or rolled-off/inactive), non-staff member gets the
-  // re-apply prompt.
+  // Shown to anyone on the dashboard rather than the first-time checklist: any
+  // returning (active or rolled-off/inactive) member, OR any board/exec/PM
+  // regardless of status (they may apply to an additional/new project). Only a
+  // first-time non_member non-staff user is steered to the checklist instead.
   const cases: [MemberStatus, boolean, boolean][] = [
     ["active", false, true],
-    ["active", true, false],
+    ["active", true, true],
     ["inactive", false, true],
-    ["inactive", true, false],
+    ["inactive", true, true],
     ["non_member", false, false],
-    ["non_member", true, false],
+    ["non_member", true, true],
     ["blacklisted", false, false],
-    ["blacklisted", true, false],
+    ["blacklisted", true, true],
   ];
 
   for (const [status, isBoardOrExec, expected] of cases) {

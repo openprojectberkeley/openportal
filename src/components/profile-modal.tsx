@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/overlay-scrollbar";
 import { initials, ProjectBadge, type OpenTarget, type PublicProfile } from "@/components/person-profile-provider";
+import { CoffeeChatIndicator, InfosessionIndicator } from "@/components/applicant-indicators";
 import { sortRoles } from "@/lib/role-order";
 import { MEMBER_STATUS_BADGE_LABEL } from "@/lib/member-status";
 
@@ -128,6 +129,8 @@ export function ProfileModal({ target, cached, onLoaded, onClose }: Props) {
                     {MEMBER_STATUS_BADGE_LABEL[merged.status]}
                   </span>
                 )}
+                <CoffeeChatIndicator state={merged.coffee_chat} />
+                <InfosessionIndicator attended={merged.infosession_attended} />
               </div>
             </div>
           </div>

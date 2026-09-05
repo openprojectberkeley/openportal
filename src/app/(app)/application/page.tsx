@@ -121,6 +121,13 @@ export default function ApplicationPage() {
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
+  // How many projects the applicant must rank / write for. Normally RANK_COUNT /
+  // REQUIRED_COUNT, but capped by how many projects are actually available to
+  // them (projects list already excludes ones they're on) so a member already on
+  // projects — or a club with few projects — can still complete and submit.
+  const rankTarget = Math.min(RANK_COUNT, projects.length);
+  const requiredTarget = Math.min(REQUIRED_COUNT, rankTarget);
+
   const load = useCallback(async () => {
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
@@ -151,7 +158,7 @@ export default function ApplicationPage() {
     // Already applied this period (submitted, or reviewed accepted/rejected).
     if (app?.status && app.status !== "draft") { setSubmitted(true); setLoading(false); return; }
 
-    const [{ data: projectRows }, { data: pmRows }, { data: chatRows }, { data: memberRow }] = await Promise.all([
+    const [{ data: projectRows }, { data: pmRows }, { data: chatRows }, { data: memberRow }, { data: myProjectRows }] = await Promise.all([
       supabase
         .from("projects")
         .select("id, name, type, client, description, difficulty, estimated_members, num_subteams, icon, icon_url, color, coffee_chat_required")
@@ -166,6 +173,9 @@ export default function ApplicationPage() {
         .eq("applicant_id", user.id)
         .eq("complete", true),
       supabase.from("members").select("resume_path, resume_filename").eq("user_id", user.id).maybeSingle(),
+      // Projects this user is already on — hidden from the ranking so they only
+      // apply to additional/new projects they aren't in yet.
+      supabase.from("project_members").select("project_id").eq("user_id", user.id),
     ]);
 
     setResume(
@@ -182,7 +192,8 @@ export default function ApplicationPage() {
       (map[row.project_id] ??= []).push({ user_id: m.user_id, name });
     }
 
-    setProjects((projectRows ?? []) as Project[]);
+    const myProjectIds = new Set((myProjectRows ?? []).map((r) => r.project_id));
+    setProjects(((projectRows ?? []) as Project[]).filter((p) => !myProjectIds.has(p.id)));
     setPmMap(map);
     setChattedWith(new Set((chatRows ?? []).map((c) => c.member_id)));
 
@@ -292,7 +303,7 @@ export default function ApplicationPage() {
 
   // The `+` button on an available card — append to the ranking.
   const addProject = async (projectId: string) => {
-    if (ranked.includes(projectId) || ranked.length >= RANK_COUNT) return;
+    if (ranked.includes(projectId) || ranked.length >= rankTarget) return;
     const aId = await ensureApp();
     if (!aId) { setError("Couldn't start your application."); return; }
     const newRanked = [...ranked, projectId];
@@ -461,9 +472,9 @@ export default function ApplicationPage() {
     const p = projectById(projectId);
     return !!p && p.type === "studio" && p.coffee_chat_required && !studioMet(projectId);
   };
-  // Only the top REQUIRED_COUNT ranked projects need their writing finished.
-  const allCompleted = ranked.length > 0 && ranked.slice(0, REQUIRED_COUNT).every((id) => completedByProject[id]);
-  const rankingReady = ranked.length === RANK_COUNT && allCompleted;
+  // Only the top requiredTarget ranked projects need their writing finished.
+  const allCompleted = ranked.length > 0 && ranked.slice(0, requiredTarget).every((id) => completedByProject[id]);
+  const rankingReady = ranked.length === rankTarget && allCompleted;
   const coffeeChatsSatisfied = ranked.every((id) => !studioChatMissing(id));
   const canSubmit = rankingReady && coffeeChatsSatisfied;
 
@@ -487,7 +498,7 @@ export default function ApplicationPage() {
 
     // Available → ranking: insert at the hovered slot.
     if (!inRanked && overRanked) {
-      if (base.length >= RANK_COUNT) return;
+      if (base.length >= rankTarget) return;
       let newIndex: number;
       if (overId === RANKED_ZONE) {
         newIndex = base.length;
@@ -594,13 +605,33 @@ export default function ApplicationPage() {
     );
   }
 
+  // The applicant is already on every current project (projects excludes their
+  // own memberships), so there's nothing left to apply to.
+  if (projects.length === 0) {
+    return (
+      <div className="flex flex-1 w-full items-center justify-center p-6">
+        <div className="flex flex-col items-center gap-4 text-center max-w-sm">
+          <div className="h-12 w-12 rounded-full bg-foreground/5 text-foreground/70 flex items-center justify-center">
+            <Check size={24} />
+          </div>
+          <h1 className="text-2xl font-bold">You&apos;re on every current project</h1>
+          <p className="text-sm text-muted-foreground">
+            There aren&apos;t any other projects to apply to right now. Check back when new projects
+            open up.
+          </p>
+          <Link href="/" className="text-sm text-muted-foreground hover:text-foreground">← Back home</Link>
+        </div>
+      </div>
+    );
+  }
+
   // While a drag is live, render from the working copy so the list reflows.
   const rankedView = dragRanked ?? ranked;
   const availableProjects = projects.filter((p) => !rankedView.includes(p.id));
   const studioAvailable = availableProjects.filter((p) => p.type === "studio");
   const launchAvailable = availableProjects.filter((p) => p.type === "launch");
   const availableIds = [...studioAvailable, ...launchAvailable].map((p) => p.id);
-  const full = rankedView.length >= RANK_COUNT;
+  const full = rankedView.length >= rankTarget;
   const activeProject = activeId ? projectById(activeId) : null;
 
   return (
@@ -609,8 +640,8 @@ export default function ApplicationPage() {
         <Link href="/" className="text-sm text-muted-foreground hover:text-foreground">← Back</Link>
         <h1 className="text-2xl font-bold">Application</h1>
         <p className="text-sm text-muted-foreground">
-          Drag projects into your ranking (top {RANK_COUNT}), then complete the questions for your
-          top {REQUIRED_COUNT} choices. Your progress saves automatically.
+          Drag projects into your ranking (top {rankTarget}), then complete the questions for your
+          top {requiredTarget} choice{requiredTarget === 1 ? "" : "s"}. Your progress saves automatically.
         </p>
       </div>
 
@@ -727,7 +758,7 @@ export default function ApplicationPage() {
           <div className="flex flex-col gap-3">
             <div className="flex items-center gap-2">
               <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Your ranking</h2>
-              <span className="text-xs font-medium text-muted-foreground tabular-nums">{rankedView.length}/{RANK_COUNT}</span>
+              <span className="text-xs font-medium text-muted-foreground tabular-nums">{rankedView.length}/{rankTarget}</span>
             </div>
             <RankZone
               ranked={rankedView}
@@ -767,10 +798,10 @@ export default function ApplicationPage() {
         {error && <p className="text-sm text-red-500">{error}</p>}
         {!canSubmit && (
           <p className="text-xs text-muted-foreground">
-            {ranked.length !== RANK_COUNT
-              ? `Rank exactly ${RANK_COUNT} projects (${ranked.length} selected).`
+            {ranked.length !== rankTarget
+              ? `Rank ${rankTarget === RANK_COUNT ? "exactly" : "all"} ${rankTarget} project${rankTarget === 1 ? "" : "s"} (${ranked.length} selected).`
               : !rankingReady
-                ? `Complete the questions for your top ${REQUIRED_COUNT} ranked projects.`
+                ? `Complete the questions for your top ${requiredTarget} ranked project${requiredTarget === 1 ? "" : "s"}.`
                 : `Book a coffee chat with a PM for ${ranked
                     .filter((id) => studioChatMissing(id))
                     .map((id) => projectById(id)?.name)
@@ -1054,7 +1085,7 @@ function CardContent({
                 onClick={(e) => { e.stopPropagation(); if (!full) onAdd?.(project.id); }}
                 onPointerDown={(e) => e.stopPropagation()}
                 aria-label={`Add ${project.name}`}
-                title={full ? `You can rank up to ${RANK_COUNT} projects` : `Add ${project.name}`}
+                title={full ? "Your ranking is full" : `Add ${project.name}`}
                 className="flex h-7 w-7 items-center justify-center rounded-md border bg-background text-foreground hover:bg-foreground hover:text-background hover:border-foreground disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-background disabled:hover:text-foreground flex-shrink-0 transition-colors"
               >
                 <Plus size={16} />

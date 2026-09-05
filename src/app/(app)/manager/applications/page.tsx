@@ -3,7 +3,7 @@
 import { createClient } from "@/lib/supabase/client";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { ChevronDown, SlidersHorizontal, Coffee, Check, Clock, RotateCcw, Presentation } from "lucide-react";
+import { ChevronDown, SlidersHorizontal, RotateCcw } from "lucide-react";
 import { useRoleSim } from "@/components/role-simulation-provider";
 import { PersonName } from "@/components/person-profile-provider";
 import { canReviewAllProjects } from "@/lib/roles";
@@ -19,12 +19,9 @@ import { ApplicationListSkeleton } from "@/components/skeletons";
 import { ApplicationPeriodsDialog, type ApplicationPeriod } from "@/components/application-periods-dialog";
 import { ApplicationReviewModal, type ReviewStatus } from "@/components/application-review-modal";
 import { ApplicationStats, type Stats } from "@/components/application-stats";
+import { CoffeeChatIndicator, InfosessionIndicator, type CoffeeState } from "@/components/applicant-indicators";
 
 type Applicant = { user_id: string; preferred_firstname: string | null; lastname: string | null };
-
-// Coffee-chat progress for the applicant: "done" once any chat is completed,
-// "booked" while one is booked but not yet completed, "none" if never booked.
-type CoffeeState = "done" | "booked" | "none";
 
 // The project currently under review: which project the reviewer is
 // assigned to (or, for a full-access reviewer, has picked from all of them).
@@ -74,23 +71,6 @@ function StatusBadge({ status }: { status: ReviewStatus }) {
   return <Badge variant="secondary">Submitted</Badge>;
 }
 
-// Coffee cup with a check once the applicant has completed a chat, a clock while
-// one is only booked, and nothing if they've never booked.
-function CoffeeChatIndicator({ state }: { state: CoffeeState }) {
-  if (state === "none") return null;
-  const done = state === "done";
-  return (
-    <span
-      title={done ? "Completed a coffee chat" : "Coffee chat booked"}
-      aria-label={done ? "Completed a coffee chat" : "Coffee chat booked"}
-      className={`inline-flex items-center gap-0.5 ${done ? "text-green-600" : "text-amber-600"}`}
-    >
-      <Coffee size={14} />
-      {done ? <Check size={12} className="stroke-[3]" /> : <Clock size={12} />}
-    </span>
-  );
-}
-
 // Small badge marking an applicant who was a member in a previous semester.
 function ReturningIndicator({ returning }: { returning: boolean }) {
   if (!returning) return null;
@@ -99,22 +79,6 @@ function ReturningIndicator({ returning }: { returning: boolean }) {
       <RotateCcw size={11} />
       Returning
     </Badge>
-  );
-}
-
-// Presentation icon with a check once the applicant has checked in to an info
-// session; nothing if they never attended one.
-function InfosessionIndicator({ attended }: { attended: boolean }) {
-  if (!attended) return null;
-  return (
-    <span
-      title="Attended an info session"
-      aria-label="Attended an info session"
-      className="inline-flex items-center gap-0.5 text-sky-600"
-    >
-      <Presentation size={14} />
-      <Check size={12} className="stroke-[3]" />
-    </span>
   );
 }
 

@@ -7,6 +7,7 @@ import { ProfileModal } from "@/components/profile-modal";
 import { cn } from "@/lib/utils";
 import { sortRoles } from "@/lib/role-order";
 import { readableTextColor, DEFAULT_ACCENT } from "@/lib/portal-color";
+import { CoffeeChatIndicator, InfosessionIndicator, type CoffeeState } from "@/components/applicant-indicators";
 
 export type Role = { id: string; role_name: string };
 
@@ -28,6 +29,10 @@ export type PublicProfile = {
   avatar_url: string | null;
   roles: Role[];
   projects: MemberProject[];
+  // Recruiting status, present only when the viewer is an application manager
+  // (board/exec/PM); the API omits these for other viewers.
+  coffee_chat?: CoffeeState | null;
+  infosession_attended?: boolean | null;
 };
 
 export type OpenTarget = { userId: string; name: string; preloaded?: Partial<PublicProfile> };
@@ -148,7 +153,11 @@ export function PersonName({ userId, name, preloaded, className }: PersonNamePro
             {initials(name)}
           </div>
           <div className="flex flex-col gap-1.5 min-w-0">
-            <span className="font-semibold text-sm truncate">{name}</span>
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="font-semibold text-sm truncate">{name}</span>
+              <CoffeeChatIndicator state={cached?.coffee_chat} />
+              <InfosessionIndicator attended={cached?.infosession_attended} />
+            </div>
             {(roles.length > 0 || projects.length > 0) && (
               <div className="flex flex-wrap gap-1">
                 {roles.map((r) => (

@@ -161,11 +161,12 @@ export default function HomePage() {
         );
       }
 
-      // Active members (non-staff) must re-apply each open round. Show a
-      // non-blocking prompt for the whole open period, even after they've
-      // submitted (the Application step just flips to done), so returning
-      // members always have somewhere to check their re-apply progress.
-      // Board/exec don't apply, so skip them.
+      // Anyone on the dashboard (returning members, plus board/exec/PM) can
+      // apply while a period is open — returning members re-apply each round,
+      // and staff may apply to an additional/new project (exec aren't required
+      // to be on one). Show a non-blocking prompt for the whole open period,
+      // even after they've submitted (the Application step just flips to done),
+      // so there's always somewhere to check apply progress.
       // Reset first: this effect reruns on every persona switch (isBoardOrExec
       // changes), and without clearing, a banner shown while simulating
       // "member" would otherwise persist after switching back to PM/exec.
@@ -367,14 +368,18 @@ export default function HomePage() {
             <div className="flex flex-col gap-0.5">
               <h2 className="text-sm font-semibold">Applications are open for {reapply.periodName}</h2>
               <p className="text-xs text-muted-foreground">
-                Returning members re-apply each round. Complete the steps below to apply. Coffee
+                Complete the steps below to apply for a project you&apos;re not already on. Coffee
                 chats aren&apos;t required unless you&apos;re applying to a project that requires
                 one (like the OP Studio projects).
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
               <ReapplyStep label="Coffee Chat" href="/coffee-chat" done={true} icon={Coffee} />
-              <ReapplyStep label="Infosession" href="/infosession" done={reapply.infosessionDone} icon={Users} />
+              {/* Board/exec/PM don't have the infosession attendance requirement,
+                  so only show that step to returning members applying. */}
+              {!isBoardOrExec && (
+                <ReapplyStep label="Infosession" href="/infosession" done={reapply.infosessionDone} icon={Users} />
+              )}
               <ReapplyStep label="Application" href="/application" done={reapply.applicationDone} icon={FileText} />
             </div>
           </div>

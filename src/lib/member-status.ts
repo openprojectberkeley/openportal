@@ -28,11 +28,13 @@ export function getHomeView(
   return "dashboard";
 }
 
-// Mirrors the (app)/page.tsx re-apply banner: any returning (active or
-// rolled-off/inactive), non-staff member is prompted to re-apply each open
-// round.
+// Mirrors the (app)/page.tsx "applications are open" banner: shown to anyone who
+// lands on the dashboard rather than the first-time checklist — returning members
+// (active or rolled-off/inactive) OR board/exec/PM, who may apply to additional
+// projects (exec aren't required to be on one). Only a first-time non_member
+// non-staff user is steered to the checklist instead of this banner.
 export function shouldShowReapplyBanner(status: MemberStatus, isBoardOrExec: boolean): boolean {
-  return isReturningMember(status) && !isBoardOrExec;
+  return isReturningMember(status) || isBoardOrExec;
 }
 
 // Profile-modal badge copy. No entry for "active" — the default, unremarkable

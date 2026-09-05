@@ -1,5 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
+import { getEffectiveAccessLevels } from "@/lib/roles-server";
+import { accessIsBoardOrExec } from "@/lib/roles";
+import type { CoffeeState } from "@/components/applicant-indicators";
 
 // Read-only public profile of a single member. Any authenticated member may view
 // another member's profile (used by the click-to-open profile modal), so this
@@ -54,5 +57,31 @@ export async function GET(
     })
     .filter((p): p is { id: string; name: string; is_pm: boolean; color: string | null } => Boolean(p));
 
-  return NextResponse.json({ ...publicMember, roles, projects });
+  // Recruiting indicators (coffee-chat + info-session status) are visible only to
+  // application managers — board/exec/PMs. Uses the *effective* access levels so
+  // an exec "viewing as member" (sim cookie) correctly loses them. Non-managers
+  // never receive these keys, so the client can't surface what it never sees.
+  const isManager = accessIsBoardOrExec(await getEffectiveAccessLevels(supabase));
+  let recruiting: { coffee_chat: CoffeeState; infosession_attended: boolean } | null = null;
+  if (isManager) {
+    const [{ data: chats }, { data: info }] = await Promise.all([
+      // A booked chat has applicant_id set; `complete` marks it done. Open
+      // (unbooked) slots have a null applicant_id and won't match.
+      supabase.from("coffee_chats").select("complete").eq("applicant_id", userId),
+      // Attendance is recorded under applicant_id or member_id depending on
+      // whether they were a member at the time; both are auth user ids.
+      supabase
+        .from("infosesh_attendance")
+        .select("id")
+        .or(`applicant_id.eq.${userId},member_id.eq.${userId}`),
+    ]);
+    const coffee_chat: CoffeeState = (chats ?? []).some((c) => c.complete)
+      ? "done"
+      : (chats ?? []).length > 0
+        ? "booked"
+        : "none";
+    recruiting = { coffee_chat, infosession_attended: (info ?? []).length > 0 };
+  }
+
+  return NextResponse.json({ ...publicMember, roles, projects, ...recruiting });
 }
