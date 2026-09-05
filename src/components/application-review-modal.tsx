@@ -1,7 +1,8 @@
 "use client";
 
 import { createClient } from "@/lib/supabase/client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { cn } from "@/lib/utils";
 import { ChevronDown, Check, X, FileText } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -88,6 +89,16 @@ export function ApplicationReviewModal({
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Default true = hidden, so the "Jump to" pill never flashes when the PM's
+  // project is already on screen; the observer reveals it a frame later if the
+  // section is actually scrolled out of view.
+  const [targetInView, setTargetInView] = useState(true);
+
+  // contentRef is the scroll viewport (DialogContent, which is overflow-y-auto);
+  // targetRef marks the PM's own project section — the jump destination and the
+  // element the IntersectionObserver watches.
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const targetRef = useRef<HTMLDivElement | null>(null);
 
   const openResume = async () => {
     if (!profile?.resume_path) return;
@@ -102,6 +113,9 @@ export function ApplicationReviewModal({
     if (!open) return;
     setLoading(true);
     setError(null);
+    // Reset so a prior applicant's "visible" state can't flash the pill before
+    // the observer re-evaluates this applicant's sections.
+    setTargetInView(true);
     const supabase = createClient();
 
     const load = async () => {
@@ -173,6 +187,27 @@ export function ApplicationReviewModal({
 
   const selectedProject = rankings.find((r) => r.project?.id === selectedProjectId)?.project ?? null;
 
+  // The PM's own project on this application — the "Jump to" destination.
+  const targetRanking = rankings.find((r) => r.project?.id === contextProjectId) ?? null;
+  const targetProjectName = targetRanking?.project?.name ?? null;
+  // Show the floating pill only when the PM's section exists, there's more than
+  // one ranking to scroll past, and that section isn't currently on screen.
+  const showJump = !loading && !!targetRanking && rankings.length > 1 && !targetInView;
+
+  // Watch the PM's project section; hide the pill while it's visible in the
+  // modal's scroll viewport, show it again when it scrolls back out.
+  useEffect(() => {
+    const root = contentRef.current;
+    const target = targetRef.current;
+    if (!root || !target) return;
+    const observer = new IntersectionObserver(
+      (entries) => setTargetInView(entries[0]?.isIntersecting ?? true),
+      { root, threshold: 0.15 },
+    );
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [loading, rankings.length, contextProjectId]);
+
   const accept = async () => {
     if (!selectedProjectId) { setError("Pick a project to place them on."); return; }
     setWorking(true);
@@ -202,7 +237,7 @@ export function ApplicationReviewModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+      <DialogContent ref={contentRef} className="max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             {applicantName}
@@ -221,7 +256,11 @@ export function ApplicationReviewModal({
               <p className="text-sm text-muted-foreground">No ranked projects on this application.</p>
             ) : (
               rankings.map((r) => (
-                <div key={r.id} className="flex flex-col gap-2">
+                <div
+                  key={r.id}
+                  ref={r.project?.id === contextProjectId ? targetRef : undefined}
+                  className="flex flex-col gap-2 scroll-mt-2"
+                >
                   <div className="flex items-center gap-2">
                     <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-foreground/10 text-xs font-semibold tabular-nums">
                       {r.rank}
@@ -299,6 +338,27 @@ export function ApplicationReviewModal({
             </div>
           </div>
         )}
+
+        {/* Floating "Jump to [the PM's project]" pill. Zero-height sticky wrapper
+            so it hovers at the bottom of the scroll viewport without reserving
+            trailing blank space. Kept mounted (opacity/translate toggled) so the
+            fade-out animates when the target section scrolls into view. */}
+        <div aria-hidden={!showJump} className="pointer-events-none sticky bottom-0 z-20 h-0">
+          <div className="flex -translate-y-4 justify-center">
+            <button
+              type="button"
+              onClick={() => targetRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+              tabIndex={showJump ? 0 : -1}
+              className={cn(
+                "pointer-events-auto inline-flex items-center gap-1.5 rounded-full bg-foreground px-4 py-2 text-sm font-medium text-background shadow-lg transition-all duration-300",
+                showJump ? "translate-y-0 opacity-100" : "translate-y-2 opacity-0",
+              )}
+            >
+              Jump to {targetProjectName}
+              <ChevronDown size={16} className="animate-bounce" />
+            </button>
+          </div>
+        </div>
       </DialogContent>
     </Dialog>
   );
