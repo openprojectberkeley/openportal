@@ -96,7 +96,11 @@ function PeriodStatusText({ period }: { period: ApplicationPeriod }) {
 }
 
 export default function ManagerApplicationsPage() {
-  const { isExec } = useRoleSim();
+  const { isExec, canSimulate, persona } = useRoleSim();
+  // VP Tech/President only (mirrors canEditWindow in manager/coffee-chats/page.tsx):
+  // canSimulate is real-role VP Tech/President, persona==="exec" hides it while
+  // previewing a lower "View as" persona.
+  const canEmailBlast = canSimulate && persona === "exec";
 
   const [periods, setPeriods] = useState<ApplicationPeriod[] | null>(null);
   const [selectedPeriodId, setSelectedPeriodId] = useState<string | null>(null);
@@ -341,7 +345,7 @@ export default function ManagerApplicationsPage() {
           </Button>
         )}
 
-        {isExec && selectedPeriod && (
+        {canEmailBlast && selectedPeriod && (
           <Button variant="outline" size="sm" onClick={() => setEmailBlastOpen(true)}>
             <Mail size={14} className="mr-1.5" />
             Email blast
@@ -470,7 +474,7 @@ export default function ManagerApplicationsPage() {
         />
       )}
 
-      {isExec && selectedPeriod && (
+      {canEmailBlast && selectedPeriod && (
         <EmailBlastDialog
           open={emailBlastOpen}
           onOpenChange={setEmailBlastOpen}

@@ -1,6 +1,6 @@
 -- Per-applicant rows backing the Applications manager's "Email blast" reminder
 -- feature: everyone with an empty or unfinished draft application in a period,
--- so exec can nudge them before the deadline.
+-- so VP Tech/President can nudge them before the deadline.
 --
 -- Reuses the exact empty/unfinished classification from application_period_stats
 -- (0053): a draft is "unfinished" once it has an essay on any ranking or >=1
@@ -10,10 +10,13 @@
 -- exclusion already used client-side in manager/coffee-chats/all/page.tsx — since
 -- those roles don't need an application reminder.
 --
--- SECURITY DEFINER + is_board_or_exec() guard, mirroring application_period_stats.
--- Board/exec can already read every applicant row via the applications SELECT
--- RLS (0016) and every members_roles/project_members row (no RLS restricts
--- those tables to a subset of users), so this exposes nothing new.
+-- SECURITY DEFINER + is_vp_tech_or_president() guard (0047) — this feature is
+-- restricted to VP Tech/President specifically, not exec generally, matching
+-- the client-side gate (canSimulate && persona === "exec", same pattern as
+-- canEditWindow in manager/coffee-chats/page.tsx). VP Tech/President can
+-- already read every applicant row via the applications SELECT RLS (0016)
+-- and every members_roles/project_members row (no RLS restricts those tables
+-- to a subset of users), so this exposes nothing new.
 create or replace function public.application_period_draft_applicants(p_period_id uuid)
 returns table (
   user_id           uuid,
@@ -28,7 +31,7 @@ set search_path = public
 stable
 as $$
 begin
-  if not public.is_board_or_exec() then
+  if not public.is_vp_tech_or_president() then
     raise exception 'not authorized';
   end if;
 

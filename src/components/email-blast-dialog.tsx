@@ -65,9 +65,9 @@ function CopyButton({ text, label }: { text: string; label: string }) {
   );
 }
 
-// Exec-only dialog listing everyone with an empty/unfinished draft application
-// for a period (PMs and board/exec excluded), plus a ready-to-copy reminder
-// email so the manager can send the blast themselves — this never sends email.
+// VP Tech/President-only dialog listing everyone with an empty/unfinished draft
+// application for a period (PMs and board/exec excluded), plus a ready-to-copy
+// reminder email so the manager can send the blast themselves — never sends email.
 export function EmailBlastDialog({
   open,
   onOpenChange,
