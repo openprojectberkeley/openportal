@@ -19,11 +19,19 @@ import { techAreaLabel, techClassLabel } from "@/lib/application-profile";
 
 export type ReviewStatus = "submitted" | "accepted" | "rejected";
 
+// A section of the application the modal can open scrolled to, so a click on a
+// sheet-view cell lands on the answer it was showing. "essay" resolves to the
+// ranking section for `contextProjectId`.
+export type FocusSection = "areas" | "classes" | "essay";
+
 // Temporarily disables Accept and Reject so nobody decides an applicant's
 // outcome early while project assignments are still being finalized.
 // Reviewing (reading the application) stays available. Flip back to true
 // once decisions should reopen.
 const DECISIONS_ENABLED = false;
+
+// Transient highlight on a section the modal was opened straight to.
+const FLASH_RING = "ring-2 ring-sky-400 ring-offset-4 ring-offset-background";
 
 const PROJECT_TYPE_LABELS: Record<string, string> = {
   studio: "OP Studio",
@@ -65,6 +73,7 @@ export function ApplicationReviewModal({
   applicantName,
   status,
   contextProjectId,
+  focus,
   open,
   onOpenChange,
   onReviewed,
@@ -77,6 +86,8 @@ export function ApplicationReviewModal({
   // already excluded by RLS, but when there's more than one visible ranking
   // this decides which one the "Place on" dropdown defaults to.
   contextProjectId?: string | null;
+  // Scroll to (and briefly highlight) this section once the application loads.
+  focus?: FocusSection | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onReviewed: (status: ReviewStatus) => void;
@@ -93,6 +104,8 @@ export function ApplicationReviewModal({
   // project is already on screen; the observer reveals it a frame later if the
   // section is actually scrolled out of view.
   const [targetInView, setTargetInView] = useState(true);
+  // Ring-highlights the section we jumped to, cleared on a timeout.
+  const [flash, setFlash] = useState<FocusSection | null>(null);
 
   // contentRef is the scroll viewport (DialogContent, which is overflow-y-auto);
   // targetRef marks the PM's own project section — the jump destination and the
@@ -208,6 +221,23 @@ export function ApplicationReviewModal({
     return () => observer.disconnect();
   }, [loading, rankings.length, contextProjectId]);
 
+  // Opened from a sheet-view cell: scroll that answer into view once the content
+  // is rendered. A missing section (blank classes, no essay) just leaves the
+  // modal at the top rather than jumping somewhere arbitrary.
+  useEffect(() => {
+    if (!open || loading || !focus) return;
+    const root = contentRef.current;
+    const el =
+      focus === "essay"
+        ? targetRef.current
+        : root?.querySelector<HTMLElement>(`[data-section="${focus}"]`) ?? null;
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "start" });
+    setFlash(focus);
+    const t = setTimeout(() => setFlash(null), 1600);
+    return () => clearTimeout(t);
+  }, [open, loading, focus, applicationId]);
+
   const accept = async () => {
     if (!selectedProjectId) { setError("Pick a project to place them on."); return; }
     setWorking(true);
@@ -250,7 +280,12 @@ export function ApplicationReviewModal({
           <ProjectApplicationModalSkeleton />
         ) : (
           <div className="flex flex-col gap-6">
-            <ApplicantDetails profile={profile} onOpenResume={openResume} resumeOpening={resumeOpening} />
+            <ApplicantDetails
+              profile={profile}
+              onOpenResume={openResume}
+              resumeOpening={resumeOpening}
+              flash={flash}
+            />
 
             {rankings.length === 0 ? (
               <p className="text-sm text-muted-foreground">No ranked projects on this application.</p>
@@ -259,7 +294,10 @@ export function ApplicationReviewModal({
                 <div
                   key={r.id}
                   ref={r.project?.id === contextProjectId ? targetRef : undefined}
-                  className="flex flex-col gap-2 scroll-mt-2"
+                  className={cn(
+                    "flex flex-col gap-2 scroll-mt-2 rounded-lg transition-shadow",
+                    flash === "essay" && r.project?.id === contextProjectId && FLASH_RING,
+                  )}
                 >
                   <div className="flex items-center gap-2">
                     <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-foreground/10 text-xs font-semibold tabular-nums">
@@ -370,10 +408,12 @@ function ApplicantDetails({
   profile,
   onOpenResume,
   resumeOpening,
+  flash,
 }: {
   profile: Profile | null;
   onOpenResume: () => void;
   resumeOpening: boolean;
+  flash: FocusSection | null;
 }) {
   const ratedAreas = Object.entries(profile?.tech_area_rankings ?? {})
     .filter(([, v]) => typeof v === "number" && v > 0)
@@ -394,7 +434,13 @@ function ApplicantDetails({
       ) : (
         <>
           {ratedAreas.length > 0 && (
-            <div className="flex flex-col gap-1">
+            <div
+              data-section="areas"
+              className={cn(
+                "flex flex-col gap-1 scroll-mt-2 rounded-lg transition-shadow",
+                flash === "areas" && FLASH_RING,
+              )}
+            >
               <span className="text-xs font-medium text-muted-foreground">Technical areas of interest</span>
               <div className="flex flex-wrap gap-1.5">
                 {ratedAreas.map(([key, v]) => (
@@ -407,7 +453,13 @@ function ApplicantDetails({
           )}
 
           {(classes.length > 0 || other) && (
-            <div className="flex flex-col gap-1">
+            <div
+              data-section="classes"
+              className={cn(
+                "flex flex-col gap-1 scroll-mt-2 rounded-lg transition-shadow",
+                flash === "classes" && FLASH_RING,
+              )}
+            >
               <span className="text-xs font-medium text-muted-foreground">Tech classes</span>
               <div className="flex flex-wrap gap-1.5">
                 {classes.map((c) => (

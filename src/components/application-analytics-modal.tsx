@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/supabase/client";
 import { useEffect, useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { ArrowRight, ChevronDown } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   DropdownMenu,
@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { DonutChart, Legend, NEUTRAL, pct, type Segment } from "@/components/donut-chart";
+import { PersonName } from "@/components/person-profile-provider";
 
 // One row per application period from the application_analytics() RPC (0060).
 type Row = {
@@ -30,6 +31,9 @@ type Row = {
   info_attended: number;
   info_returning: number;
   info_nothing: number;
+  // Completed a coffee chat (or returning) AND attended an info session (0063).
+  // Optional so the modal still renders against a pre-0063 database.
+  both_valid?: number;
 };
 
 type Period = { id: string; name: string };
@@ -137,7 +141,7 @@ function ChartCard({
 function coffeeSegments(r: Row): Segment[] {
   return [
     { label: "Completed", value: r.coffee_completed, color: GREEN },
-    { label: "Booked", value: r.coffee_booked, color: AMBER },
+    { label: "Booked (incomplete)", value: r.coffee_booked, color: AMBER },
     { label: "Returning (exempt)", value: r.coffee_returning, color: INDIGO },
     { label: "Nothing", value: r.coffee_nothing, color: NEUTRAL },
   ];
@@ -146,14 +150,41 @@ function coffeeSegments(r: Row): Segment[] {
 function infoSegments(r: Row): Segment[] {
   return [
     { label: "Attended", value: r.info_attended, color: SKY },
-    { label: "Returning (exempt)", value: r.info_returning, color: INDIGO },
+    { label: "Returning (didn't attend)", value: r.info_returning, color: INDIGO },
     { label: "Nothing", value: r.info_nothing, color: NEUTRAL },
   ];
 }
 
 const submittedTotal = (r: Row) => r.submitted + r.accepted + r.rejected;
-const coffeeValid = (r: Row) => r.coffee_completed + r.coffee_booked + r.coffee_returning;
-const infoValid = (r: Row) => r.info_attended + r.info_returning;
+// Valid = cleared the requirement. A booked-but-incomplete chat doesn't count;
+// returning members are exempt from the coffee chat but not the info session.
+// bothValid is the intersection of the two, computed server-side (0063).
+const coffeeValid = (r: Row) => r.coffee_completed + r.coffee_returning;
+const infoValid = (r: Row) => r.info_attended;
+const bothValid = (r: Row) => r.both_valid ?? 0;
+
+// One invalid applicant from application_analytics_invalid() (0064).
+type InvalidRow = {
+  applicant_id: string;
+  preferred_firstname: string | null;
+  lastname: string | null;
+  is_returning: boolean;
+  did_complete: boolean;
+  has_chat: boolean;
+  did_att: boolean;
+};
+
+function invalidName(r: InvalidRow): string {
+  return [r.preferred_firstname, r.lastname].filter(Boolean).join(" ") || "Applicant";
+}
+
+function invalidIssues(r: InvalidRow): string[] {
+  const coffeeOk = r.did_complete || r.is_returning;
+  const issues: string[] = [];
+  if (!coffeeOk) issues.push(r.has_chat ? "Coffee booked (incomplete)" : "No coffee chat");
+  if (!r.did_att) issues.push("No info session");
+  return issues;
+}
 
 // Exec analytics for recruiting funnels: per-period pie breakdowns of coffee-chat
 // and info-session status plus a historical "valid %" table across all periods.
@@ -172,9 +203,13 @@ export function ApplicationAnalyticsModal({
   const [demo, setDemo] = useState<DemoRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [selectedPeriodId, setSelectedPeriodId] = useState<string | null>(initialPeriodId);
+  const [invalidOpen, setInvalidOpen] = useState(false);
+  const [invalidRows, setInvalidRows] = useState<InvalidRow[] | null>(null);
+  const [invalidError, setInvalidError] = useState<string | null>(null);
 
   useEffect(() => {
     if (open) setSelectedPeriodId(initialPeriodId);
+    else setInvalidOpen(false);
   }, [open, initialPeriodId]);
 
   useEffect(() => {
@@ -206,14 +241,46 @@ export function ApplicationAnalyticsModal({
     })();
   }, [open, selectedPeriodId]);
 
+  // Invalid-people list for the selected period; fetched only while that modal is open.
+  useEffect(() => {
+    if (!invalidOpen || !selectedPeriodId) {
+      if (!invalidOpen) {
+        setInvalidRows(null);
+        setInvalidError(null);
+      }
+      return;
+    }
+    setInvalidRows(null);
+    setInvalidError(null);
+    const supabase = createClient();
+    (async () => {
+      const { data, error: err } = await supabase.rpc("application_analytics_invalid", {
+        p_period_id: selectedPeriodId,
+      });
+      if (err) {
+        setInvalidError(err.message);
+        setInvalidRows([]);
+        return;
+      }
+      setInvalidRows((data as InvalidRow[]) ?? []);
+    })();
+  }, [invalidOpen, selectedPeriodId]);
+
   const selected =
     rows?.find((r) => r.period_id === selectedPeriodId) ?? rows?.[0] ?? null;
   const selectedName =
     periods.find((p) => p.id === selectedPeriodId)?.name ?? selected?.period_name ?? "Select period";
   const { gradYear, returning } = buildDemographics(demo);
+  const invalidCount = selected ? submittedTotal(selected) - bothValid(selected) : 0;
+
+  const handleOpenChange = (next: boolean) => {
+    if (!next) setInvalidOpen(false);
+    onOpenChange(next);
+  };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Recruiting analytics</DialogTitle>
@@ -282,6 +349,38 @@ export function ApplicationAnalyticsModal({
                   />
                 </div>
 
+                {/* Combined valid: cleared both requirements */}
+                <div className="flex flex-col gap-2 rounded-xl border bg-background p-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Valid</h3>
+                    {invalidCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setInvalidOpen(true)}
+                        className="inline-flex items-center gap-1 rounded-sm text-xs font-medium text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        View invalid
+                        <ArrowRight size={12} />
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl font-bold tabular-nums">
+                      {pct(bothValid(selected), submittedTotal(selected))}%
+                    </span>
+                    <span className="text-sm text-muted-foreground tabular-nums">
+                      {bothValid(selected)}/{submittedTotal(selected)}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <Bar pct={pct(bothValid(selected), submittedTotal(selected))} color={INDIGO} />
+                    </div>
+                  </div>
+                  <p className="text-[0.7rem] text-muted-foreground">
+                    Cleared both requirements: coffee chat valid and info session valid. A booked-but-incomplete
+                    chat doesn&apos;t count, and returning members are exempt from the coffee chat only.
+                  </p>
+                </div>
+
                 {/* Applicant demographics */}
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <BarList title="By grad year" items={gradYear} total={submittedTotal(selected)} />
@@ -300,7 +399,8 @@ export function ApplicationAnalyticsModal({
                           <th className="py-1 pr-3 font-medium">Period</th>
                           <th className="py-1 pr-3 font-medium tabular-nums">Submitted</th>
                           <th className="py-1 pr-3 font-medium">Coffee valid</th>
-                          <th className="py-1 font-medium">Info valid</th>
+                          <th className="py-1 pr-3 font-medium">Info valid</th>
+                          <th className="py-1 font-medium">Valid</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -323,8 +423,11 @@ export function ApplicationAnalyticsModal({
                               <td className="py-1.5 pr-3">
                                 <Bar pct={cv} color={GREEN} />
                               </td>
-                              <td className="py-1.5">
+                              <td className="py-1.5 pr-3">
                                 <Bar pct={iv} color={SKY} />
+                              </td>
+                              <td className="py-1.5">
+                                <Bar pct={pct(bothValid(r), sub)} color={INDIGO} />
                               </td>
                             </tr>
                           );
@@ -341,6 +444,64 @@ export function ApplicationAnalyticsModal({
         )}
       </DialogContent>
     </Dialog>
+
+    <Dialog open={invalidOpen} onOpenChange={setInvalidOpen}>
+      <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>
+            Invalid
+            {invalidRows ? (
+              <span className="ml-2 text-sm font-normal text-muted-foreground tabular-nums">
+                {invalidRows.length} {invalidRows.length === 1 ? "person" : "people"}
+              </span>
+            ) : null}
+          </DialogTitle>
+        </DialogHeader>
+
+        {invalidError && <p className="text-sm text-red-500">{invalidError}</p>}
+
+        {invalidRows === null ? (
+          <div className="flex flex-col gap-2">
+            <div className="h-10 rounded-lg border bg-muted animate-pulse" />
+            <div className="h-10 rounded-lg border bg-muted animate-pulse" />
+            <div className="h-10 rounded-lg border bg-muted animate-pulse" />
+          </div>
+        ) : invalidRows.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Everyone submitted is valid.</p>
+        ) : (
+          <ul className="flex flex-col divide-y">
+            {invalidRows.map((r) => (
+              <li
+                key={r.applicant_id}
+                className="flex flex-col gap-1.5 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3"
+              >
+                <PersonName
+                  userId={r.applicant_id}
+                  name={invalidName(r)}
+                  className="min-w-0 truncate text-sm font-medium"
+                />
+                <div className="flex flex-wrap gap-1.5 sm:justify-end">
+                  {invalidIssues(r).map((issue) => (
+                    <span
+                      key={issue}
+                      className={cn(
+                        "inline-flex items-center rounded-md border px-2 py-0.5 text-[0.7rem] font-medium",
+                        issue.startsWith("Coffee booked")
+                          ? "border-amber-600/30 text-amber-700 dark:text-amber-400"
+                          : "border-foreground/15 text-muted-foreground",
+                      )}
+                    >
+                      {issue}
+                    </span>
+                  ))}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </DialogContent>
+    </Dialog>
+    </>
   );
 }
 
