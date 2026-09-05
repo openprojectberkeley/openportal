@@ -68,7 +68,7 @@ begin
     case when app.has_content then 'unfinished' else 'empty' end
   from app
   join members m on m.user_id = app.applicant_id
-  where m.user_id not in (select user_id from excluded_users)
+  where not exists (select 1 from excluded_users eu where eu.user_id = m.user_id)
   order by app.has_content, m.lastname, m.preferred_firstname;
 end;
 $$;
