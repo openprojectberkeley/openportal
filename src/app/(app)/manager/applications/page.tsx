@@ -3,7 +3,7 @@
 import { createClient } from "@/lib/supabase/client";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { ChevronDown, SlidersHorizontal, RotateCcw } from "lucide-react";
+import { ChevronDown, SlidersHorizontal, RotateCcw, Mail } from "lucide-react";
 import { useRoleSim } from "@/components/role-simulation-provider";
 import { PersonName } from "@/components/person-profile-provider";
 import { canReviewAllProjects } from "@/lib/roles";
@@ -17,6 +17,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ApplicationListSkeleton } from "@/components/skeletons";
 import { ApplicationPeriodsDialog, type ApplicationPeriod } from "@/components/application-periods-dialog";
+import { EmailBlastDialog } from "@/components/email-blast-dialog";
 import { ApplicationReviewModal, type ReviewStatus } from "@/components/application-review-modal";
 import { ApplicationStats, type Stats } from "@/components/application-stats";
 import { CoffeeChatIndicator, InfosessionIndicator, type CoffeeState } from "@/components/applicant-indicators";
@@ -102,6 +103,7 @@ export default function ManagerApplicationsPage() {
   const [apps, setApps] = useState<AppRow[] | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
   const [periodsDialogOpen, setPeriodsDialogOpen] = useState(false);
+  const [emailBlastOpen, setEmailBlastOpen] = useState(false);
   const [reviewFor, setReviewFor] = useState<{ id: string; name: string; status: ReviewStatus } | null>(null);
 
   // Which project(s) the current viewer may review: every project if they hold
@@ -338,6 +340,13 @@ export default function ManagerApplicationsPage() {
             Manage periods
           </Button>
         )}
+
+        {isExec && selectedPeriod && (
+          <Button variant="outline" size="sm" onClick={() => setEmailBlastOpen(true)}>
+            <Mail size={14} className="mr-1.5" />
+            Email blast
+          </Button>
+        )}
       </div>
 
       {/* Project bar: which project's applicants you're reviewing */}
@@ -458,6 +467,14 @@ export default function ManagerApplicationsPage() {
           onOpenChange={setPeriodsDialogOpen}
           periods={periods}
           onChanged={loadPeriods}
+        />
+      )}
+
+      {isExec && selectedPeriod && (
+        <EmailBlastDialog
+          open={emailBlastOpen}
+          onOpenChange={setEmailBlastOpen}
+          period={selectedPeriod}
         />
       )}
 
