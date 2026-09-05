@@ -26,7 +26,6 @@ import {
 import { ApplicationStats, type Stats } from "@/components/application-stats";
 import { ApplicationAnalyticsModal } from "@/components/application-analytics-modal";
 import { ApplicationSheetModal } from "@/components/application-sheet-modal";
-import { ProjectRankDistribution } from "@/components/project-rank-distribution";
 import { ProjectAnalyticsModal } from "@/components/project-analytics-modal";
 import { rankLabel } from "@/lib/application-rank";
 import { CoffeeChatIndicator, InfosessionIndicator, type CoffeeState } from "@/components/applicant-indicators";
@@ -329,10 +328,6 @@ export default function ManagerApplicationsPage() {
         .sort((x, y) => x[0] - y[0])
     : [];
 
-  // Rank breakdown for the selected project (count of applicants per rank),
-  // shown inline in the left column below the roster.
-  const rankDistribution = groupedApps.map(([rank, list]) => ({ rank, count: list.length }));
-
   const onReviewed = (id: string, status: ReviewStatus) => {
     setApps((prev) => (prev ? prev.map((a) => (a.id === id ? { ...a, status } : a)) : prev));
     if (isExec && selectedPeriodId) loadStats(selectedPeriodId);
@@ -477,7 +472,7 @@ export default function ManagerApplicationsPage() {
             {allCounts
               ? `${allCounts.applicants} application${allCounts.applicants === 1 ? "" : "s"} across ${allCounts.projects} project${allCounts.projects === 1 ? "" : "s"}.`
               : "Loading counts…"}{" "}
-            Open the sheet to scan and review them.
+            Open the sheet to page through one project at a time.
           </p>
           <Button size="sm" onClick={() => setSheetOpen(true)} disabled={!selectedPeriodId}>
             <Table2 size={14} className="mr-1.5" />
@@ -507,10 +502,6 @@ export default function ManagerApplicationsPage() {
                 ))}
               </div>
             )}
-
-            {apps && apps.length > 0 && (
-              <ProjectRankDistribution distribution={rankDistribution} total={apps.length} />
-            )}
           </div>
 
           {/* Right: applicants left to pick from */}
@@ -537,7 +528,7 @@ export default function ManagerApplicationsPage() {
                 {groupedApps.map(([rank, list]) => (
                   <div key={rank} className="flex flex-col gap-1.5">
                     <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      {rankLabel(rank)}
+                      {rankLabel(rank)} ({list.length})
                     </h3>
                     {list.map((a) => {
                       const name = applicantName(a);
@@ -573,6 +564,7 @@ export default function ManagerApplicationsPage() {
         open={sheetOpen}
         onOpenChange={setSheetOpen}
         periodId={selectedPeriodId}
+        periodName={selectedPeriod?.name}
         projectId={allSelected ? null : selectedProjectId}
         projectName={selectedProject?.name}
         allProjects={allSelected}

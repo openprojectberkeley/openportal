@@ -11,7 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { DonutChart, Legend, NEUTRAL, pct, type Segment } from "@/components/donut-chart";
+import { pct } from "@/components/donut-chart";
 import { PersonName } from "@/components/person-profile-provider";
 
 // One row per application period from the application_analytics() RPC (0060).
@@ -98,62 +98,11 @@ function buildDemographics(demo: DemoRow[]) {
   return { gradYear, returning };
 }
 
-// Slice colors — aligned with the coffee/info indicator colors used elsewhere
-// (green = done, amber = booked, sky = attended, indigo = returning) plus a
-// theme-aware neutral for "nothing".
+// Bar colors — aligned with the coffee/info indicator colors used elsewhere
+// (green = coffee done, sky = info attended, indigo = returning).
 const GREEN = "#16a34a";
-const AMBER = "#d97706";
 const INDIGO = "#4f46e5";
 const SKY = "#0284c7";
-
-function ChartCard({
-  title,
-  segments,
-  validValue,
-  submitted,
-}: {
-  title: string;
-  segments: Segment[];
-  validValue: number;
-  submitted: number;
-}) {
-  return (
-    <div className="flex flex-col gap-3 rounded-xl border bg-background p-4">
-      <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</h3>
-      <div className="flex items-center gap-4">
-        <DonutChart
-          segments={segments}
-          total={submitted}
-          centerValue={`${pct(validValue, submitted)}%`}
-          centerSub={`${validValue}/${submitted}`}
-        />
-        <div className="min-w-0 flex-1">
-          <Legend segments={segments} total={submitted} />
-        </div>
-      </div>
-      <p className="text-xs text-muted-foreground">
-        Valid: <span className="font-medium text-foreground/90 tabular-nums">{validValue}/{submitted}</span> ({pct(validValue, submitted)}%)
-      </p>
-    </div>
-  );
-}
-
-function coffeeSegments(r: Row): Segment[] {
-  return [
-    { label: "Completed", value: r.coffee_completed, color: GREEN },
-    { label: "Booked (incomplete)", value: r.coffee_booked, color: AMBER },
-    { label: "Returning (exempt)", value: r.coffee_returning, color: INDIGO },
-    { label: "Nothing", value: r.coffee_nothing, color: NEUTRAL },
-  ];
-}
-
-function infoSegments(r: Row): Segment[] {
-  return [
-    { label: "Attended", value: r.info_attended, color: SKY },
-    { label: "Returning (didn't attend)", value: r.info_returning, color: INDIGO },
-    { label: "Nothing", value: r.info_nothing, color: NEUTRAL },
-  ];
-}
 
 const submittedTotal = (r: Row) => r.submitted + r.accepted + r.rejected;
 // Valid = cleared the requirement. A booked-but-incomplete chat doesn't count;
@@ -331,22 +280,6 @@ export function ApplicationAnalyticsModal({
                       <div className="text-[0.7rem] text-muted-foreground">{label}</div>
                     </div>
                   ))}
-                </div>
-
-                {/* Pies */}
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <ChartCard
-                    title="Coffee chat"
-                    segments={coffeeSegments(selected)}
-                    validValue={coffeeValid(selected)}
-                    submitted={submittedTotal(selected)}
-                  />
-                  <ChartCard
-                    title="Info session"
-                    segments={infoSegments(selected)}
-                    validValue={infoValid(selected)}
-                    submitted={submittedTotal(selected)}
-                  />
                 </div>
 
                 {/* Combined valid: cleared both requirements */}

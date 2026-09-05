@@ -5,7 +5,6 @@ import { useEffect, useMemo, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { rankLabel } from "@/lib/application-rank";
-import { DonutChart, Legend, type Segment } from "@/components/donut-chart";
 
 // One row per (project, rank) from application_project_rankings() (0061).
 type Row = {
@@ -26,17 +25,11 @@ type ProjectRow = {
 };
 
 const PROJECT_TYPE_LABELS: Record<string, string> = { studio: "OP Studio", launch: "OP Launch" };
-const STUDIO = "#7c3aed"; // violet
-const LAUNCH = "#0284c7"; // sky
-
-function typeColor(type: string): string {
-  return type === "studio" ? STUDIO : LAUNCH;
-}
 
 // Exec-only global project analytics for one period: a project × rank matrix of
-// how many submitted applicants picked each project 1st, 2nd, … plus first-choice
-// popularity and demand-vs-capacity visuals. Fetched from the
-// application_project_rankings RPC (+ project capacities) on open.
+// how many submitted applicants picked each project 1st, 2nd, … plus
+// demand-vs-capacity visuals. Fetched from the application_project_rankings
+// RPC (+ project capacities) on open.
 export function ProjectAnalyticsModal({
   open,
   onOpenChange,
@@ -86,7 +79,7 @@ export function ProjectAnalyticsModal({
     })();
   }, [open, periodId]);
 
-  const { projects, maxRank, maxFirsts, totalFirsts, studioFirsts, launchFirsts } = useMemo(() => {
+  const { projects, maxRank } = useMemo(() => {
     const byProject = new Map<string, ProjectRow>();
     let max = 0;
     for (const r of rows ?? []) {
@@ -101,21 +94,10 @@ export function ProjectAnalyticsModal({
       if (r.rank === 1) p.firsts += r.cnt;
     }
     const list = [...byProject.values()].sort((a, b) => b.firsts - a.firsts || a.name.localeCompare(b.name));
-    return {
-      projects: list,
-      maxRank: max,
-      maxFirsts: list.reduce((m, p) => Math.max(m, p.firsts), 0),
-      totalFirsts: list.reduce((s, p) => s + p.firsts, 0),
-      studioFirsts: list.filter((p) => p.type === "studio").reduce((s, p) => s + p.firsts, 0),
-      launchFirsts: list.filter((p) => p.type === "launch").reduce((s, p) => s + p.firsts, 0),
-    };
+    return { projects: list, maxRank: max };
   }, [rows]);
 
   const ranks = Array.from({ length: maxRank }, (_, i) => i + 1);
-  const trackSegments: Segment[] = [
-    { label: "OP Studio", value: studioFirsts, color: STUDIO },
-    { label: "OP Launch", value: launchFirsts, color: LAUNCH },
-  ];
 
   // Demand (1st-choice count) vs capacity, for projects that have a capacity set.
   const withCapacity = projects
@@ -145,61 +127,6 @@ export function ProjectAnalyticsModal({
               <p className="text-sm text-muted-foreground">No ranked applications for this period yet.</p>
             ) : (
               <>
-                {/* First-choice popularity + track split */}
-                <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_auto]">
-                  <div className="flex flex-col gap-2 rounded-xl border bg-background p-4">
-                    <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      First-choice popularity
-                    </h3>
-                    <ul className="flex flex-col gap-1.5">
-                      {projects.map((p) => {
-                        const width = maxFirsts === 0 ? 0 : Math.round((p.firsts / maxFirsts) * 100);
-                        return (
-                          <li key={p.id} className="flex items-center gap-2 text-xs">
-                            <span className="w-28 flex-shrink-0 truncate text-foreground/90" title={p.name}>
-                              {p.name}
-                            </span>
-                            <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-foreground/10">
-                              <div
-                                className="h-full rounded-full"
-                                style={{ width: `${width}%`, background: typeColor(p.type) }}
-                              />
-                            </div>
-                            <span className="w-6 flex-shrink-0 text-right tabular-nums text-muted-foreground">
-                              {p.firsts}
-                            </span>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                    <div className="mt-1 flex items-center gap-4 text-[0.7rem] text-muted-foreground">
-                      <span className="flex items-center gap-1.5">
-                        <span className="h-2.5 w-2.5 rounded-sm" style={{ background: STUDIO }} /> OP Studio
-                      </span>
-                      <span className="flex items-center gap-1.5">
-                        <span className="h-2.5 w-2.5 rounded-sm" style={{ background: LAUNCH }} /> OP Launch
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col gap-2 rounded-xl border bg-background p-4">
-                    <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      1st choices by track
-                    </h3>
-                    <div className="flex items-center gap-4">
-                      <DonutChart
-                        segments={trackSegments}
-                        total={totalFirsts}
-                        centerValue={`${totalFirsts}`}
-                        centerSub="1st picks"
-                      />
-                      <div className="min-w-0">
-                        <Legend segments={trackSegments} total={totalFirsts} />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
                 {/* Demand vs capacity */}
                 <div className="flex flex-col gap-2 rounded-xl border bg-background p-4">
                   <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
