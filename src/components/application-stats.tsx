@@ -8,7 +8,17 @@ export type Stats = {
   submitted: number;
   accepted: number;
   rejected: number;
+  // Of the submitted applicants (submitted + accepted + rejected), how many have
+  // a valid coffee-chat status (booked/completed a chat, or a returning member
+  // who's exempt) / attended an info session.
+  coffee_chat_valid: number;
+  infosession_attended: number;
 };
+
+// Whole-percent, guarding a zero denominator so an empty period shows 0%.
+function pct(n: number, d: number): number {
+  return d === 0 ? 0 : Math.round((n / d) * 100);
+}
 
 function Tile({ label, value }: { label: string; value: number }) {
   return (
@@ -29,6 +39,7 @@ export function ApplicationStats({ stats }: { stats: Stats | null }) {
           ))}
         </div>
         <div className="h-3 w-48 rounded bg-muted animate-pulse" />
+        <div className="h-3 w-56 rounded bg-muted animate-pulse" />
       </div>
     );
   }
@@ -44,6 +55,10 @@ export function ApplicationStats({ stats }: { stats: Stats | null }) {
       </div>
       <p className="text-xs text-muted-foreground tabular-nums">
         Pending review {stats.submitted} · Accepted {stats.accepted} · Rejected {stats.rejected}
+      </p>
+      <p className="text-xs text-muted-foreground tabular-nums">
+        Coffee chat {stats.coffee_chat_valid}/{completed} ({pct(stats.coffee_chat_valid, completed)}%) · Info session{" "}
+        {stats.infosession_attended}/{completed} ({pct(stats.infosession_attended, completed)}%)
       </p>
     </div>
   );

@@ -7,7 +7,12 @@ import { ProfileModal } from "@/components/profile-modal";
 import { cn } from "@/lib/utils";
 import { sortRoles } from "@/lib/role-order";
 import { readableTextColor, DEFAULT_ACCENT } from "@/lib/portal-color";
-import { CoffeeChatIndicator, InfosessionIndicator, type CoffeeState } from "@/components/applicant-indicators";
+import {
+  CoffeeChatIndicator,
+  InfosessionIndicator,
+  SubmittedApplicationIndicator,
+  type CoffeeState,
+} from "@/components/applicant-indicators";
 
 export type Role = { id: string; role_name: string };
 
@@ -33,6 +38,7 @@ export type PublicProfile = {
   // (board/exec/PM); the API omits these for other viewers.
   coffee_chat?: CoffeeState | null;
   infosession_attended?: boolean | null;
+  submitted_application?: boolean | null;
 };
 
 export type OpenTarget = { userId: string; name: string; preloaded?: Partial<PublicProfile> };
@@ -157,6 +163,7 @@ export function PersonName({ userId, name, preloaded, className }: PersonNamePro
               <span className="font-semibold text-sm truncate">{name}</span>
               <CoffeeChatIndicator state={cached?.coffee_chat} />
               <InfosessionIndicator attended={cached?.infosession_attended} />
+              <SubmittedApplicationIndicator submitted={cached?.submitted_application} />
             </div>
             {(roles.length > 0 || projects.length > 0) && (
               <div className="flex flex-wrap gap-1">

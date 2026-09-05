@@ -62,9 +62,14 @@ export async function GET(
   // an exec "viewing as member" (sim cookie) correctly loses them. Non-managers
   // never receive these keys, so the client can't surface what it never sees.
   const isManager = accessIsBoardOrExec(await getEffectiveAccessLevels(supabase));
-  let recruiting: { coffee_chat: CoffeeState; infosession_attended: boolean } | null = null;
+  let recruiting:
+    | { coffee_chat: CoffeeState; infosession_attended: boolean; submitted_application: boolean }
+    | null = null;
   if (isManager) {
-    const [{ data: chats }, { data: info }] = await Promise.all([
+    // The submitted-application check is scoped to the current cycle, so resolve
+    // the period first (returns the open period, else the most recent).
+    const { data: periodId } = await supabase.rpc("current_application_period");
+    const [{ data: chats }, { data: info }, { data: apps }] = await Promise.all([
       // A booked chat has applicant_id set; `complete` marks it done. Open
       // (unbooked) slots have a null applicant_id and won't match.
       supabase.from("coffee_chats").select("complete").eq("applicant_id", userId),
@@ -74,13 +79,28 @@ export async function GET(
         .from("infosesh_attendance")
         .select("id")
         .or(`applicant_id.eq.${userId},member_id.eq.${userId}`),
+      // A submitted (non-draft) application in the current period. Skip when
+      // there's no period yet (feeding an empty string to a uuid column errors).
+      periodId
+        ? supabase
+            .from("applications")
+            .select("status")
+            .eq("applicant_id", userId)
+            .eq("period_id", periodId)
+            .neq("status", "draft")
+            .limit(1)
+        : Promise.resolve({ data: [] as { status: string }[] }),
     ]);
     const coffee_chat: CoffeeState = (chats ?? []).some((c) => c.complete)
       ? "done"
       : (chats ?? []).length > 0
         ? "booked"
         : "none";
-    recruiting = { coffee_chat, infosession_attended: (info ?? []).length > 0 };
+    recruiting = {
+      coffee_chat,
+      infosession_attended: (info ?? []).length > 0,
+      submitted_application: (apps ?? []).length > 0,
+    };
   }
 
   return NextResponse.json({ ...publicMember, roles, projects, ...recruiting });
