@@ -285,7 +285,7 @@ export function PortalSettingsModal({ portalId, open, onOpenChange, initial, onM
                     <PlusCircle size={14} />
                   </button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="max-h-64 overflow-y-auto">
+                <DropdownMenuContent align="start" className="max-h-64">
                   {available.length === 0 ? (
                     <div className="px-2 py-1.5 text-xs text-muted-foreground">No roles left to add</div>
                   ) : (

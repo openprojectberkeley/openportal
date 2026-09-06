@@ -47,6 +47,7 @@ type RankedProject = { id: string; name: string };
 type SheetRow = {
   id: string;
   status: ReviewStatus;
+  submittedAt: string | null;
   applicantId: string;
   name: string;
   rank: number;
@@ -79,6 +80,7 @@ type DecisionFilter = "any" | "pending" | "accepted" | "rejected";
 type SortKey =
   | "rank"
   | "name"
+  | "submitted"
   | "year"
   | "coffee"
   | "projectCoffee"
@@ -106,6 +108,18 @@ function classRank(label: string): number {
 }
 
 const COFFEE_SORT: Record<CoffeeState, number> = { done: 0, booked: 1, none: 2 };
+
+// Compact enough for a table cell; matches the timestamp cells in the manager
+// info-session table. The year is left to the cell's title attribute.
+function submittedLabel(iso: string | null): string {
+  if (!iso) return "";
+  return new Date(iso).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
 
 // Exports read like the table rather than like the enum columns behind it.
 const COFFEE_CSV: Record<CoffeeState, string> = { done: "Done", booked: "Booked", none: "" };
@@ -188,7 +202,7 @@ function HeaderMenu({
           )}
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="max-h-72 overflow-y-auto">
+      <DropdownMenuContent align="start" className="max-h-72">
         {columnKey && (
           <>
             <DropdownMenuItem className="text-xs" onSelect={() => onSort({ key: columnKey, dir: "asc" })}>
@@ -483,9 +497,9 @@ export function ApplicationSheetModal({
       // The overview leaves the embed a plain left join and keeps every ranking
       // instead, so applicants who ranked nothing still get a row.
       const appSelect = project
-        ? `id, status, applicant_id, tech_classes, tech_classes_other, tech_area_rankings, portfolio_url, about_note,
+        ? `id, status, submitted_at, applicant_id, tech_classes, tech_classes_other, tech_area_rankings, portfolio_url, about_note,
            application_rankings!inner(rank, essay, application_answers(question_id, answer, answer_options))`
-        : `id, status, applicant_id, tech_classes, tech_classes_other, tech_area_rankings, portfolio_url, about_note,
+        : `id, status, submitted_at, applicant_id, tech_classes, tech_classes_other, tech_area_rankings, portfolio_url, about_note,
            application_rankings(rank, ranked, project:projects(id, name))`;
 
       let appQuery = supabase
@@ -540,6 +554,7 @@ export function ApplicationSheetModal({
       type Raw = {
         id: string;
         status: ReviewStatus;
+        submitted_at: string | null;
         applicant_id: string | null;
         tech_classes: string[] | null;
         tech_classes_other: string | null;
@@ -610,6 +625,7 @@ export function ApplicationSheetModal({
         return {
           id: r.id,
           status: r.status,
+          submittedAt: r.submitted_at,
           applicantId: aid,
           name,
           // On the overview `ranking` is just whichever ranking came back
@@ -634,6 +650,7 @@ export function ApplicationSheetModal({
           // box matches full essays and answers, not their truncated preview.
           search: [
             name,
+            submittedLabel(r.submitted_at),
             m?.grad_year ?? "",
             ...classLabels,
             ...topAreas,
@@ -782,6 +799,13 @@ export function ApplicationSheetModal({
           return a.rank - b.rank;
         case "name":
           return a.name.localeCompare(b.name);
+        // Earliest first ascending. Every row here is submitted/accepted/
+        // rejected so a null shouldn't occur, but it sorts last if one does.
+        case "submitted":
+          return (
+            (a.submittedAt ? new Date(a.submittedAt).getTime() : Infinity) -
+            (b.submittedAt ? new Date(b.submittedAt).getTime() : Infinity)
+          );
         case "year":
           return classRank(a.gradYear) - classRank(b.gradYear) || a.gradYear.localeCompare(b.gradYear);
         case "coffee":
@@ -919,7 +943,12 @@ export function ApplicationSheetModal({
     for (const q of questions) {
       cols.push({ header: q.prompt, value: (r) => answerText(r, q.id) });
     }
-    cols.push({ header: "Decision", value: (r) => DECISION_CSV[r.status] });
+    cols.push(
+      // The raw timestamp, so a spreadsheet parses and sorts it as a date
+      // rather than as the abbreviated text the cell shows.
+      { header: "Submitted", value: (r) => r.submittedAt ?? "" },
+      { header: "Decision", value: (r) => DECISION_CSV[r.status] },
+    );
     return cols;
   }, [isOverview, isStudio, slots, questions]);
 
@@ -981,7 +1010,7 @@ export function ApplicationSheetModal({
                     <ChevronDown size={12} className="text-muted-foreground" />
                   </button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="max-h-72 overflow-y-auto">
+                <DropdownMenuContent align="start" className="max-h-72">
                   {pages.map((p, i) => (
                     <DropdownMenuItem
                       key={p.kind === "overview" ? "__overview__" : p.project.id}
@@ -1258,6 +1287,9 @@ export function ApplicationSheetModal({
                     </th>
                   ))}
                   <th className={th}>
+                    <HeaderMenu label="Submitted" columnKey="submitted" sort={effectiveSort} onSort={setSort} menu={menu} />
+                  </th>
+                  <th className={th}>
                     <HeaderMenu
                       label="Decision"
                       sort={effectiveSort}
@@ -1461,6 +1493,12 @@ export function ApplicationSheetModal({
                           </td>
                         );
                       })}
+                      <td
+                        className={cn(td, "whitespace-nowrap text-muted-foreground")}
+                        title={r.submittedAt ? new Date(r.submittedAt).toLocaleString() : undefined}
+                      >
+                        {r.submittedAt ? submittedLabel(r.submittedAt) : "—"}
+                      </td>
                       <td className={td}>
                         {r.status === "accepted" ? (
                           <Badge className="bg-green-600 hover:bg-green-600 text-[0.65rem] px-1.5 py-0">Accepted</Badge>

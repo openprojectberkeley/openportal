@@ -7,6 +7,7 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { ScrollArea } from "@/components/overlay-scrollbar";
 import { useNotifications, type AppNotification } from "@/components/notifications-provider";
 
 function relativeTime(iso: string): string {
@@ -52,7 +53,7 @@ export function NotificationBell() {
         {items.length === 0 ? (
           <p className="px-3 py-6 text-center text-sm text-muted-foreground">You&apos;re all caught up.</p>
         ) : (
-          <div className="max-h-96 overflow-y-auto">
+          <ScrollArea className="max-h-96">
             {items.map((n) => (
               <button
                 key={n.id}
@@ -67,7 +68,7 @@ export function NotificationBell() {
                 </span>
               </button>
             ))}
-          </div>
+          </ScrollArea>
         )}
       </DropdownMenuContent>
     </DropdownMenu>
