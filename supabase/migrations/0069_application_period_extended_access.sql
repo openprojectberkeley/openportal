@@ -4,19 +4,22 @@
 -- 0023) -- there was previously no way to let one specific applicant keep
 -- submitting/editing after a period closes for everyone else. This adds:
 --
---   1. application_period_access: (period_id, user_id) grants. user_id
---      references public.members(user_id) (not auth.users directly) so the
---      admin UI can pick a person from a name-search dropdown over `members`
---      -- the same table/pattern the portal and project member pickers
---      already use (add-member-picker.tsx) -- and so the grants list can
---      embed-join members for display. Read/write is a single policy gated
---      to VP Tech or President (public.is_vp_tech_or_president(), 0047) --
---      the same restriction as the coffee-chat booking window, deliberately
---      narrower than is_exec() since this is a review-integrity-sensitive
---      override. No email lookup / SECURITY DEFINER RPC is needed: the
---      client already has the target's user_id from the picker, so grant/
---      revoke are plain table writes under RLS (mirrors application_periods
---      itself, 0022).
+--   1. application_period_access: (period_id, user_id, expires_at) grants.
+--      user_id references public.members(user_id) (not auth.users directly)
+--      so the admin UI can pick a person from a name-search dropdown over
+--      `members` -- the same table/pattern the portal and project member
+--      pickers already use (add-member-picker.tsx) -- and so the grants list
+--      can embed-join members for display. Every grant has an expiry (picked
+--      at grant time) so it lapses on its own rather than needing to be
+--      remembered and manually revoked; period_is_open_for()/
+--      my_open_application_period() below both check `expires_at > now()`.
+--      Read/write is a single policy gated to VP Tech or President
+--      (public.is_vp_tech_or_president(), 0047) -- the same restriction as
+--      the coffee-chat booking window, deliberately narrower than is_exec()
+--      since this is a review-integrity-sensitive override. No email lookup
+--      / SECURITY DEFINER RPC is needed: the client already has the target's
+--      user_id from the picker, so grant/revoke are plain table writes under
+--      RLS (mirrors application_periods itself, 0022).
 --   2. period_is_open_for(period_id): applications_open() (0023) generalized
 --      to "open, or the current user has an explicit grant for this period."
 --      Replaces applications_open() in the applicant write policies on
@@ -42,11 +45,15 @@ create table if not exists public.application_period_access (
   user_id    uuid not null references public.members(user_id) on delete cascade,
   granted_by uuid references public.members(user_id) on delete set null default auth.uid(),
   granted_at timestamptz not null default now(),
+  expires_at timestamptz not null,
   unique (period_id, user_id)
 );
 
 alter table public.application_period_access drop column if exists email;
 alter table public.application_period_access alter column granted_by set default auth.uid();
+alter table public.application_period_access add column if not exists expires_at timestamptz;
+update public.application_period_access set expires_at = granted_at + interval '7 days' where expires_at is null;
+alter table public.application_period_access alter column expires_at set not null;
 alter table public.application_period_access drop constraint if exists application_period_access_user_id_fkey;
 alter table public.application_period_access
   add constraint application_period_access_user_id_fkey
@@ -84,7 +91,7 @@ as $$
   )
   or exists (
     select 1 from public.application_period_access a
-    where a.period_id = p_period_id and a.user_id = auth.uid()
+    where a.period_id = p_period_id and a.user_id = auth.uid() and a.expires_at > now()
   );
 $$;
 
@@ -104,7 +111,7 @@ as $$
   where p.status = 'open'
      or exists (
        select 1 from public.application_period_access a
-       where a.period_id = p.id and a.user_id = auth.uid()
+       where a.period_id = p.id and a.user_id = auth.uid() and a.expires_at > now()
      )
   order by (p.status = 'open') desc, p.created_at desc
   limit 1;

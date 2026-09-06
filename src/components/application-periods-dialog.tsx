@@ -62,17 +62,47 @@ function StatusPicker({
 }
 
 type MemberOption = { user_id: string; name: string };
-type AccessGrant = { id: string; user_id: string; name: string };
+type AccessGrant = { id: string; user_id: string; name: string; expires_at: string };
 
 const fullName = (first: string | null | undefined, last: string | null | undefined) =>
   [first, last].filter(Boolean).join(" ") || "—";
 
+const DEFAULT_GRANT_DAYS = 7;
+
+// timestamptz <-> local 'YYYY-MM-DD' (the value format of <input type="date">).
+function toDateInputValue(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+function defaultExpiryDate(): string {
+  const d = new Date();
+  d.setDate(d.getDate() + DEFAULT_GRANT_DAYS);
+  return toDateInputValue(d);
+}
+// A grant "until" a picked date lasts through the end of that local day, not
+// just to its midnight start.
+const endOfDayIso = (dateStr: string) => new Date(`${dateStr}T23:59:59`).toISOString();
+
+const formatExpiry = (iso: string) => {
+  const label = new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return new Date(iso).getTime() < Date.now() ? `expired ${label}` : `until ${label}`;
+};
+
 // Popover with a search box over `options`, filtered by name as you type —
 // same shape as AddMemberPicker (add-member-picker.tsx) minus its role/project
-// filters, which don't apply here.
-function GrantAccessPicker({ options, onGrant }: { options: MemberOption[]; onGrant: (m: MemberOption) => void }) {
+// filters, which don't apply here — followed by an expiry-date step once a
+// person is picked.
+function GrantAccessPicker({
+  options,
+  onGrant,
+}: {
+  options: MemberOption[];
+  onGrant: (m: MemberOption, expiresAt: string) => void;
+}) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const [pending, setPending] = useState<MemberOption | null>(null);
+  const [expiresOn, setExpiresOn] = useState(defaultExpiryDate());
 
   // Portal the popover into an enclosing Dialog's content so it inherits that
   // dialog's pointer-events region and focus scope (same trick as
@@ -89,7 +119,17 @@ function GrantAccessPicker({ options, onGrant }: { options: MemberOption[]; onGr
 
   const handleOpenChange = (next: boolean) => {
     setOpen(next);
-    if (!next) setSearch("");
+    if (!next) {
+      setSearch("");
+      setPending(null);
+      setExpiresOn(defaultExpiryDate());
+    }
+  };
+
+  const confirm = () => {
+    if (!pending || !expiresOn) return;
+    onGrant(pending, endOfDayIso(expiresOn));
+    handleOpenChange(false);
   };
 
   return (
@@ -102,34 +142,58 @@ function GrantAccessPicker({ options, onGrant }: { options: MemberOption[]; onGr
         </Button>
       </PopoverTrigger>
       <PopoverContent container={dialogContainer} side="bottom" align="start" className="w-64 p-2">
-        <div className="flex flex-col gap-2">
-          <Input
-            autoFocus
-            placeholder="Search by name…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="h-8"
-          />
-          <ScrollArea className="max-h-56">
-            {options.length === 0 ? (
-              <p className="px-2 py-3 text-xs text-center text-muted-foreground">Everyone already has access</p>
-            ) : results.length === 0 ? (
-              <p className="px-2 py-3 text-xs text-center text-muted-foreground">No matches</p>
-            ) : (
-              <div className="flex flex-col">
-                {results.map((m) => (
-                  <button
-                    key={m.user_id}
-                    onClick={() => { onGrant(m); handleOpenChange(false); }}
-                    className="rounded-sm px-2 py-1.5 text-left text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent"
-                  >
-                    {m.name}
-                  </button>
-                ))}
-              </div>
-            )}
-          </ScrollArea>
-        </div>
+        {pending ? (
+          <div className="flex flex-col gap-2">
+            <p className="text-sm px-1 font-medium">{pending.name}</p>
+            <label className="flex flex-col gap-1 text-xs font-medium px-1">
+              Until
+              <input
+                type="date"
+                value={expiresOn}
+                min={toDateInputValue(new Date())}
+                onChange={(e) => setExpiresOn(e.target.value)}
+                className="border rounded-md px-2 py-1.5 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+              />
+            </label>
+            <div className="flex gap-2">
+              <Button size="sm" variant="ghost" className="flex-1" onClick={() => setPending(null)}>
+                Back
+              </Button>
+              <Button size="sm" className="flex-1" onClick={confirm} disabled={!expiresOn}>
+                Grant access
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            <Input
+              autoFocus
+              placeholder="Search by name…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="h-8"
+            />
+            <ScrollArea className="max-h-56">
+              {options.length === 0 ? (
+                <p className="px-2 py-3 text-xs text-center text-muted-foreground">Everyone already has access</p>
+              ) : results.length === 0 ? (
+                <p className="px-2 py-3 text-xs text-center text-muted-foreground">No matches</p>
+              ) : (
+                <div className="flex flex-col">
+                  {results.map((m) => (
+                    <button
+                      key={m.user_id}
+                      onClick={() => setPending(m)}
+                      className="rounded-sm px-2 py-1.5 text-left text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent"
+                    >
+                      {m.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </ScrollArea>
+          </div>
+        )}
       </PopoverContent>
     </Popover>
   );
@@ -145,20 +209,33 @@ function ExtendedAccessSection({ periodId, allMembers }: { periodId: string; all
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Postgres' unique-violation code — surfaces if this section's `grants` list
+  // is stale (e.g. it failed to load) and the picker offered someone who
+  // already has a grant; re-fetching resolves the staleness rather than
+  // leaving the row un-added and the list still wrong.
+  const UNIQUE_VIOLATION_CODE = "23505";
+
   const load = useCallback(async () => {
     const supabase = createClient();
-    const { data } = await supabase
+    const { data, error: err } = await supabase
       .from("application_period_access")
-      .select("id, user_id, members(preferred_firstname, lastname)")
+      .select("id, user_id, expires_at, members(preferred_firstname, lastname)")
       .eq("period_id", periodId);
+    if (err) { setError(err.message); setGrants([]); return; }
     const rows = (data ?? []) as unknown as {
       id: string;
       user_id: string;
+      expires_at: string;
       members: { preferred_firstname: string | null; lastname: string | null } | null;
     }[];
     setGrants(
       rows
-        .map((r) => ({ id: r.id, user_id: r.user_id, name: fullName(r.members?.preferred_firstname, r.members?.lastname) }))
+        .map((r) => ({
+          id: r.id,
+          user_id: r.user_id,
+          expires_at: r.expires_at,
+          name: fullName(r.members?.preferred_firstname, r.members?.lastname),
+        }))
         .sort((a, b) => a.name.localeCompare(b.name)),
     );
   }, [periodId]);
@@ -170,13 +247,13 @@ function ExtendedAccessSection({ periodId, allMembers }: { periodId: string; all
     [allMembers, grants],
   );
 
-  const grant = async (m: MemberOption) => {
+  const grant = async (m: MemberOption, expiresAt: string) => {
     setError(null);
     const supabase = createClient();
     const { error: err } = await supabase
       .from("application_period_access")
-      .insert({ period_id: periodId, user_id: m.user_id });
-    if (err) { setError(err.message); return; }
+      .insert({ period_id: periodId, user_id: m.user_id, expires_at: expiresAt });
+    if (err && err.code !== UNIQUE_VIOLATION_CODE) { setError(err.message); return; }
     load();
   };
 
@@ -204,21 +281,27 @@ function ExtendedAccessSection({ periodId, allMembers }: { periodId: string; all
       </p>
       {grants && grants.length > 0 && (
         <ul className="flex flex-col gap-1">
-          {grants.map((g) => (
-            <li key={g.id} className="flex items-center justify-between gap-2 text-sm">
-              <span>{g.name}</span>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => revoke(g)}
-                disabled={removingId === g.user_id}
-                aria-label={`Remove ${g.name}`}
-                className="text-muted-foreground hover:text-red-500 h-6 w-6 p-0"
-              >
-                <X size={14} />
-              </Button>
-            </li>
-          ))}
+          {grants.map((g) => {
+            const expired = new Date(g.expires_at).getTime() < Date.now();
+            return (
+              <li key={g.id} className="flex items-center justify-between gap-2 text-sm">
+                <span className="truncate">{g.name}</span>
+                <span className={`text-xs shrink-0 ${expired ? "text-red-500" : "text-muted-foreground"}`}>
+                  {formatExpiry(g.expires_at)}
+                </span>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => revoke(g)}
+                  disabled={removingId === g.user_id}
+                  aria-label={`Remove ${g.name}`}
+                  className="text-muted-foreground hover:text-red-500 h-6 w-6 p-0 shrink-0"
+                >
+                  <X size={14} />
+                </Button>
+              </li>
+            );
+          })}
         </ul>
       )}
       <div>
