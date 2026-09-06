@@ -1,0 +1,276 @@
+-- Per-person extended access to a closed application period.
+--
+-- application_periods.status is a single global open/closed switch (0022,
+-- 0023) -- there was previously no way to let one specific applicant keep
+-- submitting/editing after a period closes for everyone else. This adds:
+--
+--   1. application_period_access: (period_id, user_id) grants, resolved from
+--      an email at grant time. Readable/writable only by VP Tech or
+--      President (public.is_vp_tech_or_president(), 0047) -- the same
+--      restriction as the coffee-chat booking window, deliberately narrower
+--      than is_exec() since this is a review-integrity-sensitive override.
+--   2. grant_application_period_access / revoke_application_period_access:
+--      SECURITY DEFINER RPCs (mirrors accept_application/reject_application,
+--      0022) so the client never touches auth.users directly. Grant looks up
+--      the email the same way account_exists() does (0052).
+--   3. period_is_open_for(period_id): applications_open() (0023) generalized
+--      to "open, or the current user has an explicit grant for this period."
+--      Replaces applications_open() in the applicant write policies on
+--      applications / application_rankings / application_answers so an
+--      allowlisted applicant's writes succeed even once the period is
+--      closed. applications_open() itself is untouched -- it still means
+--      "is *some* period open" for any other caller.
+--   4. my_open_application_period(): the period id the current applicant
+--      should load -- the open one, or one they hold a grant for. Replaces
+--      the client's direct `status = 'open'` query in application/page.tsx.
+
+create table if not exists public.application_period_access (
+  id         uuid primary key default gen_random_uuid(),
+  period_id  uuid not null references public.application_periods(id) on delete cascade,
+  user_id    uuid not null references auth.users(id) on delete cascade,
+  email      text not null,
+  granted_by uuid references auth.users(id) on delete set null,
+  granted_at timestamptz not null default now(),
+  unique (period_id, user_id)
+);
+
+alter table public.application_period_access enable row level security;
+
+-- VP Tech/President-only read (the admin dialog lists grants). All writes go
+-- through the SECURITY DEFINER RPCs below, so no insert/update/delete policy
+-- is needed here.
+drop policy if exists "application_period_access_select" on public.application_period_access;
+create policy "application_period_access_select"
+on public.application_period_access
+for select
+to authenticated
+using ( public.is_vp_tech_or_president() );
+
+-- Grant: resolve the email to an existing account and record the grant.
+create or replace function public.grant_application_period_access(p_period_id uuid, p_email text)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_email text := lower(trim(p_email));
+  v_user_id uuid;
+begin
+  if not public.is_vp_tech_or_president() then
+    raise exception 'not authorized';
+  end if;
+
+  select id into v_user_id from auth.users where lower(email) = v_email;
+  if v_user_id is null then
+    raise exception 'no account found for that email';
+  end if;
+
+  insert into public.application_period_access (period_id, user_id, email, granted_by)
+  values (p_period_id, v_user_id, v_email, auth.uid())
+  on conflict (period_id, user_id) do nothing;
+end;
+$$;
+
+grant execute on function public.grant_application_period_access(uuid, text) to authenticated;
+
+-- Revoke: remove a grant.
+create or replace function public.revoke_application_period_access(p_period_id uuid, p_user_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not public.is_vp_tech_or_president() then
+    raise exception 'not authorized';
+  end if;
+
+  delete from public.application_period_access
+  where period_id = p_period_id and user_id = p_user_id;
+end;
+$$;
+
+grant execute on function public.revoke_application_period_access(uuid, uuid) to authenticated;
+
+-- Is this period open for the current user -- either globally open, or they
+-- hold an explicit grant for it? Used in place of applications_open() in the
+-- write policies below, where the row's period_id is known.
+create or replace function public.period_is_open_for(p_period_id uuid)
+returns boolean
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select exists (
+    select 1 from public.application_periods p
+    where p.id = p_period_id and p.status = 'open'
+  )
+  or exists (
+    select 1 from public.application_period_access a
+    where a.period_id = p_period_id and a.user_id = auth.uid()
+  );
+$$;
+
+grant execute on function public.period_is_open_for(uuid) to authenticated;
+
+-- The period id an applicant should load: the open one, or one they hold a
+-- grant for (even though it's closed for everyone else).
+create or replace function public.my_open_application_period()
+returns uuid
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select p.id
+  from public.application_periods p
+  where p.status = 'open'
+     or exists (
+       select 1 from public.application_period_access a
+       where a.period_id = p.id and a.user_id = auth.uid()
+     )
+  order by (p.status = 'open') desc, p.created_at desc
+  limit 1;
+$$;
+
+grant execute on function public.my_open_application_period() to authenticated;
+
+-- Re-gate applicant writes on period_is_open_for(<row's period>) instead of
+-- the global applications_open() (same policies, same shape, as 0022).
+
+drop policy if exists "applications_insert" on public.applications;
+create policy "applications_insert"
+on public.applications
+for insert
+to authenticated
+with check ( applicant_id = auth.uid() and public.period_is_open_for(period_id) );
+
+drop policy if exists "applications_update" on public.applications;
+create policy "applications_update"
+on public.applications
+for update
+to authenticated
+using ( applicant_id = auth.uid() and public.period_is_open_for(period_id) )
+with check ( applicant_id = auth.uid() and public.period_is_open_for(period_id) );
+
+drop policy if exists "application_rankings_insert" on public.application_rankings;
+create policy "application_rankings_insert"
+on public.application_rankings
+for insert
+to authenticated
+with check (
+  exists (
+    select 1 from public.applications a
+    where a.id = application_id
+      and a.applicant_id = auth.uid()
+      and public.period_is_open_for(a.period_id)
+  )
+  and (
+    public.is_returning_member()
+    or exists (
+      select 1 from public.projects p
+      where p.id = application_rankings.project_id and p.type = 'launch'
+    )
+  )
+);
+
+drop policy if exists "application_rankings_update" on public.application_rankings;
+create policy "application_rankings_update"
+on public.application_rankings
+for update
+to authenticated
+using (
+  exists (
+    select 1 from public.applications a
+    where a.id = application_id
+      and a.applicant_id = auth.uid()
+  )
+)
+with check (
+  exists (
+    select 1 from public.applications a
+    where a.id = application_id
+      and a.applicant_id = auth.uid()
+      and public.period_is_open_for(a.period_id)
+  )
+  and (
+    public.is_returning_member()
+    or exists (
+      select 1 from public.projects p
+      where p.id = application_rankings.project_id and p.type = 'launch'
+    )
+  )
+);
+
+drop policy if exists "application_rankings_delete" on public.application_rankings;
+create policy "application_rankings_delete"
+on public.application_rankings
+for delete
+to authenticated
+using (
+  exists (
+    select 1 from public.applications a
+    where a.id = application_id
+      and a.applicant_id = auth.uid()
+      and public.period_is_open_for(a.period_id)
+  )
+);
+
+drop policy if exists "application_answers_insert" on public.application_answers;
+create policy "application_answers_insert"
+on public.application_answers
+for insert
+to authenticated
+with check (
+  exists (
+    select 1
+    from public.application_rankings r
+    join public.applications a on a.id = r.application_id
+    where r.id = application_answers.ranking_id
+      and a.applicant_id = auth.uid()
+      and public.period_is_open_for(a.period_id)
+  )
+);
+
+drop policy if exists "application_answers_update" on public.application_answers;
+create policy "application_answers_update"
+on public.application_answers
+for update
+to authenticated
+using (
+  exists (
+    select 1
+    from public.application_rankings r
+    join public.applications a on a.id = r.application_id
+    where r.id = application_answers.ranking_id
+      and a.applicant_id = auth.uid()
+  )
+)
+with check (
+  exists (
+    select 1
+    from public.application_rankings r
+    join public.applications a on a.id = r.application_id
+    where r.id = application_answers.ranking_id
+      and a.applicant_id = auth.uid()
+      and public.period_is_open_for(a.period_id)
+  )
+);
+
+drop policy if exists "application_answers_delete" on public.application_answers;
+create policy "application_answers_delete"
+on public.application_answers
+for delete
+to authenticated
+using (
+  exists (
+    select 1
+    from public.application_rankings r
+    join public.applications a on a.id = r.application_id
+    where r.id = application_answers.ranking_id
+      and a.applicant_id = auth.uid()
+      and public.period_is_open_for(a.period_id)
+  )
+);

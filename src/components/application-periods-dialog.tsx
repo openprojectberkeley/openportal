@@ -1,8 +1,8 @@
 "use client";
 
 import { createClient } from "@/lib/supabase/client";
-import { useState } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { Plus, Trash2, X } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -59,7 +59,111 @@ function StatusPicker({
   );
 }
 
-function PeriodRow({ period, onChanged }: { period: ApplicationPeriod; onChanged: () => void }) {
+type AccessGrant = { id: string; user_id: string; email: string };
+
+// VP Tech/President only: lets the currently-closed (or open) period keep
+// accepting one specific applicant's writes past its global status, via the
+// application_period_access grants + SECURITY DEFINER RPCs from
+// 0067_application_period_extended_access.sql.
+function ExtendedAccessSection({ periodId }: { periodId: string }) {
+  const [grants, setGrants] = useState<AccessGrant[] | null>(null);
+  const [email, setEmail] = useState("");
+  const [granting, setGranting] = useState(false);
+  const [removingId, setRemovingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    const supabase = createClient();
+    const { data } = await supabase
+      .from("application_period_access")
+      .select("id, user_id, email")
+      .eq("period_id", periodId)
+      .order("email");
+    setGrants((data as AccessGrant[]) ?? []);
+  }, [periodId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const grant = async () => {
+    setError(null);
+    if (!email.trim()) return;
+    setGranting(true);
+    const supabase = createClient();
+    const { error: err } = await supabase.rpc("grant_application_period_access", {
+      p_period_id: periodId,
+      p_email: email.trim(),
+    });
+    setGranting(false);
+    if (err) { setError(err.message); return; }
+    setEmail("");
+    load();
+  };
+
+  const revoke = async (userId: string) => {
+    setError(null);
+    setRemovingId(userId);
+    const supabase = createClient();
+    const { error: err } = await supabase.rpc("revoke_application_period_access", {
+      p_period_id: periodId,
+      p_user_id: userId,
+    });
+    setRemovingId(null);
+    if (err) { setError(err.message); return; }
+    load();
+  };
+
+  return (
+    <div className="flex flex-col gap-2 border-t pt-2.5 mt-1">
+      <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+        Extended access
+      </Label>
+      <p className="text-xs text-muted-foreground">
+        These people can keep applying to this period even while it&apos;s closed to everyone else.
+      </p>
+      {grants && grants.length > 0 && (
+        <ul className="flex flex-col gap-1">
+          {grants.map((g) => (
+            <li key={g.id} className="flex items-center justify-between gap-2 text-sm">
+              <span>{g.email}</span>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => revoke(g.user_id)}
+                disabled={removingId === g.user_id}
+                aria-label={`Remove ${g.email}`}
+                className="text-muted-foreground hover:text-red-500 h-6 w-6 p-0"
+              >
+                <X size={14} />
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="flex items-center gap-2">
+        <Input
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="email@berkeley.edu"
+          className="h-8 text-sm"
+        />
+        <Button size="sm" onClick={grant} disabled={granting || !email.trim()}>
+          {granting ? "Granting…" : "Grant access"}
+        </Button>
+      </div>
+      {error && <p className="text-sm text-red-500">{error}</p>}
+    </div>
+  );
+}
+
+function PeriodRow({
+  period,
+  onChanged,
+  canManageExtendedAccess,
+}: {
+  period: ApplicationPeriod;
+  onChanged: () => void;
+  canManageExtendedAccess: boolean;
+}) {
   const [name, setName] = useState(period.name);
   const [start, setStart] = useState(toDateTimeLocal(period.starts_at));
   const [end, setEnd] = useState(toDateTimeLocal(period.ends_at));
@@ -154,6 +258,7 @@ function PeriodRow({ period, onChanged }: { period: ApplicationPeriod; onChanged
         </Button>
       </div>
       {error && <p className="text-sm text-red-500">{error}</p>}
+      {canManageExtendedAccess && <ExtendedAccessSection periodId={period.id} />}
     </div>
   );
 }
@@ -226,17 +331,21 @@ function NewPeriodForm({ onChanged }: { onChanged: () => void }) {
 }
 
 // Exec-only dialog to create and edit application periods. `onChanged` refreshes
-// the parent's period list after any write.
+// the parent's period list after any write. `canManageExtendedAccess` (VP
+// Tech/President only, see manager/applications/page.tsx's canEmailBlast) gates
+// each period's "Extended access" grant list.
 export function ApplicationPeriodsDialog({
   open,
   onOpenChange,
   periods,
   onChanged,
+  canManageExtendedAccess,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   periods: ApplicationPeriod[];
   onChanged: () => void;
+  canManageExtendedAccess: boolean;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -246,7 +355,12 @@ export function ApplicationPeriodsDialog({
         </DialogHeader>
         <div className="flex flex-col gap-3">
           {periods.map((p) => (
-            <PeriodRow key={p.id} period={p} onChanged={onChanged} />
+            <PeriodRow
+              key={p.id}
+              period={p}
+              onChanged={onChanged}
+              canManageExtendedAccess={canManageExtendedAccess}
+            />
           ))}
           <NewPeriodForm onChanged={onChanged} />
         </div>

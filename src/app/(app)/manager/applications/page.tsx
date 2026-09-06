@@ -591,6 +591,7 @@ export default function ManagerApplicationsPage() {
           onOpenChange={setPeriodsDialogOpen}
           periods={periods}
           onChanged={loadPeriods}
+          canManageExtendedAccess={canEmailBlast}
         />
       )}
 

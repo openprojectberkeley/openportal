@@ -148,15 +148,11 @@ export default function ApplicationPage() {
 
     // Applications can only be built/submitted while a period's status is 'open'
     // (the explicit switch — the start/end window is just an informational
-    // schedule). No open period → the flow is closed.
-    const { data: openPeriods } = await supabase
-      .from("application_periods")
-      .select("id")
-      .eq("status", "open")
-      .order("created_at", { ascending: false })
-      .limit(1);
-    const periodId = openPeriods?.[0]?.id ?? null;
-    periodIdRef.current = periodId;
+    // schedule), or the applicant holds an explicit extended-access grant for a
+    // closed period (see 0067_application_period_extended_access.sql). No
+    // applicable period → the flow is closed.
+    const { data: periodId } = await supabase.rpc("my_open_application_period");
+    periodIdRef.current = periodId ?? null;
 
     if (!periodId) { setClosed(true); setLoading(false); return; }
 
