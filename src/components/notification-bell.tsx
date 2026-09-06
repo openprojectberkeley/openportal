@@ -7,6 +7,7 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { ScrollArea } from "@/components/overlay-scrollbar";
 import { useNotifications, type AppNotification } from "@/components/notifications-provider";
 
 function relativeTime(iso: string): string {
@@ -47,28 +48,32 @@ export function NotificationBell() {
           )}
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-80 p-0">
-        <div className="px-3 py-2 border-b text-sm font-semibold">Notifications</div>
-        {items.length === 0 ? (
-          <p className="px-3 py-6 text-center text-sm text-muted-foreground">You&apos;re all caught up.</p>
-        ) : (
-          <div className="max-h-96 overflow-y-auto">
-            {items.map((n) => (
-              <button
-                key={n.id}
-                onClick={() => { markRead(n.id); router.push(hrefFor(n, userId)); }}
-                className="w-full text-left px-3 py-2.5 border-b last:border-b-0 hover:bg-accent transition-colors flex gap-2"
-              >
-                <span className={`mt-1.5 h-1.5 w-1.5 rounded-full flex-shrink-0 ${n.read ? "bg-transparent" : "bg-blue-500"}`} />
-                <span className="flex flex-col gap-0.5 min-w-0">
-                  <span className="text-sm font-medium">{n.title}</span>
-                  {n.body && <span className="text-xs text-muted-foreground leading-snug">{n.body}</span>}
-                  <span className="text-[11px] text-muted-foreground/70">{relativeTime(n.created_at)}</span>
-                </span>
-              </button>
-            ))}
-          </div>
-        )}
+      <DropdownMenuContent align="end" className="w-80">
+        {/* The menu's scroll padding (p-1 on the content viewport) is cancelled
+            here so the header rule and rows stay flush to the edges. */}
+        <div className="-m-1">
+          <div className="px-3 py-2 border-b text-sm font-semibold">Notifications</div>
+          {items.length === 0 ? (
+            <p className="px-3 py-6 text-center text-sm text-muted-foreground">You&apos;re all caught up.</p>
+          ) : (
+            <ScrollArea className="max-h-96">
+              {items.map((n) => (
+                <button
+                  key={n.id}
+                  onClick={() => { markRead(n.id); router.push(hrefFor(n, userId)); }}
+                  className="w-full text-left px-3 py-2.5 border-b last:border-b-0 hover:bg-accent transition-colors flex gap-2"
+                >
+                  <span className={`mt-1.5 h-1.5 w-1.5 rounded-full flex-shrink-0 ${n.read ? "bg-transparent" : "bg-blue-500"}`} />
+                  <span className="flex flex-col gap-0.5 min-w-0">
+                    <span className="text-sm font-medium">{n.title}</span>
+                    {n.body && <span className="text-xs text-muted-foreground leading-snug">{n.body}</span>}
+                    <span className="text-[11px] text-muted-foreground/70">{relativeTime(n.created_at)}</span>
+                  </span>
+                </button>
+              ))}
+            </ScrollArea>
+          )}
+        </div>
       </DropdownMenuContent>
     </DropdownMenu>
   );

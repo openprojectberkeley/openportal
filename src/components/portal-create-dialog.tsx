@@ -263,7 +263,7 @@ export function PortalCreateDialog({
                       <ChevronDown size={15} className="text-muted-foreground flex-shrink-0" />
                     </button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="max-h-64 overflow-y-auto">
+                  <DropdownMenuContent align="start" className="max-h-64">
                     {memberOptions.map((m) => (
                       <DropdownMenuCheckboxItem
                         key={m.user_id}
@@ -292,7 +292,7 @@ export function PortalCreateDialog({
                       <ChevronDown size={15} className="text-muted-foreground flex-shrink-0" />
                     </button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="max-h-64 overflow-y-auto">
+                  <DropdownMenuContent align="start" className="max-h-64">
                     {roleOptions.map((r) => (
                       <DropdownMenuCheckboxItem
                         key={r.id}

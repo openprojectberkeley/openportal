@@ -6,6 +6,7 @@ import { PlusCircle } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/overlay-scrollbar";
 
 export type MemberOption = { user_id: string; name: string };
 
@@ -166,7 +167,7 @@ export function AddMemberPicker({ options, onAdd, filters, trigger, side = "bott
               ))}
             </select>
           </div>
-          <div className="max-h-64 overflow-y-auto">
+          <ScrollArea className="max-h-64">
             {options.length === 0 ? (
               <p className="px-2 py-3 text-xs text-center text-muted-foreground">No members left to add</p>
             ) : results.length === 0 ? (
@@ -187,7 +188,7 @@ export function AddMemberPicker({ options, onAdd, filters, trigger, side = "bott
                 ))}
               </div>
             )}
-          </div>
+          </ScrollArea>
         </div>
       </PopoverContent>
     </Popover>

@@ -3,7 +3,7 @@
 import { createClient } from "@/lib/supabase/client";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { ChevronDown, SlidersHorizontal, RotateCcw, Mail } from "lucide-react";
+import { ChevronDown, SlidersHorizontal, RotateCcw, Mail, BarChart3, Table2 } from "lucide-react";
 import { useRoleSim } from "@/components/role-simulation-provider";
 import { PersonName } from "@/components/person-profile-provider";
 import { canReviewAllProjects } from "@/lib/roles";
@@ -11,6 +11,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
@@ -18,8 +19,16 @@ import { Button } from "@/components/ui/button";
 import { ApplicationListSkeleton } from "@/components/skeletons";
 import { ApplicationPeriodsDialog, type ApplicationPeriod } from "@/components/application-periods-dialog";
 import { EmailBlastDialog } from "@/components/email-blast-dialog";
-import { ApplicationReviewModal, type ReviewStatus } from "@/components/application-review-modal";
+import {
+  ApplicationReviewModal,
+  type FocusSection,
+  type ReviewStatus,
+} from "@/components/application-review-modal";
 import { ApplicationStats, type Stats } from "@/components/application-stats";
+import { ApplicationAnalyticsModal } from "@/components/application-analytics-modal";
+import { ApplicationSheetModal } from "@/components/application-sheet-modal";
+import { ProjectAnalyticsModal } from "@/components/project-analytics-modal";
+import { rankLabel } from "@/lib/application-rank";
 import { CoffeeChatIndicator, InfosessionIndicator, type CoffeeState } from "@/components/applicant-indicators";
 
 type Applicant = { user_id: string; preferred_firstname: string | null; lastname: string | null };
@@ -27,6 +36,10 @@ type Applicant = { user_id: string; preferred_firstname: string | null; lastname
 // The project currently under review: which project the reviewer is
 // assigned to (or, for a full-access reviewer, has picked from all of them).
 type ReviewableProject = { id: string; name: string };
+
+// Sentinel for the cross-project mode in the project picker. A plain null still
+// means "this reviewer has no projects", so it can't double as the sentinel.
+const ALL_PROJECTS = "__all__";
 
 // A current member of the selected project (left-hand roster column).
 type RosterMember = { user_id: string; name: string; isPm: boolean };
@@ -45,14 +58,6 @@ type AppRow = {
   infosession: boolean;
 };
 
-const RANK_LABELS: Record<number, string> = {
-  1: "1st choice", 2: "2nd choice", 3: "3rd choice", 4: "4th choice",
-  5: "5th choice", 6: "6th choice", 7: "7th choice",
-};
-function rankLabel(rank: number): string {
-  return RANK_LABELS[rank] ?? `${rank}th choice`;
-}
-
 function isOpenNow(p: ApplicationPeriod): boolean {
   const now = Date.now();
   return p.status === "open" && new Date(p.starts_at).getTime() <= now && now < new Date(p.ends_at).getTime();
@@ -69,14 +74,14 @@ function applicantName(a: AppRow): string {
 function StatusBadge({ status }: { status: ReviewStatus }) {
   if (status === "accepted") return <Badge className="bg-green-600 hover:bg-green-600">Accepted</Badge>;
   if (status === "rejected") return <Badge variant="destructive">Rejected</Badge>;
-  return <Badge variant="secondary">Submitted</Badge>;
+  return null;
 }
 
 // Small badge marking an applicant who was a member in a previous semester.
 function ReturningIndicator({ returning }: { returning: boolean }) {
   if (!returning) return null;
   return (
-    <Badge variant="outline" className="gap-1 border-indigo-300 text-indigo-600" title="Returning member">
+    <Badge variant="outline" className="gap-1 border-transparent text-indigo-600" title="Returning member">
       <RotateCcw size={11} />
       Returning
     </Badge>
@@ -108,15 +113,24 @@ export default function ManagerApplicationsPage() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [periodsDialogOpen, setPeriodsDialogOpen] = useState(false);
   const [emailBlastOpen, setEmailBlastOpen] = useState(false);
-  const [reviewFor, setReviewFor] = useState<{ id: string; name: string; status: ReviewStatus } | null>(null);
+  const [analyticsOpen, setAnalyticsOpen] = useState(false);
+  const [projAnalyticsOpen, setProjAnalyticsOpen] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [sheetReloadToken, setSheetReloadToken] = useState(0);
+  const [reviewFor, setReviewFor] = useState<
+    { id: string; name: string; status: ReviewStatus; projectId?: string | null; focus?: FocusSection } | null
+  >(null);
 
   // Which project(s) the current viewer may review: every project if they hold
   // a full-access role (VP Tech/President/VP Projects), otherwise only the
   // ones they PM. null = still loading.
   const [reviewableProjects, setReviewableProjects] = useState<ReviewableProject[] | null>(null);
+  const [fullAccessReview, setFullAccessReview] = useState(false);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const allSelected = selectedProjectId === ALL_PROJECTS;
   // Everyone currently on the selected project (left column). null = loading.
   const [roster, setRoster] = useState<RosterMember[] | null>(null);
+  const [allCounts, setAllCounts] = useState<{ applicants: number; projects: number } | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -131,6 +145,7 @@ export default function ManagerApplicationsPage() {
       const roles = ((roleRows ?? []) as unknown as { roles: { role_name: string | null } | null }[])
         .flatMap((r) => (r.roles ? [r.roles] : []));
       const fullAccess = canReviewAllProjects(roles);
+      setFullAccessReview(fullAccess);
 
       if (fullAccess) {
         const { data } = await supabase.from("projects").select("id, name").order("name");
@@ -152,10 +167,13 @@ export default function ManagerApplicationsPage() {
   useEffect(() => {
     setSelectedProjectId((cur) => {
       if (!reviewableProjects) return cur;
+      if (cur === ALL_PROJECTS) return fullAccessReview ? cur : null;
       if (cur && reviewableProjects.some((p) => p.id === cur)) return cur;
+      // Full-access reviewers land on the cross-project view; PMs land on a project.
+      if (fullAccessReview) return ALL_PROJECTS;
       return reviewableProjects[0]?.id ?? null;
     });
-  }, [reviewableProjects]);
+  }, [reviewableProjects, fullAccessReview]);
 
   // Roster of the selected project (left column) — who's already on the team.
   const loadRoster = useCallback(async (projectId: string) => {
@@ -175,10 +193,28 @@ export default function ManagerApplicationsPage() {
   }, []);
 
   useEffect(() => {
-    if (!selectedProjectId) { setRoster(null); return; }
+    if (!selectedProjectId || selectedProjectId === ALL_PROJECTS) { setRoster(null); return; }
     setRoster(null);
     loadRoster(selectedProjectId);
   }, [selectedProjectId, loadRoster]);
+
+  // Headline numbers for the cross-project view, which has no per-project list.
+  useEffect(() => {
+    if (!allSelected || !selectedPeriodId) { setAllCounts(null); return; }
+    setAllCounts(null);
+    const supabase = createClient();
+    (async () => {
+      const [{ count: applicants }, { count: projects }] = await Promise.all([
+        supabase
+          .from("applications")
+          .select("id", { count: "exact", head: true })
+          .eq("period_id", selectedPeriodId)
+          .in("status", ["submitted", "accepted", "rejected"]),
+        supabase.from("projects").select("id", { count: "exact", head: true }),
+      ]);
+      setAllCounts({ applicants: applicants ?? 0, projects: projects ?? 0 });
+    })();
+  }, [allSelected, selectedPeriodId]);
 
   // Exec-only period funnel stats, shown above the list.
   const loadStats = useCallback(async (periodId: string) => {
@@ -201,9 +237,10 @@ export default function ManagerApplicationsPage() {
   useEffect(() => { loadPeriods(); }, [loadPeriods]);
 
   useEffect(() => {
-    if (!selectedPeriodId) { setApps([]); setStats(null); return; }
-    if (!reviewableProjects) { setApps(null); setStats(null); return; } // still loading review scope
-    if (!selectedProjectId) { setApps([]); setStats(null); return; } // no assigned projects to review
+    if (!selectedPeriodId) { setApps([]); return; }
+    if (!reviewableProjects) { setApps(null); return; } // still loading review scope
+    // No assigned projects to review, or the cross-project view (sheet-only).
+    if (!selectedProjectId || selectedProjectId === ALL_PROJECTS) { setApps([]); return; }
     const supabase = createClient();
     setApps(null);
     // applicant_id is the auth user id (no FK to `members`), so fetch the rows
@@ -272,10 +309,14 @@ export default function ManagerApplicationsPage() {
         })),
       );
     })();
+  }, [selectedPeriodId, selectedProjectId, reviewableProjects]);
 
-    if (isExec) { setStats(null); loadStats(selectedPeriodId); }
-    else setStats(null);
-  }, [selectedPeriodId, selectedProjectId, reviewableProjects, isExec, loadStats]);
+  // Period funnel stats track the period alone, so they survive the project
+  // picker switching to "All projects".
+  useEffect(() => {
+    setStats(null);
+    if (isExec && selectedPeriodId) loadStats(selectedPeriodId);
+  }, [selectedPeriodId, isExec, loadStats]);
 
   const selectedPeriod = periods?.find((p) => p.id === selectedPeriodId) ?? null;
   const selectedProject = reviewableProjects?.find((p) => p.id === selectedProjectId) ?? null;
@@ -298,7 +339,8 @@ export default function ManagerApplicationsPage() {
     if (isExec && selectedPeriodId) loadStats(selectedPeriodId);
     // Accepting adds the applicant to project_members — refresh the roster so
     // they show up on the left without a full page reload.
-    if (status === "accepted" && selectedProjectId) loadRoster(selectedProjectId);
+    if (status === "accepted" && selectedProjectId && !allSelected) loadRoster(selectedProjectId);
+    if (sheetOpen) setSheetReloadToken((n) => n + 1);
   };
 
   return (
@@ -351,42 +393,104 @@ export default function ManagerApplicationsPage() {
             Email blast
           </Button>
         )}
-      </div>
 
-      {/* Project bar: which project's applicants you're reviewing */}
-      {reviewableProjects === null ? (
-        <div className="h-9 w-48 rounded-md bg-muted animate-pulse" />
-      ) : reviewableProjects.length === 0 ? null : reviewableProjects.length === 1 ? (
-        <span className="text-sm text-muted-foreground">
-          Reviewing for <span className="font-medium text-foreground">{reviewableProjects[0].name}</span>
-        </span>
-      ) : (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button className="flex items-center gap-2 self-start border rounded-md px-3 py-2 text-sm bg-background hover:bg-accent transition-colors">
-              <span className="text-muted-foreground">Reviewing for</span>
-              <span className="font-medium">{selectedProject?.name ?? "Select project"}</span>
-              <ChevronDown size={14} className="text-muted-foreground" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start">
-            {reviewableProjects.map((p) => (
-              <DropdownMenuItem key={p.id} onSelect={() => setSelectedProjectId(p.id)}>
-                {p.name}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      )}
+        {isExec && selectedPeriodId && (
+          <Button variant="outline" size="sm" onClick={() => setAnalyticsOpen(true)}>
+            <BarChart3 size={14} className="mr-1.5" />
+            View analytics
+          </Button>
+        )}
+      </div>
 
       {/* Exec-only period funnel stats */}
       {isExec && selectedPeriodId && <ApplicationStats stats={stats} />}
+
+      {/* Project bar: which project's applicants you're reviewing — sits right
+          above the split view so it reads as a header for the applicant lists. */}
+      {reviewableProjects !== null && reviewableProjects.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3">
+          {reviewableProjects.length === 1 && !fullAccessReview ? (
+            <span className="text-sm text-muted-foreground">
+              Reviewing for <span className="font-medium text-foreground">{reviewableProjects[0].name}</span>
+            </span>
+          ) : (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="flex items-center gap-2 self-start border rounded-md px-3 py-2 text-sm bg-background hover:bg-accent transition-colors">
+                  <span className="text-muted-foreground">Reviewing for</span>
+                  <span className="font-medium">
+                    {allSelected ? "All projects" : selectedProject?.name ?? "Select project"}
+                  </span>
+                  <ChevronDown size={14} className="text-muted-foreground" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                {fullAccessReview && (
+                  <>
+                    <DropdownMenuItem onSelect={() => setSelectedProjectId(ALL_PROJECTS)}>
+                      All projects
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                  </>
+                )}
+                {reviewableProjects.map((p) => (
+                  <DropdownMenuItem key={p.id} onSelect={() => setSelectedProjectId(p.id)}>
+                    {p.name}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+
+          {isExec && selectedPeriodId && (
+            <Button variant="outline" size="sm" onClick={() => setProjAnalyticsOpen(true)}>
+              <BarChart3 size={14} className="mr-1.5" />
+              Project analytics
+            </Button>
+          )}
+        </div>
+      )}
+      {reviewableProjects === null && <div className="h-9 w-48 rounded-md bg-muted animate-pulse" />}
+
+      {isExec && (
+        <ProjectAnalyticsModal
+          open={projAnalyticsOpen}
+          onOpenChange={setProjAnalyticsOpen}
+          periodId={selectedPeriodId}
+          periodName={selectedPeriod?.name}
+        />
+      )}
+
+      {isExec && (
+        <ApplicationAnalyticsModal
+          open={analyticsOpen}
+          onOpenChange={setAnalyticsOpen}
+          periods={periods ?? []}
+          initialPeriodId={selectedPeriodId}
+        />
+      )}
 
       {/* Split view: current team on the left, applicants left to review
           (grouped by rank: 1st choice, 2nd choice, …) on the right */}
       {reviewableProjects?.length === 0 ? (
         <div className="px-4 py-10 text-center text-sm text-muted-foreground border rounded-xl">
           You aren&apos;t assigned to review any projects.
+        </div>
+      ) : allSelected ? (
+        // Cross-project mode has no single roster or rank grouping to show, so
+        // the page hands off to the sheet.
+        <div className="flex flex-col items-center gap-3 border rounded-xl px-4 py-12 text-center">
+          <p className="text-sm font-medium">Reviewing every project this period</p>
+          <p className="text-sm text-muted-foreground">
+            {allCounts
+              ? `${allCounts.applicants} application${allCounts.applicants === 1 ? "" : "s"} across ${allCounts.projects} project${allCounts.projects === 1 ? "" : "s"}.`
+              : "Loading counts…"}{" "}
+            Open the sheet to page through one project at a time.
+          </p>
+          <Button size="sm" onClick={() => setSheetOpen(true)} disabled={!selectedPeriodId}>
+            <Table2 size={14} className="mr-1.5" />
+            Open sheet view
+          </Button>
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
@@ -415,9 +519,17 @@ export default function ManagerApplicationsPage() {
 
           {/* Right: applicants left to pick from */}
           <div className="flex flex-col gap-2.5">
-            <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Left to review
-            </h2>
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Left to review
+              </h2>
+              {selectedPeriodId && selectedProjectId && (
+                <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs" onClick={() => setSheetOpen(true)}>
+                  <Table2 size={13} className="mr-1.5" />
+                  Sheet view
+                </Button>
+              )}
+            </div>
             {apps === null ? (
               <ApplicationListSkeleton rows={4} />
             ) : apps.length === 0 ? (
@@ -425,31 +537,27 @@ export default function ManagerApplicationsPage() {
                 No submitted applications for this project yet.
               </div>
             ) : (
-              <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-3">
                 {groupedApps.map(([rank, list]) => (
-                  <div key={rank} className="flex flex-col gap-2.5">
+                  <div key={rank} className="flex flex-col gap-1.5">
                     <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      {rankLabel(rank)}
+                      {rankLabel(rank)} ({list.length})
                     </h3>
                     {list.map((a) => {
                       const name = applicantName(a);
                       return (
-                        <div key={a.id} className="flex items-center gap-3 border rounded-xl px-4 py-3">
-                          <div className="flex flex-col gap-0.5 min-w-0 flex-1">
-                            <div className="flex items-center gap-2">
-                              <PersonName userId={a.applicant?.user_id} name={name} className="text-sm font-medium" />
-                              <StatusBadge status={a.status} />
-                              <ReturningIndicator returning={a.returning} />
-                              <CoffeeChatIndicator state={a.coffee} />
-                              <InfosessionIndicator attended={a.infosession} />
-                            </div>
-                            <span className="text-xs text-muted-foreground truncate">
-                              {a.submitted_at ? `Submitted ${new Date(a.submitted_at).toLocaleDateString()}` : ""}
-                            </span>
+                        <div key={a.id} className="flex items-center gap-2 border rounded-lg px-3 py-2">
+                          <div className="flex min-w-0 flex-1 items-center gap-1.5">
+                            <PersonName userId={a.applicant?.user_id} name={name} className="text-sm font-medium truncate" />
+                            <StatusBadge status={a.status} />
+                            <ReturningIndicator returning={a.returning} />
+                            <CoffeeChatIndicator state={a.coffee} />
+                            <InfosessionIndicator attended={a.infosession} />
                           </div>
                           <Button
                             size="sm"
                             variant="outline"
+                            className="h-7 px-2.5 text-xs"
                             onClick={() => setReviewFor({ id: a.id, name, status: a.status })}
                           >
                             Review
@@ -464,6 +572,18 @@ export default function ManagerApplicationsPage() {
           </div>
         </div>
       )}
+
+      <ApplicationSheetModal
+        open={sheetOpen}
+        onOpenChange={setSheetOpen}
+        periodId={selectedPeriodId}
+        periodName={selectedPeriod?.name}
+        projectId={allSelected ? null : selectedProjectId}
+        projectName={selectedProject?.name}
+        allProjects={allSelected}
+        onReview={(row) => setReviewFor(row)}
+        reloadToken={sheetReloadToken}
+      />
 
       {isExec && periods && (
         <ApplicationPeriodsDialog
@@ -487,7 +607,8 @@ export default function ManagerApplicationsPage() {
           applicationId={reviewFor.id}
           applicantName={reviewFor.name}
           status={reviewFor.status}
-          contextProjectId={selectedProjectId}
+          contextProjectId={reviewFor.projectId ?? (allSelected ? null : selectedProjectId)}
+          focus={reviewFor.focus}
           open={!!reviewFor}
           onOpenChange={(o) => { if (!o) setReviewFor(null); }}
           onReviewed={(status) => onReviewed(reviewFor.id, status)}
