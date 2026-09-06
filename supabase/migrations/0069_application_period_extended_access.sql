@@ -28,6 +28,14 @@
 --      should load -- the open one, or one they hold a grant for. Replaces
 --      the client's direct `status = 'open'` query in application/page.tsx.
 
+-- An earlier iteration of this migration shipped an email-based version
+-- (email column, user_id -> auth.users, grant/revoke as SECURITY DEFINER
+-- RPCs, select-only RLS). Drop that version's RPCs and converge the table
+-- below onto the current shape, so this file is safe to (re-)run against a
+-- database that already has either version applied.
+drop function if exists public.grant_application_period_access(uuid, text);
+drop function if exists public.revoke_application_period_access(uuid, uuid);
+
 create table if not exists public.application_period_access (
   id         uuid primary key default gen_random_uuid(),
   period_id  uuid not null references public.application_periods(id) on delete cascade,
@@ -36,6 +44,17 @@ create table if not exists public.application_period_access (
   granted_at timestamptz not null default now(),
   unique (period_id, user_id)
 );
+
+alter table public.application_period_access drop column if exists email;
+alter table public.application_period_access alter column granted_by set default auth.uid();
+alter table public.application_period_access drop constraint if exists application_period_access_user_id_fkey;
+alter table public.application_period_access
+  add constraint application_period_access_user_id_fkey
+  foreign key (user_id) references public.members(user_id) on delete cascade;
+alter table public.application_period_access drop constraint if exists application_period_access_granted_by_fkey;
+alter table public.application_period_access
+  add constraint application_period_access_granted_by_fkey
+  foreign key (granted_by) references public.members(user_id) on delete set null;
 
 alter table public.application_period_access enable row level security;
 
