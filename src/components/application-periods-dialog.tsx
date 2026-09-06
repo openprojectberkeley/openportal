@@ -64,7 +64,7 @@ type AccessGrant = { id: string; user_id: string; email: string };
 // VP Tech/President only: lets the currently-closed (or open) period keep
 // accepting one specific applicant's writes past its global status, via the
 // application_period_access grants + SECURITY DEFINER RPCs from
-// 0067_application_period_extended_access.sql.
+// 0069_application_period_extended_access.sql.
 function ExtendedAccessSection({ periodId }: { periodId: string }) {
   const [grants, setGrants] = useState<AccessGrant[] | null>(null);
   const [email, setEmail] = useState("");
