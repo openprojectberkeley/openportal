@@ -16,6 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { ProjectApplicationModalSkeleton } from "@/components/skeletons";
 import { resumeSignedUrl } from "@/lib/resume-upload";
 import { techAreaLabel, techClassLabel } from "@/lib/application-profile";
+import { LateBadge } from "@/components/applicant-indicators";
 
 export type ReviewStatus = "submitted" | "accepted" | "rejected";
 
@@ -96,6 +97,8 @@ export function ApplicationReviewModal({
   const [rankings, setRankings] = useState<RankingRow[]>([]);
   const [answersByRanking, setAnswersByRanking] = useState<Record<string, AnswerRow[]>>({});
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [submittedAt, setSubmittedAt] = useState<string | null>(null);
+  const [periodEndsAt, setPeriodEndsAt] = useState<string | null>(null);
   const [resumeOpening, setResumeOpening] = useState(false);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [working, setWorking] = useState(false);
@@ -137,9 +140,13 @@ export function ApplicationReviewModal({
       // in a second query keyed on members.user_id.
       const { data: appRow } = await supabase
         .from("applications")
-        .select("applicant_id, tech_area_rankings, tech_classes, tech_classes_other, about_note, portfolio_url")
+        .select("applicant_id, tech_area_rankings, tech_classes, tech_classes_other, about_note, portfolio_url, submitted_at, period:application_periods(ends_at)")
         .eq("id", applicationId)
         .maybeSingle();
+      // The period embed is to-one; Supabase types it loosely, so accept either shape.
+      const period = appRow?.period as { ends_at: string } | { ends_at: string }[] | null | undefined;
+      setSubmittedAt((appRow?.submitted_at as string | null) ?? null);
+      setPeriodEndsAt(Array.isArray(period) ? period[0]?.ends_at ?? null : period?.ends_at ?? null);
       let applicant: { resume_path: string | null; resume_filename: string | null } | null = null;
       if (appRow?.applicant_id) {
         const { data: mem } = await supabase
@@ -273,6 +280,7 @@ export function ApplicationReviewModal({
             {applicantName}
             {status === "accepted" && <Badge className="bg-green-600 hover:bg-green-600">Accepted</Badge>}
             {status === "rejected" && <Badge variant="destructive">Rejected</Badge>}
+            <LateBadge submittedAt={submittedAt} endsAt={periodEndsAt} />
           </DialogTitle>
         </DialogHeader>
 

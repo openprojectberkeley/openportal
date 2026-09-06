@@ -31,7 +31,8 @@ type Row = {
   info_attended: number;
   info_returning: number;
   info_nothing: number;
-  // Completed a coffee chat (or returning) AND attended an info session (0063).
+  // Board/exec, or (completed a coffee chat or returning) AND attended an info
+  // session (0063, board/exec exemption added in 0067).
   // Optional so the modal still renders against a pre-0063 database.
   both_valid?: number;
 };
@@ -106,8 +107,10 @@ function PieCard({ title, segments, total, centerSub }: { title: string; segment
 
 const submittedTotal = (r: Row) => r.submitted + r.accepted + r.rejected;
 // Valid = cleared the requirement. A booked-but-incomplete chat doesn't count;
-// returning members are exempt from the coffee chat but not the info session.
-// bothValid is the intersection of the two, computed server-side (0063).
+// returning members are exempt from the coffee chat but not the info session,
+// and board/exec members are auto-valid regardless of either (0067). bothValid
+// is computed server-side; because of the board/exec exemption it's no longer
+// strictly the intersection of the coffee and info funnels.
 const coffeeValid = (r: Row) => r.coffee_completed + r.coffee_returning;
 const infoValid = (r: Row) => r.info_attended;
 const bothValid = (r: Row) => r.both_valid ?? 0;

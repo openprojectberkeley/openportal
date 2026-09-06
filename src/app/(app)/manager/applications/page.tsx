@@ -28,7 +28,7 @@ import { ApplicationAnalyticsModal } from "@/components/application-analytics-mo
 import { ApplicationSheetModal } from "@/components/application-sheet-modal";
 import { ProjectAnalyticsModal } from "@/components/project-analytics-modal";
 import { rankLabel } from "@/lib/application-rank";
-import { CoffeeChatIndicator, InfosessionIndicator, type CoffeeState } from "@/components/applicant-indicators";
+import { CoffeeChatIndicator, InfosessionIndicator, LateBadge, type CoffeeState } from "@/components/applicant-indicators";
 
 type Applicant = { user_id: string; preferred_firstname: string | null; lastname: string | null };
 
@@ -537,6 +537,7 @@ export default function ManagerApplicationsPage() {
                           <div className="flex min-w-0 flex-1 items-center gap-1.5">
                             <PersonName userId={a.applicant?.user_id} name={name} className="text-sm font-medium truncate" />
                             <StatusBadge status={a.status} />
+                            <LateBadge submittedAt={a.submitted_at} endsAt={selectedPeriod?.ends_at} />
                             <ReturningIndicator returning={a.returning} />
                             <CoffeeChatIndicator state={a.coffee} />
                             <InfosessionIndicator attended={a.infosession} />
@@ -565,6 +566,7 @@ export default function ManagerApplicationsPage() {
         onOpenChange={setSheetOpen}
         periodId={selectedPeriodId}
         periodName={selectedPeriod?.name}
+        periodEndsAt={selectedPeriod?.ends_at}
         projectId={allSelected ? null : selectedProjectId}
         projectName={selectedProject?.name}
         allProjects={allSelected}

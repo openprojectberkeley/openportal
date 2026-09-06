@@ -19,7 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/overlay-scrollbar";
 import { PersonName } from "@/components/person-profile-provider";
-import { CoffeeChatIndicator, InfosessionIndicator, type CoffeeState } from "@/components/applicant-indicators";
+import { CoffeeChatIndicator, InfosessionIndicator, LateBadge, type CoffeeState } from "@/components/applicant-indicators";
 import { type FocusSection, type ReviewStatus } from "@/components/application-review-modal";
 import { pct } from "@/components/donut-chart";
 import { rankLabel } from "@/lib/application-rank";
@@ -30,7 +30,7 @@ import {
   techClassLabel,
 } from "@/lib/application-profile";
 import { csvSlug, downloadCsv } from "@/lib/csv";
-import { cn } from "@/lib/utils";
+import { cn, isLate } from "@/lib/utils";
 
 type PageProject = { id: string; name: string; type: string; essay_prompt: string | null };
 
@@ -315,11 +315,14 @@ async function loadApplicantContext(supabase: ReturnType<typeof createClient>, i
   // applicant -> members they've completed a chat with, for the PM check.
   const completedWith: Record<string, Set<string>> = {};
   const attendedInfo = new Set<string>();
+  // Applicants who currently hold a board- or exec-level role; they're
+  // auto-valid, regardless of coffee chat / info session.
+  const boardExecIds = new Set<string>();
 
-  if (!ids.length) return { memById, coffeeById, completedWith, attendedInfo };
+  if (!ids.length) return { memById, coffeeById, completedWith, attendedInfo, boardExecIds };
 
   const idSet = new Set(ids);
-  const [{ data: mem }, { data: chats }, { data: info }] = await Promise.all([
+  const [{ data: mem }, { data: chats }, { data: info }, { data: roleRows }] = await Promise.all([
     supabase.from("members").select("user_id, preferred_firstname, lastname, status, grad_year").in("user_id", ids),
     supabase.from("coffee_chats").select("applicant_id, member_id, complete").in("applicant_id", ids),
     // Attendance is recorded under member_id or applicant_id depending on
@@ -328,10 +331,22 @@ async function loadApplicantContext(supabase: ReturnType<typeof createClient>, i
       .from("infosesh_attendance")
       .select("applicant_id, member_id")
       .or(`applicant_id.in.(${ids.join(",")}),member_id.in.(${ids.join(",")})`),
+    // Board/exec = access_level in ('board','exec'), same grouping as the
+    // is_board_or_exec() SQL helper. Inner join + filter returns only the rows
+    // for applicants who hold such a role.
+    supabase
+      .from("members_roles")
+      .select("user_id, roles!inner(access_level)")
+      .in("user_id", ids)
+      .in("roles.access_level", ["board", "exec"]),
   ]);
 
   for (const m of (mem ?? []) as (MemberInfo & { user_id: string })[]) {
     memById[m.user_id] = m;
+  }
+
+  for (const r of (roleRows ?? []) as { user_id: string | null }[]) {
+    if (r.user_id) boardExecIds.add(r.user_id);
   }
 
   for (const ch of (chats ?? []) as { applicant_id: string; member_id: string; complete: boolean }[]) {
@@ -345,7 +360,7 @@ async function loadApplicantContext(supabase: ReturnType<typeof createClient>, i
     if (r.member_id && idSet.has(r.member_id)) attendedInfo.add(r.member_id);
   }
 
-  return { memById, coffeeById, completedWith, attendedInfo };
+  return { memById, coffeeById, completedWith, attendedInfo, boardExecIds };
 }
 
 // Spreadsheet-style scan of every applicant who ranked one project in the
@@ -358,6 +373,7 @@ export function ApplicationSheetModal({
   onOpenChange,
   periodId,
   periodName,
+  periodEndsAt,
   projectId,
   projectName,
   allProjects = false,
@@ -369,6 +385,8 @@ export function ApplicationSheetModal({
   periodId: string | null;
   // Only used to name the CSV export.
   periodName?: string | null;
+  // The period's deadline, used to flag applications submitted after it as late.
+  periodEndsAt?: string | null;
   projectId: string | null;
   projectName?: string | null;
   // Page through an all-applicants overview and then every project in the
@@ -578,7 +596,7 @@ export function ApplicationSheetModal({
         for (const p of (pms ?? []) as { user_id: string }[]) projectPms.add(p.user_id);
       }
 
-      const { memById, coffeeById, completedWith, attendedInfo } = await loadApplicantContext(supabase, ids);
+      const { memById, coffeeById, completedWith, attendedInfo, boardExecIds } = await loadApplicantContext(supabase, ids);
 
       const next: SheetRow[] = raw.map((r) => {
         const aid = r.applicant_id ?? "";
@@ -595,7 +613,10 @@ export function ApplicationSheetModal({
         const returning = m?.status === "active" || m?.status === "inactive";
         const coffee = coffeeById[aid] ?? "none";
         const infosession = attendedInfo.has(aid);
-        const valid = (coffee === "done" || returning) && infosession;
+        // Board/exec members are auto-valid; everyone else must clear both the
+        // coffee-chat (or returning) and info-session requirements.
+        const boardExec = boardExecIds.has(aid);
+        const valid = boardExec || ((coffee === "done" || returning) && infosession);
         const met = !!project && project.type === "studio" && [...projectPms].some((pm) => completedWith[aid]?.has(pm));
 
         const ranking = r.application_rankings[0];
@@ -947,10 +968,11 @@ export function ApplicationSheetModal({
       // The raw timestamp, so a spreadsheet parses and sorts it as a date
       // rather than as the abbreviated text the cell shows.
       { header: "Submitted", value: (r) => r.submittedAt ?? "" },
+      { header: "Late", value: (r) => (isLate(r.submittedAt, periodEndsAt) ? "Yes" : "") },
       { header: "Decision", value: (r) => DECISION_CSV[r.status] },
     );
     return cols;
-  }, [isOverview, isStudio, slots, questions]);
+  }, [isOverview, isStudio, slots, questions, periodEndsAt]);
 
   const th = "sticky top-0 z-20 bg-background border-b border-r px-2 py-1.5 text-left text-xs font-medium text-muted-foreground whitespace-nowrap";
   const td = "border-b border-r px-2 py-1.5 text-xs align-middle";
@@ -1397,7 +1419,7 @@ export function ApplicationSheetModal({
                         {r.valid ? (
                           <span
                             className="inline-flex items-center gap-0.5 text-green-600"
-                            title="Coffee chat done or returning, and attended an info session"
+                            title="Board/exec, or: coffee chat done or returning, and attended an info session"
                           >
                             <Check size={14} className="stroke-[3]" /> Valid
                           </span>
@@ -1498,6 +1520,11 @@ export function ApplicationSheetModal({
                         title={r.submittedAt ? new Date(r.submittedAt).toLocaleString() : undefined}
                       >
                         {r.submittedAt ? submittedLabel(r.submittedAt) : "—"}
+                        <LateBadge
+                          submittedAt={r.submittedAt}
+                          endsAt={periodEndsAt}
+                          className="ml-1.5 text-[0.6rem] px-1 py-0"
+                        />
                       </td>
                       <td className={td}>
                         {r.status === "accepted" ? (

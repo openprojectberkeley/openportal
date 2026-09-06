@@ -1,4 +1,6 @@
 import { Coffee, Check, Clock, Presentation, FileCheck } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { cn, isLate } from "@/lib/utils";
 
 // Coffee-chat progress for an applicant: "done" once any chat is completed,
 // "booked" while one is booked but not yet completed, "none" if never booked.
@@ -35,6 +37,31 @@ export function InfosessionIndicator({ attended }: { attended?: boolean | null }
       <Presentation size={14} />
       <Check size={12} className="stroke-[3]" />
     </span>
+  );
+}
+
+// Amber "Late" pill shown when an application was submitted after its period's
+// deadline (ends_at); nothing otherwise. Renders null unless the submission is
+// actually late, so callers can drop it into a badge cluster unconditionally.
+export function LateBadge({
+  submittedAt,
+  endsAt,
+  className,
+}: {
+  submittedAt?: string | null;
+  endsAt?: string | null;
+  className?: string;
+}) {
+  if (!isLate(submittedAt, endsAt)) return null;
+  return (
+    <Badge
+      variant="outline"
+      className={cn("gap-1 border-amber-500/40 text-amber-600", className)}
+      title="Submitted after the period deadline"
+    >
+      <Clock size={11} />
+      Late
+    </Badge>
   );
 }
 
