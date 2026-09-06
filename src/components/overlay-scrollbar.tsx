@@ -134,6 +134,15 @@ export const ScrollArea = React.forwardRef<HTMLDivElement, ScrollAreaProps>(
           ref={setRefs}
           className={cn(
             "h-full w-full",
+            // Inherit the outer box's max-height so the viewport is bounded (and
+            // therefore scrolls) even when the outer is sized only by a
+            // `max-h-*` — `h-full` alone stays content-height there because a
+            // percentage height needs a *definite* parent, which a bare
+            // max-height is not. A no-op when the outer has no max-height (e.g.
+            // a `flex-1` box), where `h-full` already resolves. `inherit` on the
+            // outer relays a grandparent's max-height down (see DropdownMenu).
+            showV && "max-h-[inherit]",
+            showH && "max-w-[inherit]",
             showV && "overflow-y-auto",
             showH && "overflow-x-auto",
             !showV && "overflow-y-hidden",

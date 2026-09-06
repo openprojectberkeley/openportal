@@ -72,8 +72,9 @@ const GREEN = "#16a34a";
 const INDIGO = "#4f46e5";
 const SKY = "#0284c7";
 
-// Categorical palette for the grad-year pie (freshman → postgrad → unknown).
-const GRAD_COLORS = ["#0284c7", "#0891b2", "#059669", "#65a30d", "#ca8a04", "#ea580c", "#9ca3af"];
+// Categorical palette for the grad-year donut (freshman → postgrad → unknown).
+// Adjacent slices get maximally different hues so neighbours stay distinct.
+const GRAD_COLORS = ["#2563eb", "#ea580c", "#16a34a", "#db2777", "#ca8a04", "#7c3aed", "#9ca3af"];
 // Returning is indigo (matches the "Valid" bar); first-time is a warm accent.
 const RETURNING_COLORS: Record<string, string> = { Returning: INDIGO, "First-time": "#ea580c" };
 
