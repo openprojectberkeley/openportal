@@ -219,7 +219,10 @@ function ExtendedAccessSection({ periodId, allMembers }: { periodId: string; all
     const supabase = createClient();
     const { data, error: err } = await supabase
       .from("application_period_access")
-      .select("id, user_id, expires_at, members(preferred_firstname, lastname)")
+      // Explicit relationship hint: the table has two FKs into members
+      // (user_id and granted_by), so a bare `members(...)` embed is
+      // ambiguous to PostgREST and errors out rather than picking one.
+      .select("id, user_id, expires_at, members!application_period_access_user_id_fkey(preferred_firstname, lastname)")
       .eq("period_id", periodId);
     if (err) { setError(err.message); setGrants([]); return; }
     const rows = (data ?? []) as unknown as {
