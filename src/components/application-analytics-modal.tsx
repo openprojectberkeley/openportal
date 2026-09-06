@@ -11,7 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { pct } from "@/components/donut-chart";
+import { pct, DonutChart, Legend, type Segment } from "@/components/donut-chart";
 import { PersonName } from "@/components/person-profile-provider";
 
 // One row per application period from the application_analytics() RPC (0060).
@@ -40,38 +40,6 @@ type Period = { id: string; name: string };
 
 // Long-format demographics row from application_demographics() (0062).
 type DemoRow = { dimension: string; bucket: string; cnt: number };
-
-// Horizontal bar list for a demographic breakdown (grad year / returning).
-function BarList({ title, items, total }: { title: string; items: { label: string; count: number }[]; total: number }) {
-  const max = items.reduce((m, i) => Math.max(m, i.count), 0);
-  return (
-    <div className="flex flex-col gap-2 rounded-xl border bg-background p-4">
-      <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</h3>
-      {items.length === 0 ? (
-        <p className="text-xs text-muted-foreground">No data.</p>
-      ) : (
-        <ul className="flex flex-col gap-1.5">
-          {items.map((it) => {
-            const w = max === 0 ? 0 : Math.round((it.count / max) * 100);
-            return (
-              <li key={it.label} className="flex items-center gap-2 text-xs">
-                <span className="w-24 flex-shrink-0 truncate text-foreground/90" title={it.label}>
-                  {it.label}
-                </span>
-                <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-foreground/10">
-                  <div className="h-full rounded-full bg-foreground/60" style={{ width: `${w}%` }} />
-                </div>
-                <span className="w-14 flex-shrink-0 text-right tabular-nums text-muted-foreground">
-                  {it.count} ({pct(it.count, total)}%)
-                </span>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </div>
-  );
-}
 
 // Class standing progression, so "By grad year" reads Freshman → Postgrad rather
 // than alphabetically. Unknown/other labels sort after these, then alphabetically.
@@ -103,6 +71,37 @@ function buildDemographics(demo: DemoRow[]) {
 const GREEN = "#16a34a";
 const INDIGO = "#4f46e5";
 const SKY = "#0284c7";
+
+// Categorical palette for the grad-year pie (freshman → postgrad → unknown).
+const GRAD_COLORS = ["#0284c7", "#0891b2", "#059669", "#65a30d", "#ca8a04", "#ea580c", "#9ca3af"];
+// Returning is indigo (matches the "Valid" bar); first-time is a warm accent.
+const RETURNING_COLORS: Record<string, string> = { Returning: INDIGO, "First-time": "#ea580c" };
+
+function toSegments(items: { label: string; count: number }[], color: (label: string, i: number) => string): Segment[] {
+  return items.map((it, i) => ({ label: it.label, value: it.count, color: color(it.label, i) }));
+}
+
+// A demographic donut with its heading and legend.
+function PieCard({ title, segments, total, centerSub }: { title: string; segments: Segment[]; total: number; centerSub: string }) {
+  const hasData = segments.some((s) => s.value > 0);
+  return (
+    <div className="flex flex-col gap-3 rounded-xl border bg-background p-4">
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</h3>
+      {!hasData ? (
+        <p className="text-xs text-muted-foreground">No data.</p>
+      ) : (
+        <div className="flex items-center gap-4">
+          <div className="flex-shrink-0">
+            <DonutChart segments={segments} total={total} centerValue={String(total)} centerSub={centerSub} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <Legend segments={segments} total={total} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 const submittedTotal = (r: Row) => r.submitted + r.accepted + r.rejected;
 // Valid = cleared the requirement. A booked-but-incomplete chat doesn't count;
@@ -220,6 +219,8 @@ export function ApplicationAnalyticsModal({
   const selectedName =
     periods.find((p) => p.id === selectedPeriodId)?.name ?? selected?.period_name ?? "Select period";
   const { gradYear, returning } = buildDemographics(demo);
+  const gradYearSegments = toSegments(gradYear, (_, i) => GRAD_COLORS[i % GRAD_COLORS.length]);
+  const returningSegments = toSegments(returning, (label) => RETURNING_COLORS[label] ?? INDIGO);
   const invalidCount = selected ? submittedTotal(selected) - bothValid(selected) : 0;
 
   const handleOpenChange = (next: boolean) => {
@@ -316,8 +317,18 @@ export function ApplicationAnalyticsModal({
 
                 {/* Applicant demographics */}
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <BarList title="By grad year" items={gradYear} total={submittedTotal(selected)} />
-                  <BarList title="Returning vs first-time" items={returning} total={submittedTotal(selected)} />
+                  <PieCard
+                    title="By grad year"
+                    segments={gradYearSegments}
+                    total={gradYear.reduce((s, it) => s + it.count, 0)}
+                    centerSub="applicants"
+                  />
+                  <PieCard
+                    title="Returning vs first-time"
+                    segments={returningSegments}
+                    total={returning.reduce((s, it) => s + it.count, 0)}
+                    centerSub="applicants"
+                  />
                 </div>
 
                 {/* History */}
