@@ -28,6 +28,13 @@ import { readableTextColor } from "@/lib/portal-color";
 import { uploadResume, deleteResume, resumeSignedUrl } from "@/lib/resume-upload";
 import { TECH_AREAS, TECH_CLASSES, TECH_CLASS_NA } from "@/lib/application-profile";
 
+// Postgres' RLS-violation code — the applications_open() checks baked into the
+// application_rankings/applications write policies fail with this when a period
+// closes out from under a tab that's had it open since before that happened.
+const RLS_VIOLATION_CODE = "42501";
+const CLOSED_PERIOD_MESSAGE =
+  "Applications just closed, so that change wasn't saved. Refresh the page to see your last saved ranking.";
+
 type ProjectType = "studio" | "launch";
 
 type Project = {
@@ -106,6 +113,11 @@ export default function ApplicationPage() {
   const [modalProject, setModalProject] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Surfaces a write failure instead of letting it vanish silently — distinguishes
+  // the RLS-closed-period case (see CLOSED_PERIOD_MESSAGE) from any other error.
+  const reportSaveError = (writeError: { code?: string } | null | undefined, fallback: string) => {
+    setError(writeError?.code === RLS_VIOLATION_CODE ? CLOSED_PERIOD_MESSAGE : fallback);
+  };
   const [showDuesConfirm, setShowDuesConfirm] = useState(false);
   // The id currently being dragged, so the DragOverlay can render a 1:1 preview.
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -252,6 +264,7 @@ export default function ApplicationPage() {
         .eq("period_id", periodIdRef.current)
         .maybeSingle();
       if (existing) { appIdRef.current = existing.id; return existing.id; }
+      reportSaveError(insertError, "Couldn't start your application.");
       return null;
     }
     appIdRef.current = data.id;
@@ -260,13 +273,15 @@ export default function ApplicationPage() {
 
   const syncRanks = async (list: string[], idMap: Record<string, string>) => {
     const supabase = createClient();
-    await Promise.all(
+    const results = await Promise.all(
       list.map((pid, i) =>
         idMap[pid]
           ? supabase.from("application_rankings").update({ rank: i + 1 }).eq("id", idMap[pid])
-          : Promise.resolve(),
+          : null,
       ),
     );
+    const failed = results.find((r) => r?.error)?.error;
+    if (failed) reportSaveError(failed, "Couldn't save your ranking order.");
   };
 
   // Restore a soft-removed row (keeps its essay/answers — see migration 0021) or
@@ -289,7 +304,7 @@ export default function ApplicationPage() {
         .from("application_rankings")
         .update({ ranked: true, rank, updated_at: new Date().toISOString() })
         .eq("id", rid);
-      if (updateError) return null;
+      if (updateError) { reportSaveError(updateError, "Couldn't save your ranking."); return null; }
       return { rid, completed: !!existing.completed };
     }
     const { data, error: insertError } = await supabase
@@ -297,7 +312,7 @@ export default function ApplicationPage() {
       .insert({ application_id: aId, project_id: projectId, rank, completed: false, ranked: true })
       .select("id")
       .single();
-    if (insertError || !data) return null;
+    if (insertError || !data) { reportSaveError(insertError, "Couldn't save your ranking."); return null; }
     return { rid: data.id as string, completed: false };
   };
 
@@ -305,7 +320,7 @@ export default function ApplicationPage() {
   const addProject = async (projectId: string) => {
     if (ranked.includes(projectId) || ranked.length >= rankTarget) return;
     const aId = await ensureApp();
-    if (!aId) { setError("Couldn't start your application."); return; }
+    if (!aId) return;
     const newRanked = [...ranked, projectId];
     const row = await upsertRankingRow(aId, projectId, newRanked.length);
     if (!row) return;
@@ -321,7 +336,10 @@ export default function ApplicationPage() {
     const rid = rankingIdByProject[projectId];
     const newRanked = ranked.filter((p) => p !== projectId);
     const supabase = createClient();
-    if (rid) await supabase.from("application_rankings").update({ ranked: false }).eq("id", rid);
+    if (rid) {
+      const { error: removeError } = await supabase.from("application_rankings").update({ ranked: false }).eq("id", rid);
+      if (removeError) reportSaveError(removeError, "Couldn't remove that project.");
+    }
     const nextMap = { ...rankingIdByProject };
     delete nextMap[projectId];
     setRankingIdByProject(nextMap);
@@ -351,7 +369,7 @@ export default function ApplicationPage() {
     const nextCompleted: Record<string, boolean> = { ...completedByProject };
 
     for (const projectId of added) {
-      if (!aId) { setError("Couldn't start your application."); continue; }
+      if (!aId) continue;
       const row = await upsertRankingRow(aId, projectId, next.indexOf(projectId) + 1);
       if (!row) continue;
       nextMap[projectId] = row.rid;
@@ -359,7 +377,10 @@ export default function ApplicationPage() {
     }
     for (const projectId of removed) {
       const rid = rankingIdByProject[projectId];
-      if (rid) await supabase.from("application_rankings").update({ ranked: false }).eq("id", rid);
+      if (rid) {
+        const { error: removeError } = await supabase.from("application_rankings").update({ ranked: false }).eq("id", rid);
+        if (removeError) reportSaveError(removeError, "Couldn't remove that project.");
+      }
       delete nextMap[projectId];
       delete nextCompleted[projectId];
     }
@@ -375,9 +396,10 @@ export default function ApplicationPage() {
   // fields debounce through scheduleSave.
   const saveAppFields = async (patch: Record<string, unknown>) => {
     const aId = await ensureApp();
-    if (!aId) { setError("Couldn't save your changes."); return; }
+    if (!aId) return;
     const supabase = createClient();
-    await supabase.from("applications").update(patch).eq("id", aId);
+    const { error: updateError } = await supabase.from("applications").update(patch).eq("id", aId);
+    if (updateError) reportSaveError(updateError, "Couldn't save your changes.");
   };
   // A ref to the latest saveAppFields, so the unmount flush isn't a stale closure.
   const saveAppFieldsRef = useRef(saveAppFields);

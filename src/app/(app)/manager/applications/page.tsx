@@ -3,7 +3,7 @@
 import { createClient } from "@/lib/supabase/client";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { ChevronDown, SlidersHorizontal, RotateCcw, BarChart3, Table2 } from "lucide-react";
+import { ChevronDown, SlidersHorizontal, RotateCcw, Mail, BarChart3, Table2 } from "lucide-react";
 import { useRoleSim } from "@/components/role-simulation-provider";
 import { PersonName } from "@/components/person-profile-provider";
 import { canReviewAllProjects } from "@/lib/roles";
@@ -18,6 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ApplicationListSkeleton } from "@/components/skeletons";
 import { ApplicationPeriodsDialog, type ApplicationPeriod } from "@/components/application-periods-dialog";
+import { EmailBlastDialog } from "@/components/email-blast-dialog";
 import {
   ApplicationReviewModal,
   type FocusSection,
@@ -100,13 +101,18 @@ function PeriodStatusText({ period }: { period: ApplicationPeriod }) {
 }
 
 export default function ManagerApplicationsPage() {
-  const { isExec } = useRoleSim();
+  const { isExec, canSimulate, persona } = useRoleSim();
+  // VP Tech/President only (mirrors canEditWindow in manager/coffee-chats/page.tsx):
+  // canSimulate is real-role VP Tech/President, persona==="exec" hides it while
+  // previewing a lower "View as" persona.
+  const canEmailBlast = canSimulate && persona === "exec";
 
   const [periods, setPeriods] = useState<ApplicationPeriod[] | null>(null);
   const [selectedPeriodId, setSelectedPeriodId] = useState<string | null>(null);
   const [apps, setApps] = useState<AppRow[] | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
   const [periodsDialogOpen, setPeriodsDialogOpen] = useState(false);
+  const [emailBlastOpen, setEmailBlastOpen] = useState(false);
   const [analyticsOpen, setAnalyticsOpen] = useState(false);
   const [projAnalyticsOpen, setProjAnalyticsOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -381,6 +387,13 @@ export default function ManagerApplicationsPage() {
           </Button>
         )}
 
+        {canEmailBlast && selectedPeriod && (
+          <Button variant="outline" size="sm" onClick={() => setEmailBlastOpen(true)}>
+            <Mail size={14} className="mr-1.5" />
+            Email blast
+          </Button>
+        )}
+
         {isExec && selectedPeriodId && (
           <Button variant="outline" size="sm" onClick={() => setAnalyticsOpen(true)}>
             <BarChart3 size={14} className="mr-1.5" />
@@ -580,6 +593,14 @@ export default function ManagerApplicationsPage() {
           onOpenChange={setPeriodsDialogOpen}
           periods={periods}
           onChanged={loadPeriods}
+        />
+      )}
+
+      {canEmailBlast && selectedPeriod && (
+        <EmailBlastDialog
+          open={emailBlastOpen}
+          onOpenChange={setEmailBlastOpen}
+          period={selectedPeriod}
         />
       )}
 
