@@ -4,94 +4,50 @@
 -- 0023) -- there was previously no way to let one specific applicant keep
 -- submitting/editing after a period closes for everyone else. This adds:
 --
---   1. application_period_access: (period_id, user_id) grants, resolved from
---      an email at grant time. Readable/writable only by VP Tech or
---      President (public.is_vp_tech_or_president(), 0047) -- the same
---      restriction as the coffee-chat booking window, deliberately narrower
---      than is_exec() since this is a review-integrity-sensitive override.
---   2. grant_application_period_access / revoke_application_period_access:
---      SECURITY DEFINER RPCs (mirrors accept_application/reject_application,
---      0022) so the client never touches auth.users directly. Grant looks up
---      the email the same way account_exists() does (0052).
---   3. period_is_open_for(period_id): applications_open() (0023) generalized
+--   1. application_period_access: (period_id, user_id) grants. user_id
+--      references public.members(user_id) (not auth.users directly) so the
+--      admin UI can pick a person from a name-search dropdown over `members`
+--      -- the same table/pattern the portal and project member pickers
+--      already use (add-member-picker.tsx) -- and so the grants list can
+--      embed-join members for display. Read/write is a single policy gated
+--      to VP Tech or President (public.is_vp_tech_or_president(), 0047) --
+--      the same restriction as the coffee-chat booking window, deliberately
+--      narrower than is_exec() since this is a review-integrity-sensitive
+--      override. No email lookup / SECURITY DEFINER RPC is needed: the
+--      client already has the target's user_id from the picker, so grant/
+--      revoke are plain table writes under RLS (mirrors application_periods
+--      itself, 0022).
+--   2. period_is_open_for(period_id): applications_open() (0023) generalized
 --      to "open, or the current user has an explicit grant for this period."
 --      Replaces applications_open() in the applicant write policies on
 --      applications / application_rankings / application_answers so an
 --      allowlisted applicant's writes succeed even once the period is
 --      closed. applications_open() itself is untouched -- it still means
 --      "is *some* period open" for any other caller.
---   4. my_open_application_period(): the period id the current applicant
+--   3. my_open_application_period(): the period id the current applicant
 --      should load -- the open one, or one they hold a grant for. Replaces
 --      the client's direct `status = 'open'` query in application/page.tsx.
 
 create table if not exists public.application_period_access (
   id         uuid primary key default gen_random_uuid(),
   period_id  uuid not null references public.application_periods(id) on delete cascade,
-  user_id    uuid not null references auth.users(id) on delete cascade,
-  email      text not null,
-  granted_by uuid references auth.users(id) on delete set null,
+  user_id    uuid not null references public.members(user_id) on delete cascade,
+  granted_by uuid references public.members(user_id) on delete set null default auth.uid(),
   granted_at timestamptz not null default now(),
   unique (period_id, user_id)
 );
 
 alter table public.application_period_access enable row level security;
 
--- VP Tech/President-only read (the admin dialog lists grants). All writes go
--- through the SECURITY DEFINER RPCs below, so no insert/update/delete policy
--- is needed here.
+-- VP Tech/President manage grants directly (list/add/remove) -- no RPC layer.
 drop policy if exists "application_period_access_select" on public.application_period_access;
-create policy "application_period_access_select"
+drop policy if exists "application_period_access_write" on public.application_period_access;
+create policy "application_period_access_write"
 on public.application_period_access
-for select
+for all
 to authenticated
-using ( public.is_vp_tech_or_president() );
-
--- Grant: resolve the email to an existing account and record the grant.
-create or replace function public.grant_application_period_access(p_period_id uuid, p_email text)
-returns void
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  v_email text := lower(trim(p_email));
-  v_user_id uuid;
-begin
-  if not public.is_vp_tech_or_president() then
-    raise exception 'not authorized';
-  end if;
-
-  select id into v_user_id from auth.users where lower(email) = v_email;
-  if v_user_id is null then
-    raise exception 'no account found for that email';
-  end if;
-
-  insert into public.application_period_access (period_id, user_id, email, granted_by)
-  values (p_period_id, v_user_id, v_email, auth.uid())
-  on conflict (period_id, user_id) do nothing;
-end;
-$$;
-
-grant execute on function public.grant_application_period_access(uuid, text) to authenticated;
-
--- Revoke: remove a grant.
-create or replace function public.revoke_application_period_access(p_period_id uuid, p_user_id uuid)
-returns void
-language plpgsql
-security definer
-set search_path = public
-as $$
-begin
-  if not public.is_vp_tech_or_president() then
-    raise exception 'not authorized';
-  end if;
-
-  delete from public.application_period_access
-  where period_id = p_period_id and user_id = p_user_id;
-end;
-$$;
-
-grant execute on function public.revoke_application_period_access(uuid, uuid) to authenticated;
+using ( public.is_vp_tech_or_president() )
+with check ( public.is_vp_tech_or_president() );
 
 -- Is this period open for the current user -- either globally open, or they
 -- hold an explicit grant for it? Used in place of applications_open() in the

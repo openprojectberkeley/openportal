@@ -1,12 +1,14 @@
 "use client";
 
 import { createClient } from "@/lib/supabase/client";
-import { useCallback, useEffect, useState } from "react";
-import { Plus, Trash2, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Plus, Trash2, X, UserPlus } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/overlay-scrollbar";
 
 export type PeriodStatus = "draft" | "open" | "closed";
 
@@ -59,16 +61,87 @@ function StatusPicker({
   );
 }
 
-type AccessGrant = { id: string; user_id: string; email: string };
+type MemberOption = { user_id: string; name: string };
+type AccessGrant = { id: string; user_id: string; name: string };
+
+const fullName = (first: string | null | undefined, last: string | null | undefined) =>
+  [first, last].filter(Boolean).join(" ") || "—";
+
+// Popover with a search box over `options`, filtered by name as you type —
+// same shape as AddMemberPicker (add-member-picker.tsx) minus its role/project
+// filters, which don't apply here.
+function GrantAccessPicker({ options, onGrant }: { options: MemberOption[]; onGrant: (m: MemberOption) => void }) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+
+  // Portal the popover into an enclosing Dialog's content so it inherits that
+  // dialog's pointer-events region and focus scope (same trick as
+  // AddMemberPicker) — this section always renders inside ApplicationPeriodsDialog.
+  const [dialogContainer, setDialogContainer] = useState<HTMLElement | null>(null);
+  const probeRef = useCallback((node: HTMLSpanElement | null) => {
+    if (node) setDialogContainer(node.closest<HTMLElement>("[role='dialog']"));
+  }, []);
+
+  const results = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return q === "" ? options : options.filter((m) => m.name.toLowerCase().includes(q));
+  }, [options, search]);
+
+  const handleOpenChange = (next: boolean) => {
+    setOpen(next);
+    if (!next) setSearch("");
+  };
+
+  return (
+    <Popover open={open} onOpenChange={handleOpenChange}>
+      <span ref={probeRef} className="hidden" aria-hidden />
+      <PopoverTrigger asChild>
+        <Button size="sm" variant="outline">
+          <UserPlus size={14} className="mr-1.5" />
+          Grant access
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent container={dialogContainer} side="bottom" align="start" className="w-64 p-2">
+        <div className="flex flex-col gap-2">
+          <Input
+            autoFocus
+            placeholder="Search by name…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="h-8"
+          />
+          <ScrollArea className="max-h-56">
+            {options.length === 0 ? (
+              <p className="px-2 py-3 text-xs text-center text-muted-foreground">Everyone already has access</p>
+            ) : results.length === 0 ? (
+              <p className="px-2 py-3 text-xs text-center text-muted-foreground">No matches</p>
+            ) : (
+              <div className="flex flex-col">
+                {results.map((m) => (
+                  <button
+                    key={m.user_id}
+                    onClick={() => { onGrant(m); handleOpenChange(false); }}
+                    className="rounded-sm px-2 py-1.5 text-left text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent"
+                  >
+                    {m.name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </ScrollArea>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 // VP Tech/President only: lets the currently-closed (or open) period keep
 // accepting one specific applicant's writes past its global status, via the
-// application_period_access grants + SECURITY DEFINER RPCs from
-// 0069_application_period_extended_access.sql.
-function ExtendedAccessSection({ periodId }: { periodId: string }) {
+// application_period_access table (RLS-gated to VP Tech/President, no RPC
+// layer — see 0069_application_period_extended_access.sql). `allMembers` is
+// fetched once at the dialog level and passed down.
+function ExtendedAccessSection({ periodId, allMembers }: { periodId: string; allMembers: MemberOption[] }) {
   const [grants, setGrants] = useState<AccessGrant[] | null>(null);
-  const [email, setEmail] = useState("");
-  const [granting, setGranting] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -76,37 +149,46 @@ function ExtendedAccessSection({ periodId }: { periodId: string }) {
     const supabase = createClient();
     const { data } = await supabase
       .from("application_period_access")
-      .select("id, user_id, email")
-      .eq("period_id", periodId)
-      .order("email");
-    setGrants((data as AccessGrant[]) ?? []);
+      .select("id, user_id, members(preferred_firstname, lastname)")
+      .eq("period_id", periodId);
+    const rows = (data ?? []) as unknown as {
+      id: string;
+      user_id: string;
+      members: { preferred_firstname: string | null; lastname: string | null } | null;
+    }[];
+    setGrants(
+      rows
+        .map((r) => ({ id: r.id, user_id: r.user_id, name: fullName(r.members?.preferred_firstname, r.members?.lastname) }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    );
   }, [periodId]);
 
   useEffect(() => { load(); }, [load]);
 
-  const grant = async () => {
+  const available = useMemo(
+    () => allMembers.filter((m) => !(grants ?? []).some((g) => g.user_id === m.user_id)),
+    [allMembers, grants],
+  );
+
+  const grant = async (m: MemberOption) => {
     setError(null);
-    if (!email.trim()) return;
-    setGranting(true);
     const supabase = createClient();
-    const { error: err } = await supabase.rpc("grant_application_period_access", {
-      p_period_id: periodId,
-      p_email: email.trim(),
-    });
-    setGranting(false);
+    const { error: err } = await supabase
+      .from("application_period_access")
+      .insert({ period_id: periodId, user_id: m.user_id });
     if (err) { setError(err.message); return; }
-    setEmail("");
     load();
   };
 
-  const revoke = async (userId: string) => {
+  const revoke = async (g: AccessGrant) => {
     setError(null);
-    setRemovingId(userId);
+    setRemovingId(g.user_id);
     const supabase = createClient();
-    const { error: err } = await supabase.rpc("revoke_application_period_access", {
-      p_period_id: periodId,
-      p_user_id: userId,
-    });
+    const { error: err } = await supabase
+      .from("application_period_access")
+      .delete()
+      .eq("period_id", periodId)
+      .eq("user_id", g.user_id);
     setRemovingId(null);
     if (err) { setError(err.message); return; }
     load();
@@ -124,13 +206,13 @@ function ExtendedAccessSection({ periodId }: { periodId: string }) {
         <ul className="flex flex-col gap-1">
           {grants.map((g) => (
             <li key={g.id} className="flex items-center justify-between gap-2 text-sm">
-              <span>{g.email}</span>
+              <span>{g.name}</span>
               <Button
                 size="sm"
                 variant="ghost"
-                onClick={() => revoke(g.user_id)}
+                onClick={() => revoke(g)}
                 disabled={removingId === g.user_id}
-                aria-label={`Remove ${g.email}`}
+                aria-label={`Remove ${g.name}`}
                 className="text-muted-foreground hover:text-red-500 h-6 w-6 p-0"
               >
                 <X size={14} />
@@ -139,16 +221,8 @@ function ExtendedAccessSection({ periodId }: { periodId: string }) {
           ))}
         </ul>
       )}
-      <div className="flex items-center gap-2">
-        <Input
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder="email@berkeley.edu"
-          className="h-8 text-sm"
-        />
-        <Button size="sm" onClick={grant} disabled={granting || !email.trim()}>
-          {granting ? "Granting…" : "Grant access"}
-        </Button>
+      <div>
+        <GrantAccessPicker options={available} onGrant={grant} />
       </div>
       {error && <p className="text-sm text-red-500">{error}</p>}
     </div>
@@ -159,10 +233,12 @@ function PeriodRow({
   period,
   onChanged,
   canManageExtendedAccess,
+  allMembers,
 }: {
   period: ApplicationPeriod;
   onChanged: () => void;
   canManageExtendedAccess: boolean;
+  allMembers: MemberOption[];
 }) {
   const [name, setName] = useState(period.name);
   const [start, setStart] = useState(toDateTimeLocal(period.starts_at));
@@ -258,7 +334,7 @@ function PeriodRow({
         </Button>
       </div>
       {error && <p className="text-sm text-red-500">{error}</p>}
-      {canManageExtendedAccess && <ExtendedAccessSection periodId={period.id} />}
+      {canManageExtendedAccess && <ExtendedAccessSection periodId={period.id} allMembers={allMembers} />}
     </div>
   );
 }
@@ -347,6 +423,28 @@ export function ApplicationPeriodsDialog({
   onChanged: () => void;
   canManageExtendedAccess: boolean;
 }) {
+  // Fetched once for the whole dialog (only VP Tech/President need it) and
+  // handed to each period's ExtendedAccessSection — the member directory is
+  // readable by any authenticated user, so this is just avoiding N duplicate
+  // fetches for N periods.
+  const [allMembers, setAllMembers] = useState<MemberOption[]>([]);
+
+  useEffect(() => {
+    if (!open || !canManageExtendedAccess) return;
+    const supabase = createClient();
+    supabase
+      .from("members")
+      .select("user_id, preferred_firstname, lastname")
+      .then(({ data }) => {
+        const rows = (data ?? []) as { user_id: string; preferred_firstname: string | null; lastname: string | null }[];
+        setAllMembers(
+          rows
+            .map((m) => ({ user_id: m.user_id, name: fullName(m.preferred_firstname, m.lastname) }))
+            .sort((a, b) => a.name.localeCompare(b.name)),
+        );
+      });
+  }, [open, canManageExtendedAccess]);
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
@@ -360,6 +458,7 @@ export function ApplicationPeriodsDialog({
               period={p}
               onChanged={onChanged}
               canManageExtendedAccess={canManageExtendedAccess}
+              allMembers={allMembers}
             />
           ))}
           <NewPeriodForm onChanged={onChanged} />
