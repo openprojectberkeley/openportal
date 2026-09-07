@@ -67,15 +67,40 @@ type AccessGrant = { id: string; user_id: string; name: string; expires_at: stri
 const fullName = (first: string | null | undefined, last: string | null | undefined) =>
   [first, last].filter(Boolean).join(" ") || "—";
 
-const DEFAULT_GRANT_DAYS = 7;
+// The org runs on Pacific time, so "midnight" always means Pacific midnight,
+// regardless of the viewer's own browser timezone. Returns the *next*
+// upcoming one (the start of tomorrow, Pacific) as a UTC ISO instant.
+function nextPacificMidnightIso(): string {
+  const tz = "America/Los_Angeles";
+  const now = new Date();
 
-// Default expiry offered when granting: now + DEFAULT_GRANT_DAYS, as a
-// datetime-local value (reuses toDateTimeLocal above — same date+time picker
-// as a period's start/end).
+  const dateParts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const get = (t: string) => Number(dateParts.find((p) => p.type === t)?.value ?? 0);
+  const y = get("year"), m = get("month"), d = get("day");
+
+  // Pacific's current UTC offset in minutes (negative — e.g. -420 for PDT,
+  // -480 for PST) — needed since a fixed offset can't be hardcoded across DST.
+  const offsetPart = new Intl.DateTimeFormat("en-US", { timeZone: tz, timeZoneName: "longOffset" })
+    .formatToParts(now)
+    .find((p) => p.type === "timeZoneName")?.value ?? "GMT-08:00";
+  const match = /GMT([+-])(\d{2}):(\d{2})/.exec(offsetPart);
+  const offsetMin = match ? (match[1] === "-" ? -1 : 1) * (Number(match[2]) * 60 + Number(match[3])) : -480;
+
+  // Tomorrow 00:00 Pacific, converted to its UTC instant.
+  const utcMillis = Date.UTC(y, m - 1, d + 1, 0, 0, 0) - offsetMin * 60_000;
+  return new Date(utcMillis).toISOString();
+}
+
+// Default expiry offered when granting, as a datetime-local value (reuses
+// toDateTimeLocal above so it renders in the viewer's own local time, even
+// though the underlying instant is anchored to Pacific midnight).
 function defaultExpiryLocal(): string {
-  const d = new Date();
-  d.setDate(d.getDate() + DEFAULT_GRANT_DAYS);
-  return toDateTimeLocal(d.toISOString());
+  return toDateTimeLocal(nextPacificMidnightIso());
 }
 
 const formatExpiry = (iso: string) => {
