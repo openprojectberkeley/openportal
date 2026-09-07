@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/supabase/client";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Plus, Trash2, X, UserPlus } from "lucide-react";
+import { Plus, Trash2, X, UserPlus, Check } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Input } from "@/components/ui/input";
@@ -69,22 +69,22 @@ const fullName = (first: string | null | undefined, last: string | null | undefi
 
 const DEFAULT_GRANT_DAYS = 7;
 
-// timestamptz <-> local 'YYYY-MM-DD' (the value format of <input type="date">).
-function toDateInputValue(d: Date): string {
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-}
-function defaultExpiryDate(): string {
+// Default expiry offered when granting: now + DEFAULT_GRANT_DAYS, as a
+// datetime-local value (reuses toDateTimeLocal above — same date+time picker
+// as a period's start/end).
+function defaultExpiryLocal(): string {
   const d = new Date();
   d.setDate(d.getDate() + DEFAULT_GRANT_DAYS);
-  return toDateInputValue(d);
+  return toDateTimeLocal(d.toISOString());
 }
-// A grant "until" a picked date lasts through the end of that local day, not
-// just to its midnight start.
-const endOfDayIso = (dateStr: string) => new Date(`${dateStr}T23:59:59`).toISOString();
 
 const formatExpiry = (iso: string) => {
-  const label = new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  const label = new Date(iso).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
   return new Date(iso).getTime() < Date.now() ? `expired ${label}` : `until ${label}`;
 };
 
@@ -102,7 +102,7 @@ function GrantAccessPicker({
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [pending, setPending] = useState<MemberOption | null>(null);
-  const [expiresOn, setExpiresOn] = useState(defaultExpiryDate());
+  const [expiresAt, setExpiresAt] = useState(defaultExpiryLocal());
 
   // Portal the popover into an enclosing Dialog's content so it inherits that
   // dialog's pointer-events region and focus scope (same trick as
@@ -122,13 +122,13 @@ function GrantAccessPicker({
     if (!next) {
       setSearch("");
       setPending(null);
-      setExpiresOn(defaultExpiryDate());
+      setExpiresAt(defaultExpiryLocal());
     }
   };
 
   const confirm = () => {
-    if (!pending || !expiresOn) return;
-    onGrant(pending, endOfDayIso(expiresOn));
+    if (!pending || !expiresAt) return;
+    onGrant(pending, toIso(expiresAt));
     handleOpenChange(false);
   };
 
@@ -148,10 +148,10 @@ function GrantAccessPicker({
             <label className="flex flex-col gap-1 text-xs font-medium px-1">
               Until
               <input
-                type="date"
-                value={expiresOn}
-                min={toDateInputValue(new Date())}
-                onChange={(e) => setExpiresOn(e.target.value)}
+                type="datetime-local"
+                value={expiresAt}
+                min={toDateTimeLocal(new Date().toISOString())}
+                onChange={(e) => setExpiresAt(e.target.value)}
                 className="border rounded-md px-2 py-1.5 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-ring"
               />
             </label>
@@ -159,7 +159,7 @@ function GrantAccessPicker({
               <Button size="sm" variant="ghost" className="flex-1" onClick={() => setPending(null)}>
                 Back
               </Button>
-              <Button size="sm" className="flex-1" onClick={confirm} disabled={!expiresOn}>
+              <Button size="sm" className="flex-1" onClick={confirm} disabled={!expiresAt}>
                 Grant access
               </Button>
             </div>
@@ -208,6 +208,9 @@ function ExtendedAccessSection({ periodId, allMembers }: { periodId: string; all
   const [grants, setGrants] = useState<AccessGrant[] | null>(null);
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Which grant's expiry is being edited inline, and its in-progress value.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState("");
 
   // Postgres' unique-violation code — surfaces if this section's `grants` list
   // is stale (e.g. it failed to load) and the picker offered someone who
@@ -260,6 +263,19 @@ function ExtendedAccessSection({ periodId, allMembers }: { periodId: string; all
     load();
   };
 
+  const saveExpiry = async (g: AccessGrant) => {
+    if (!editValue) return;
+    setError(null);
+    const supabase = createClient();
+    const { error: err } = await supabase
+      .from("application_period_access")
+      .update({ expires_at: toIso(editValue) })
+      .eq("id", g.id);
+    if (err) { setError(err.message); return; }
+    setEditingId(null);
+    load();
+  };
+
   const revoke = async (g: AccessGrant) => {
     setError(null);
     setRemovingId(g.user_id);
@@ -280,7 +296,7 @@ function ExtendedAccessSection({ periodId, allMembers }: { periodId: string; all
         Extended access
       </Label>
       <p className="text-xs text-muted-foreground">
-        These people can keep applying to this period even while it&apos;s closed to everyone else.
+        These people can keep applying to this period even while it&apos;s closed to everyone else. Click a date to change it.
       </p>
       {grants && grants.length > 0 && (
         <ul className="flex flex-col gap-1">
@@ -289,9 +305,42 @@ function ExtendedAccessSection({ periodId, allMembers }: { periodId: string; all
             return (
               <li key={g.id} className="flex items-center justify-between gap-2 text-sm">
                 <span className="truncate">{g.name}</span>
-                <span className={`text-xs shrink-0 ${expired ? "text-red-500" : "text-muted-foreground"}`}>
-                  {formatExpiry(g.expires_at)}
-                </span>
+                {editingId === g.id ? (
+                  <div className="flex items-center gap-1 shrink-0">
+                    <input
+                      type="datetime-local"
+                      value={editValue}
+                      onChange={(e) => setEditValue(e.target.value)}
+                      className="border rounded-md px-1.5 py-0.5 text-xs bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+                    />
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => saveExpiry(g)}
+                      disabled={!editValue}
+                      aria-label={`Save ${g.name}'s expiry`}
+                      className="text-muted-foreground hover:text-foreground h-6 w-6 p-0"
+                    >
+                      <Check size={14} />
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setEditingId(null)}
+                      aria-label="Cancel"
+                      className="text-muted-foreground hover:text-red-500 h-6 w-6 p-0"
+                    >
+                      <X size={14} />
+                    </Button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => { setEditingId(g.id); setEditValue(toDateTimeLocal(g.expires_at)); }}
+                    className={`text-xs shrink-0 underline decoration-dotted underline-offset-2 hover:text-foreground ${expired ? "text-red-500" : "text-muted-foreground"}`}
+                  >
+                    {formatExpiry(g.expires_at)}
+                  </button>
+                )}
                 <Button
                   size="sm"
                   variant="ghost"
