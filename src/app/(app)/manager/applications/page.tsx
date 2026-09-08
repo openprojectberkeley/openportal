@@ -3,7 +3,7 @@
 import { createClient } from "@/lib/supabase/client";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { ChevronDown, SlidersHorizontal, RotateCcw, Mail, BarChart3, Table2 } from "lucide-react";
+import { ChevronDown, SlidersHorizontal, RotateCcw, Mail, BarChart3, Table2, UserPlus } from "lucide-react";
 import { useRoleSim } from "@/components/role-simulation-provider";
 import { PersonName } from "@/components/person-profile-provider";
 import { canReviewAllProjects } from "@/lib/roles";
@@ -487,10 +487,20 @@ export default function ManagerApplicationsPage() {
               : "Loading counts…"}{" "}
             Open the sheet to page through one project at a time.
           </p>
-          <Button size="sm" onClick={() => setSheetOpen(true)} disabled={!selectedPeriodId}>
-            <Table2 size={14} className="mr-1.5" />
-            Open sheet view
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button size="sm" onClick={() => setSheetOpen(true)} disabled={!selectedPeriodId}>
+              <Table2 size={14} className="mr-1.5" />
+              Open sheet view
+            </Button>
+            {fullAccessReview && (
+              <Button asChild variant="outline" size="sm">
+                <Link href="/manager/draft">
+                  <UserPlus size={14} className="mr-1.5" />
+                  Draft members
+                </Link>
+              </Button>
+            )}
+          </div>
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
