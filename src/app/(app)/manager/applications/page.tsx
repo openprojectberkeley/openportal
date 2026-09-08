@@ -141,7 +141,6 @@ export default function ManagerApplicationsPage() {
   const [projAnalyticsOpen, setProjAnalyticsOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetReloadToken, setSheetReloadToken] = useState(0);
-  const [appsReloadToken, setAppsReloadToken] = useState(0);
   const [reviewFor, setReviewFor] = useState<
     { id: string; name: string; status: ReviewStatus; projectId?: string | null; focus?: FocusSection } | null
   >(null);
@@ -314,14 +313,11 @@ export default function ManagerApplicationsPage() {
   // the wishlist, and dragged back out to either, directly.
   const draftPicks = useDraftPicks(!allSelected ? selectedProjectId : null, selectedPeriodId);
 
-  const handleSubmitDraftPicks = async () => {
-    const ok = await draftPicks.submit();
-    if (ok && selectedProjectId && !allSelected) {
-      loadRoster(selectedProjectId);
-      setAppsReloadToken((n) => n + 1);
-    }
-    return ok;
-  };
+  // Submitting only locks the round's picks in as "confirmed" -- it doesn't
+  // place anyone on the roster yet (that's a separate "Complete draft" step
+  // a VP takes for the whole period, from /manager/draft), so there's
+  // nothing here that needs the roster/apps to reload.
+  const handleSubmitDraftPicks = () => draftPicks.submit();
 
   // Three peer drop zones (Wishlist, Draft window, Left to review) any
   // applicant card can move between directly -- whichever zone it lands on
@@ -453,7 +449,7 @@ export default function ManagerApplicationsPage() {
         })),
       );
     })();
-  }, [selectedPeriodId, selectedProjectId, reviewableProjects, appsReloadToken]);
+  }, [selectedPeriodId, selectedProjectId, reviewableProjects]);
 
   // Period funnel stats track the period alone, so they survive the project
   // picker switching to "All projects".

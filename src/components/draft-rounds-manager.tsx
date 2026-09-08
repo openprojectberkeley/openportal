@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/supabase/client";
 import { useCallback, useEffect, useState } from "react";
-import { ChevronDown, ChevronLeft, ChevronRight, GripVertical, Play, Plus, RotateCcw, Trash2, X } from "lucide-react";
+import { CheckCheck, ChevronDown, ChevronLeft, ChevronRight, GripVertical, Play, Plus, RotateCcw, Trash2, X } from "lucide-react";
 import {
   DndContext,
   PointerSensor,
@@ -38,7 +38,9 @@ type PickStop = RoundProject & { round_id: string; round_number: number };
 // Pending destructive action, confirmed via the shared ConfirmDialog.
 type ConfirmTarget =
   | { kind: "round"; roundId: string; label: string }
-  | { kind: "project"; roundId: string; rowId: string; label: string };
+  | { kind: "project"; roundId: string; rowId: string; label: string }
+  | { kind: "reset" }
+  | { kind: "complete" };
 
 function isOpenNow(p: Period): boolean {
   const now = Date.now();
@@ -60,8 +62,12 @@ export function DraftRoundsManager() {
   const [rounds, setRounds] = useState<Round[] | null>(null);
   // null current_pick_id (or no row at all) means the draft hasn't started.
   const [currentPickId, setCurrentPickId] = useState<string | null>(null);
+  // Once set, the draft is finished: every confirmed pick has been placed
+  // on its project, and Reset/further submissions are blocked.
+  const [completedAt, setCompletedAt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirmTarget, setConfirmTarget] = useState<ConfirmTarget | null>(null);
+  const [working, setWorking] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -113,8 +119,9 @@ export function DraftRoundsManager() {
 
   const loadDraftState = useCallback(async (periodId: string) => {
     const supabase = createClient();
-    const { data } = await supabase.from("draft_state").select("current_pick_id").eq("period_id", periodId).maybeSingle();
+    const { data } = await supabase.from("draft_state").select("current_pick_id, completed_at").eq("period_id", periodId).maybeSingle();
     setCurrentPickId(data?.current_pick_id ?? null);
+    setCompletedAt(data?.completed_at ?? null);
   }, []);
 
   useEffect(() => {
@@ -124,6 +131,7 @@ export function DraftRoundsManager() {
     } else {
       setRounds(null);
       setCurrentPickId(null);
+      setCompletedAt(null);
     }
   }, [selectedPeriodId, loadRounds, loadDraftState]);
 
@@ -156,9 +164,39 @@ export function DraftRoundsManager() {
     setPick(selectedPeriodId, sequence[index].id);
   };
 
-  const resetDraft = () => {
+  // Wipes every staged/confirmed pick for the period and un-submits every
+  // round before clearing the position -- since placement is deferred to
+  // completeDraft(), nothing on applications/project_members needs
+  // undoing here; a reset genuinely sends everyone back to plain
+  // applicants. Goes through the RPC (not a plain draft_state upsert)
+  // because RLS blocks deleting draft_picks under an already-submitted
+  // round for anyone but this SECURITY DEFINER function.
+  const resetDraft = async () => {
     if (!selectedPeriodId) return;
-    setPick(selectedPeriodId, null);
+    setWorking(true);
+    try {
+      const supabase = createClient();
+      const { error: rpcError } = await supabase.rpc("reset_draft", { p_period_id: selectedPeriodId });
+      if (rpcError) { setError(rpcError.message || "Couldn't reset the draft."); return; }
+      setCurrentPickId(null);
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  // Places every confirmed pick in the period onto its project for real
+  // (accept_application under the hood) and locks the draft as completed.
+  const completeDraft = async () => {
+    if (!selectedPeriodId) return;
+    setWorking(true);
+    try {
+      const supabase = createClient();
+      const { error: rpcError } = await supabase.rpc("complete_draft", { p_period_id: selectedPeriodId });
+      if (rpcError) { setError(rpcError.message || "Couldn't complete the draft."); return; }
+      loadDraftState(selectedPeriodId);
+    } finally {
+      setWorking(false);
+    }
   };
 
   // A new round starts seeded with every current project, in alphabetical
@@ -312,7 +350,15 @@ export function DraftRoundsManager() {
 
       {selectedPeriodId && rounds !== null && rounds.length > 0 && (
         <div className="border rounded-xl p-4 flex flex-wrap items-center justify-between gap-3 bg-muted/30">
-          {currentStop === null ? (
+          {completedAt ? (
+            <div className="flex items-center gap-2 text-sm">
+              <CheckCheck size={16} className="text-green-600" />
+              <span>
+                Draft completed — every confirmed pick has been placed on its project
+                <span className="text-muted-foreground"> ({new Date(completedAt).toLocaleString()})</span>.
+              </span>
+            </div>
+          ) : currentStop === null ? (
             <>
               <span className="text-sm text-muted-foreground">
                 {sequence.length === 0 ? "No projects with picks to draft yet." : `${sequence.length} pick${sequence.length === 1 ? "" : "s"} queued up.`}
@@ -344,7 +390,22 @@ export function DraftRoundsManager() {
                   Next
                   <ChevronRight size={14} className="ml-1" />
                 </Button>
-                <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={resetDraft}>
+                <Button
+                  size="sm"
+                  className="bg-green-600 hover:bg-green-600/90"
+                  onClick={() => setConfirmTarget({ kind: "complete" })}
+                  disabled={working}
+                >
+                  <CheckCheck size={14} className="mr-1.5" />
+                  Complete draft
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-muted-foreground"
+                  onClick={() => setConfirmTarget({ kind: "reset" })}
+                  disabled={working}
+                >
                   <RotateCcw size={13} className="mr-1.5" />
                   Reset
                 </Button>
@@ -391,17 +452,32 @@ export function DraftRoundsManager() {
       <ConfirmDialog
         open={!!confirmTarget}
         onOpenChange={(o) => { if (!o) setConfirmTarget(null); }}
-        title={confirmTarget?.kind === "round" ? `Delete ${confirmTarget.label}?` : `Remove ${confirmTarget?.label}?`}
-        description={
-          confirmTarget?.kind === "round"
-            ? "This removes the round and every project's order/pick count within it."
-            : "This project will no longer draft in this round."
+        title={
+          confirmTarget?.kind === "round" ? `Delete ${confirmTarget.label}?`
+          : confirmTarget?.kind === "project" ? `Remove ${confirmTarget.label}?`
+          : confirmTarget?.kind === "reset" ? "Reset the draft?"
+          : "Complete the draft?"
         }
-        confirmLabel={confirmTarget?.kind === "round" ? "Delete round" : "Remove"}
+        description={
+          confirmTarget?.kind === "round" ? "This removes the round and every project's order/pick count within it."
+          : confirmTarget?.kind === "project" ? "This project will no longer draft in this round."
+          : confirmTarget?.kind === "reset"
+            ? "Every staged and confirmed pick this draft is cleared and every round un-submitted. Applicants go back to being plain applicants — nothing has been placed on a project yet, so there's nothing to undo there. Round order and pick counts are unaffected."
+            : "Places every confirmed pick onto its project for real (same as accepting them manually) and locks the draft. This can't be undone from here."
+        }
+        confirmLabel={
+          confirmTarget?.kind === "round" ? "Delete round"
+          : confirmTarget?.kind === "project" ? "Remove"
+          : confirmTarget?.kind === "reset" ? "Reset draft"
+          : "Complete draft"
+        }
+        destructive={confirmTarget?.kind !== "complete"}
         onConfirm={() => {
           if (!confirmTarget) return;
           if (confirmTarget.kind === "round") return deleteRound(confirmTarget.roundId);
-          return removeProjectFromRound(confirmTarget.roundId, confirmTarget.rowId);
+          if (confirmTarget.kind === "project") return removeProjectFromRound(confirmTarget.roundId, confirmTarget.rowId);
+          if (confirmTarget.kind === "reset") return resetDraft();
+          return completeDraft();
         }}
       />
     </div>

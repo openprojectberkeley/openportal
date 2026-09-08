@@ -61,9 +61,16 @@ export function DraftWindowPanel({
     <>
       {/* Confirmed */}
       <div className="flex flex-col gap-2.5">
-        <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Confirmed{confirmedPicks.length ? ` (${confirmedPicks.length})` : ""}
-        </h2>
+        <div className="flex flex-col gap-0.5">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Confirmed{confirmedPicks.length ? ` (${confirmedPicks.length})` : ""}
+          </h2>
+          {confirmedPicks.length > 0 && (
+            <p className="text-xs text-muted-foreground">
+              Locked in, but not yet team members — that happens once the draft is completed.
+            </p>
+          )}
+        </div>
         {confirmedPicks.length === 0 ? (
           <div className="px-4 py-6 text-center text-sm text-muted-foreground border rounded-xl">
             No picks confirmed yet.
