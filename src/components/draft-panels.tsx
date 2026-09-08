@@ -1,10 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { useDraggable, useDroppable } from "@dnd-kit/core";
-import { GripVertical } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { useDroppable } from "@dnd-kit/core";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { DraggableApplicantCard, applicantName, type AppRow } from "@/components/applicant-meta";
 import type { PickRow } from "@/lib/use-draft-picks";
 
 // Drop target id for the draft-window zone -- a peer of the wishlist and
@@ -13,44 +13,26 @@ import type { PickRow } from "@/lib/use-draft-picks";
 // either, directly -- staging isn't gated behind the wishlist.
 export const DRAFT_WINDOW_DROPZONE_ID = "draft-window-dropzone";
 
-// A staged (not yet submitted) draft-window pick -- draggable back out to
-// the wishlist or "Left to review", same gesture as dragging it in.
-function DraftWindowCard({ applicationId, name }: { applicationId: string; name: string }) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: applicationId });
-  const style = transform ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` } : undefined;
-  return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      className={`flex items-center gap-2 border rounded-lg px-3 py-2 bg-background ${isDragging ? "relative z-10 opacity-50 shadow-lg" : ""}`}
-    >
-      <button
-        {...attributes}
-        {...listeners}
-        className="text-muted-foreground/40 hover:text-muted-foreground cursor-grab touch-none shrink-0"
-        aria-label="Drag out of the draft window"
-      >
-        <GripVertical size={14} />
-      </button>
-      <span className="flex-1 min-w-0 truncate text-sm font-medium">{name}</span>
-    </div>
-  );
-}
-
 // Shown on the Applications manager page, only once a draft is active for
 // the selected period. Draft window is a capped staging area for the
 // project's upcoming round -- drag an applicant card in from anywhere
-// (Wishlist or "Left to review"), drag one back out the same way; Confirmed
-// is what's already been submitted this draft, across every round so far.
+// (Wishlist or "Left to review"), drag one back out the same way. Staged
+// picks keep the full applicant card (Review button, status/late/returning/
+// coffee/infosession badges) the whole time; that only goes away once a
+// pick is actually confirmed, shown below as a plain name + round badge.
 export function DraftWindowPanel({
-  nameById,
+  appById,
+  periodEndsAt,
+  onReview,
   nextRound,
   isMyTurn,
   draftWindowPicks,
   confirmedPicks,
   onSubmit,
 }: {
-  nameById: Map<string, string>;
+  appById: Map<string, AppRow>;
+  periodEndsAt: string | undefined;
+  onReview: (app: AppRow) => void;
   nextRound: { id: string; round_number: number; pick_count: number } | null;
   isMyTurn: boolean;
   draftWindowPicks: PickRow[];
@@ -82,12 +64,15 @@ export function DraftWindowPanel({
           </div>
         ) : (
           <div className="flex flex-col gap-2">
-            {confirmedPicks.map((p) => (
-              <div key={p.id} className="flex items-center gap-2 border rounded-lg px-3 py-2">
-                <span className="flex-1 min-w-0 truncate text-sm font-medium">{nameById.get(p.application_id) ?? "Applicant"}</span>
-                <Badge variant="outline">Round {p.round.round_number}</Badge>
-              </div>
-            ))}
+            {confirmedPicks.map((p) => {
+              const app = appById.get(p.application_id);
+              return (
+                <div key={p.id} className="flex items-center gap-2 border rounded-lg px-3 py-2">
+                  <span className="flex-1 min-w-0 truncate text-sm font-medium">{app ? applicantName(app) : "Applicant"}</span>
+                  <Badge variant="outline">Round {p.round.round_number}</Badge>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
@@ -117,9 +102,13 @@ export function DraftWindowPanel({
               Drag up to {nextRound.pick_count} applicants here for Round {nextRound.round_number}.
             </p>
           ) : (
-            draftWindowPicks.map((p) => (
-              <DraftWindowCard key={p.id} applicationId={p.application_id} name={nameById.get(p.application_id) ?? "Applicant"} />
-            ))
+            draftWindowPicks.map((p) => {
+              const app = appById.get(p.application_id);
+              if (!app) return null;
+              return (
+                <DraggableApplicantCard key={p.id} app={app} periodEndsAt={periodEndsAt} onReview={() => onReview(app)} />
+              );
+            })
           )}
         </div>
       </div>
