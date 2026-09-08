@@ -150,9 +150,10 @@ function WishlistDropzone({
               dndId={WISHLIST_PREFIX + a.id}
               app={a}
               periodEndsAt={periodEndsAt}
-              onReview={() => onReview(a)}
-              onRemove={() => onRemove(a.id)}
-              onAddToDraft={draftActive ? () => onAddToDraft(a.id) : undefined}
+              onReview={onReview}
+              onRemove={onRemove}
+              showAddToDraft={draftActive}
+              onAddToDraft={onAddToDraft}
               addToDraftDisabled={addToDraftDisabled(a.id)}
             />
           ))}
@@ -418,6 +419,17 @@ export default function ManagerApplicationsPage() {
   // applicant can be staged into the draft window from the Applicants list or
   // the wishlist (a copy -- the source keeps its card).
   const draftPicks = useDraftPicks(!allSelected ? selectedProjectId : null, selectedPeriodId);
+
+  // Stable callbacks for the (memoized) applicant cards. draftPicks' own
+  // callbacks change identity every render (nextRound is recomputed), which
+  // would defeat the card memo during a drag, so route through a ref.
+  const draftPicksRef = useRef(draftPicks);
+  draftPicksRef.current = draftPicks;
+  const stageInDraft = useCallback((id: string) => { draftPicksRef.current.addToDraftWindow(id); }, []);
+  const onReviewApp = useCallback(
+    (a: AppRow) => setReviewFor({ id: a.id, name: applicantName(a), status: a.status }),
+    [],
+  );
 
   // Submitting only locks the round's picks in as "confirmed" -- it doesn't
   // place anyone on the roster yet (that's a separate "Complete draft" step
@@ -939,9 +951,9 @@ export default function ManagerApplicationsPage() {
                   periodEndsAt={selectedPeriod?.ends_at}
                   draftActive={draftActive}
                   addToDraftDisabled={(id) => draftedIds.has(id)}
-                  onReview={(a) => setReviewFor({ id: a.id, name: applicantName(a), status: a.status })}
+                  onReview={onReviewApp}
                   onRemove={removeFromWishlist}
-                  onAddToDraft={draftPicks.addToDraftWindow}
+                  onAddToDraft={stageInDraft}
                 />
               </div>
 
@@ -951,7 +963,7 @@ export default function ManagerApplicationsPage() {
                 <DraftWindowPanel
                   appById={appById}
                   periodEndsAt={selectedPeriod?.ends_at}
-                  onReview={(a) => setReviewFor({ id: a.id, name: applicantName(a), status: a.status })}
+                  onReview={onReviewApp}
                   nextRound={draftPicks.nextRound}
                   isMyTurn={draftPicks.isMyTurn}
                   draftWindowPicks={draftPicks.draftWindowPicks}
@@ -996,10 +1008,11 @@ export default function ManagerApplicationsPage() {
                           app={a}
                           periodEndsAt={selectedPeriod?.ends_at}
                           isWishlisted={wishlistSet.has(a.id)}
-                          onWishlistToggle={() => toggleWishlist(a.id)}
-                          onAddToDraft={draftActive ? () => draftPicks.addToDraftWindow(a.id) : undefined}
+                          onWishlistToggle={toggleWishlist}
+                          showAddToDraft={draftActive}
+                          onAddToDraft={stageInDraft}
                           addToDraftDisabled={draftedIds.has(a.id)}
-                          onReview={() => setReviewFor({ id: a.id, name: applicantName(a), status: a.status })}
+                          onReview={onReviewApp}
                         />
                       ))}
                     </div>
@@ -1015,7 +1028,7 @@ export default function ManagerApplicationsPage() {
               <StaticApplicantCard
                 app={activeApp}
                 periodEndsAt={selectedPeriod?.ends_at}
-                onReview={() => {}}
+                onReview={onReviewApp}
               />
             ) : null}
           </DragOverlay>

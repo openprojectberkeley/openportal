@@ -143,8 +143,8 @@ export function DraftWindowPanel({
                   key={p.id}
                   app={app}
                   periodEndsAt={periodEndsAt}
-                  onReview={() => onReview(app)}
-                  onRemove={() => onRemove(app.id)}
+                  onReview={onReview}
+                  onRemove={onRemove}
                 />
               );
             })
