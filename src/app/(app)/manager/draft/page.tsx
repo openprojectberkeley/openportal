@@ -4,6 +4,7 @@ import { connection } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getEffectiveRoleNames } from "@/lib/roles-server";
 import { canReviewAllProjects } from "@/lib/roles";
+import { DraftRoundsManager } from "@/components/draft-rounds-manager";
 
 export default async function DraftPage() {
   await connection();
@@ -21,13 +22,11 @@ export default async function DraftPage() {
         <Link href="/manager" className="text-sm text-muted-foreground hover:text-foreground">← Back</Link>
         <h1 className="text-2xl font-bold">Draft</h1>
         <p className="text-sm text-muted-foreground">
-          Draft accepted members onto new projects.
+          Set up draft rounds: the order projects pick in and how many applicants each may take, per round.
         </p>
       </div>
 
-      <div className="px-4 py-10 text-center text-sm text-muted-foreground border rounded-xl">
-        Coming soon.
-      </div>
+      <DraftRoundsManager />
     </div>
   );
 }
