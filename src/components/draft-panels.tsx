@@ -19,9 +19,11 @@ type WishlistEntry = { id: string; application_id: string; position: number };
 type RoundProjectInfo = { id: string; round_number: number; pick_count: number; submitted_at: string | null };
 type PickRow = { id: string; round_project_id: string; application_id: string };
 
-// Shown on the Applications manager page once a draft is active: a PM's
-// shortlist (Wishlist), a capped staging area for their upcoming round
-// (Draft window), and what's already been submitted this draft (Confirmed).
+// Shown on the Applications manager page, below the existing roster. The
+// Wishlist is a standing shortlist a PM can build any time (before a draft
+// starts and after it ends); Draft window (a capped staging area for their
+// upcoming round) and Confirmed (what's been submitted this draft) only
+// appear once a draft is actually active for the selected period.
 export function DraftPanels({
   projectId,
   periodId,
@@ -141,71 +143,76 @@ export function DraftPanels({
     }
   };
 
-  if (!draftStarted) return null;
-
   return (
     <div className="flex flex-col gap-4">
       {error && <p className="text-sm text-red-500">{error}</p>}
 
-      {/* Confirmed */}
-      <div className="flex flex-col gap-2">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Confirmed{confirmedPicks.length ? ` (${confirmedPicks.length})` : ""}
-        </h3>
-        {confirmedPicks.length === 0 ? (
-          <div className="px-4 py-6 text-center text-sm text-muted-foreground border rounded-xl">
-            No picks confirmed yet.
-          </div>
-        ) : (
+      {/* Confirmed + Draft window only make sense once a draft is running --
+          Wishlist below is a standing tool a PM can build up before a draft
+          starts and still consult after it ends, so it's never gated. */}
+      {draftStarted && (
+        <>
+          {/* Confirmed */}
           <div className="flex flex-col gap-2">
-            {confirmedPicks.map((p) => (
-              <div key={p.id} className="flex items-center gap-2 border rounded-lg px-3 py-2">
-                <span className="flex-1 min-w-0 truncate text-sm font-medium">{nameById.get(p.application_id) ?? "Applicant"}</span>
-                <Badge variant="outline">Round {p.round!.round_number}</Badge>
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Confirmed{confirmedPicks.length ? ` (${confirmedPicks.length})` : ""}
+            </h3>
+            {confirmedPicks.length === 0 ? (
+              <div className="px-4 py-6 text-center text-sm text-muted-foreground border rounded-xl">
+                No picks confirmed yet.
               </div>
-            ))}
+            ) : (
+              <div className="flex flex-col gap-2">
+                {confirmedPicks.map((p) => (
+                  <div key={p.id} className="flex items-center gap-2 border rounded-lg px-3 py-2">
+                    <span className="flex-1 min-w-0 truncate text-sm font-medium">{nameById.get(p.application_id) ?? "Applicant"}</span>
+                    <Badge variant="outline">Round {p.round!.round_number}</Badge>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
-        )}
-      </div>
 
-      {/* Draft window */}
-      <div className="flex flex-col gap-2">
-        <div className="flex items-center justify-between gap-2">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Draft window{nextRound ? ` (${draftWindowPicks.length}/${nextRound.pick_count})` : ""}
-          </h3>
-          {nextRound && (
-            <Button size="sm" className="h-7 px-2.5 text-xs" onClick={submit} disabled={!isMyTurn || draftWindowPicks.length === 0 || submitting}>
-              {submitting ? "Submitting…" : isMyTurn ? "Submit" : "Not your turn yet"}
-            </Button>
-          )}
-        </div>
-        {!nextRound ? (
-          <div className="px-4 py-6 text-center text-sm text-muted-foreground border rounded-xl">
-            No upcoming round to draft into.
-          </div>
-        ) : draftWindowPicks.length === 0 ? (
-          <div className="px-4 py-6 text-center text-sm text-muted-foreground border rounded-xl">
-            Round {nextRound.round_number} — move up to {nextRound.pick_count} from your wishlist.
-          </div>
-        ) : (
+          {/* Draft window */}
           <div className="flex flex-col gap-2">
-            {draftWindowPicks.map((p) => (
-              <div key={p.id} className="flex items-center gap-2 border rounded-lg px-3 py-2">
-                <span className="flex-1 min-w-0 truncate text-sm font-medium">{nameById.get(p.application_id) ?? "Applicant"}</span>
-                <button
-                  onClick={() => moveBackToWishlist(p)}
-                  className="text-muted-foreground/50 hover:text-muted-foreground"
-                  aria-label="Move back to wishlist"
-                  title="Move back to wishlist"
-                >
-                  <ArrowLeftRight size={14} />
-                </button>
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Draft window{nextRound ? ` (${draftWindowPicks.length}/${nextRound.pick_count})` : ""}
+              </h3>
+              {nextRound && (
+                <Button size="sm" className="h-7 px-2.5 text-xs" onClick={submit} disabled={!isMyTurn || draftWindowPicks.length === 0 || submitting}>
+                  {submitting ? "Submitting…" : isMyTurn ? "Submit" : "Not your turn yet"}
+                </Button>
+              )}
+            </div>
+            {!nextRound ? (
+              <div className="px-4 py-6 text-center text-sm text-muted-foreground border rounded-xl">
+                No upcoming round to draft into.
               </div>
-            ))}
+            ) : draftWindowPicks.length === 0 ? (
+              <div className="px-4 py-6 text-center text-sm text-muted-foreground border rounded-xl">
+                Round {nextRound.round_number} — move up to {nextRound.pick_count} from your wishlist.
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {draftWindowPicks.map((p) => (
+                  <div key={p.id} className="flex items-center gap-2 border rounded-lg px-3 py-2">
+                    <span className="flex-1 min-w-0 truncate text-sm font-medium">{nameById.get(p.application_id) ?? "Applicant"}</span>
+                    <button
+                      onClick={() => moveBackToWishlist(p)}
+                      className="text-muted-foreground/50 hover:text-muted-foreground"
+                      aria-label="Move back to wishlist"
+                      title="Move back to wishlist"
+                    >
+                      <ArrowLeftRight size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
-        )}
-      </div>
+        </>
+      )}
 
       {/* Wishlist */}
       <div className="flex flex-col gap-2">
