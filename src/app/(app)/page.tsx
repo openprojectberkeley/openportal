@@ -174,13 +174,20 @@ export default function HomePage() {
       // "member" would otherwise persist after switching back to PM/exec.
       setReapply(null);
       if (shouldShowReapplyBanner(member.status, isBoardOrExec)) {
-        const { data: openPeriods } = await supabase
-          .from("application_periods")
-          .select("id, name")
-          .eq("status", "open")
-          .order("created_at", { ascending: false })
-          .limit(1);
-        const period = openPeriods?.[0] ?? null;
+        // Grant-aware, mirroring /application (my_open_application_period):
+        // the period this user can apply to is the globally open one OR a
+        // closed one they hold an extended-access grant for (0069). A plain
+        // status = 'open' query hid this prompt from a grant-holder the moment
+        // the cycle closed — even though they could still submit at
+        // /application — so the exception effectively did nothing here.
+        const { data: periodId } = await supabase.rpc("my_open_application_period");
+        const { data: period } = periodId
+          ? await supabase
+              .from("application_periods")
+              .select("id, name")
+              .eq("id", periodId)
+              .maybeSingle()
+          : { data: null };
         if (period) {
           const [{ data: appliedRows }, { data: infoRows }] = await Promise.all([
             supabase

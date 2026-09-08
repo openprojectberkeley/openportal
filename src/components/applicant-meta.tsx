@@ -4,10 +4,9 @@ import { memo } from "react";
 import { useDraggable } from "@dnd-kit/core";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { AlertTriangle, RotateCcw, Star, UserPlus, X } from "lucide-react";
+import { AlertTriangle, GripVertical, RotateCcw, Star, UserPlus, X } from "lucide-react";
 import { PersonName } from "@/components/person-profile-provider";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import type { ReviewStatus } from "@/components/application-review-modal";
 import { CoffeeChatIndicator, InfosessionIndicator, LateBadge, type CoffeeState } from "@/components/applicant-indicators";
 
@@ -98,36 +97,64 @@ export type ApplicantCardActions = {
   onRemove?: (id: string) => void;
 };
 
-// Small helper so a button living on a draggable card doesn't start a drag.
-const stopDrag = {
+// Small helper so a button living on a draggable card doesn't start a drag,
+// and clicking it doesn't bubble up to the card's open-review click.
+const stopClick = {
   onPointerDown: (e: React.PointerEvent) => e.stopPropagation(),
+  onClick: (e: React.MouseEvent) => e.stopPropagation(),
 };
 
-// Action buttons stay hidden until the card is hovered, so the row reads as
-// name + badges at rest. The wishlist star is the exception: on an already-
-// wishlisted card it stays lit as the at-rest indicator (see below).
-const HOVER_BTN =
-  "opacity-0 pointer-events-none transition-opacity group-hover:opacity-100 group-hover:pointer-events-auto";
+// An overlay action button (revealed on hover inside the gradient panel).
+function OverlayButton({
+  onClick,
+  disabled,
+  label,
+  className,
+  children,
+}: {
+  onClick: () => void;
+  disabled?: boolean;
+  label: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      title={label}
+      aria-label={label}
+      className={`flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent disabled:opacity-40 disabled:hover:bg-transparent ${className ?? ""}`}
+      onPointerDown={stopClick.onPointerDown}
+      onClick={(e) => { e.stopPropagation(); if (!disabled) onClick(); }}
+    >
+      {children}
+    </button>
+  );
+}
 
-// The visible contents of an applicant card: meta + action buttons. Rendered
-// inside every wrapper (sortable / draggable / static) so all variants look
-// identical and the buttons behave the same.
+// The visible contents of an applicant card: a drag affordance, meta, and a
+// hover overlay of actions. Rendered inside every wrapper (sortable /
+// draggable / static). The overlay is absolutely positioned so the buttons
+// take no layout width -- they fade in over a gradient that veils the labels
+// behind them. Clicking the card (anywhere but a button) opens review.
 function ApplicantCardInner({
   app,
   periodEndsAt,
-  onReview,
   isWishlisted,
   onWishlistToggle,
   showAddToDraft,
   onAddToDraft,
   addToDraftDisabled,
   onRemove,
-}: ApplicantCardActions) {
+  draggable,
+}: ApplicantCardActions & { draggable?: boolean }) {
   const invalid = !app.valid;
   const reasons = invalid ? invalidReasons(app) : [];
+  const hasOverlay = !!(onWishlistToggle || (showAddToDraft && onAddToDraft) || onRemove);
   return (
     <>
-      {invalid && (
+      {invalid ? (
         // CSS fallback for the shared <Tooltip> primitive (components/ui/tooltip):
         // dnd-kit listeners on the card block Radix hover-open, and native title
         // never fires while a drag is armed. Styling is kept in sync with TooltipContent.
@@ -140,58 +167,53 @@ function ApplicantCardInner({
             <span className="opacity-80">Can still be drafted into projects.</span>
           </span>
         </span>
-      )}
+      ) : draggable ? (
+        <GripVertical size={14} className="shrink-0 text-muted-foreground/40" aria-hidden />
+      ) : null}
+
       <ApplicantMeta app={app} periodEndsAt={periodEndsAt} />
-      <div className="flex shrink-0 items-center gap-0.5">
-        {showAddToDraft && onAddToDraft && (
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); onAddToDraft(app.id); }}
-            disabled={addToDraftDisabled}
-            title="Add to draft window"
-            aria-label="Add to draft window"
-            className={`flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent ${HOVER_BTN}`}
-            {...stopDrag}
-          >
-            <UserPlus size={14} />
-          </button>
-        )}
-        {onWishlistToggle && (
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); onWishlistToggle(app.id); }}
-            title={isWishlisted ? "Remove from wishlist" : "Add to wishlist"}
-            aria-label={isWishlisted ? "Remove from wishlist" : "Add to wishlist"}
-            className={`flex h-7 w-7 items-center justify-center rounded-md hover:bg-accent ${
-              isWishlisted ? "text-amber-500" : `text-muted-foreground hover:text-amber-500 ${HOVER_BTN}`
-            }`}
-            {...stopDrag}
-          >
-            <Star size={14} className={isWishlisted ? "fill-amber-500" : ""} />
-          </button>
-        )}
-        <Button
-          size="sm"
-          variant="outline"
-          className={`h-7 px-2 text-xs ${HOVER_BTN}`}
-          onClick={(e) => { e.stopPropagation(); onReview(app); }}
-          {...stopDrag}
-        >
-          Review
-        </Button>
-        {onRemove && (
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); onRemove(app.id); }}
-            aria-label="Remove"
-            title="Remove"
-            className={`flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-destructive ${HOVER_BTN}`}
-            {...stopDrag}
-          >
-            <X size={14} />
-          </button>
-        )}
-      </div>
+
+      {/* Persistent wishlisted indicator; sits in the same 28px box (and card
+          padding) as the overlay's star toggle so the two line up exactly, and
+          fades out as the overlay fades in. */}
+      {isWishlisted && onWishlistToggle && (
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center text-amber-500 transition-opacity group-hover:opacity-0" aria-hidden>
+          <Star size={14} className="fill-amber-500" />
+        </span>
+      )}
+
+      {hasOverlay && (
+        <div className="absolute inset-y-0 right-0 flex items-center gap-0.5 rounded-r-lg pl-10 pr-3 bg-gradient-to-l from-background via-background/95 to-transparent opacity-0 pointer-events-none transition-opacity group-hover:opacity-100 group-hover:pointer-events-auto">
+          {showAddToDraft && onAddToDraft && (
+            <OverlayButton
+              onClick={() => onAddToDraft(app.id)}
+              disabled={addToDraftDisabled}
+              label="Add to draft window"
+              className="hover:text-foreground"
+            >
+              <UserPlus size={14} />
+            </OverlayButton>
+          )}
+          {onWishlistToggle && (
+            <OverlayButton
+              onClick={() => onWishlistToggle(app.id)}
+              label={isWishlisted ? "Remove from wishlist" : "Add to wishlist"}
+              className={isWishlisted ? "text-amber-500 hover:text-amber-600" : "hover:text-amber-500"}
+            >
+              <Star size={14} className={isWishlisted ? "fill-amber-500" : ""} />
+            </OverlayButton>
+          )}
+          {onRemove && (
+            <OverlayButton
+              onClick={() => onRemove(app.id)}
+              label="Remove"
+              className="hover:text-destructive"
+            >
+              <X size={14} />
+            </OverlayButton>
+          )}
+        </div>
+      )}
     </>
   );
 }
@@ -199,19 +221,19 @@ function ApplicantCardInner({
 function cardClassName(app: AppRow, opts?: { grab?: boolean; dragClass?: string; wishlisted?: boolean }): string {
   const invalid = !app.valid;
   return [
-    "group flex items-center gap-2 border rounded-lg px-3 py-2 select-none transition-colors",
+    "group relative flex items-center gap-2 border rounded-lg px-3 py-2 select-none transition-colors cursor-pointer",
     invalid
       ? "border-red-200 bg-red-50/60 dark:border-red-900/50 dark:bg-red-950/20"
       : opts?.wishlisted
         ? "border-amber-400/70 ring-1 ring-amber-400/50 bg-amber-50/40 dark:bg-amber-950/10"
         : "bg-background",
-    opts?.grab ? "cursor-grab active:cursor-grabbing touch-none" : "",
+    opts?.grab ? "active:cursor-grabbing touch-none" : "",
     opts?.dragClass ?? "",
   ].join(" ");
 }
 
 // Sortable card for the reorderable Wishlist. The whole card is the drag
-// handle; buttons stop propagation so they don't start a drag.
+// handle; clicking (without dragging) opens review, buttons stop propagation.
 export const SortableApplicantCard = memo(function SortableApplicantCard({
   dndId,
   ...actions
@@ -226,9 +248,10 @@ export const SortableApplicantCard = memo(function SortableApplicantCard({
       style={style}
       {...attributes}
       {...listeners}
+      onClick={() => actions.onReview(actions.app)}
       className={cardClassName(actions.app, { grab: true, wishlisted: actions.isWishlisted })}
     >
-      <ApplicantCardInner {...actions} />
+      <ApplicantCardInner {...actions} draggable />
     </div>
   );
 });
@@ -252,18 +275,26 @@ export const DraggableApplicantCard = memo(function DraggableApplicantCard({
       ref={setNodeRef}
       {...attributes}
       {...listeners}
+      onClick={() => actions.onReview(actions.app)}
       className={cardClassName(actions.app, { grab: true, wishlisted: actions.isWishlisted, dragClass: isDragging ? "opacity-40" : "" })}
     >
-      <ApplicantCardInner {...actions} />
+      <ApplicantCardInner {...actions} draggable />
     </div>
   );
 });
 
-// Non-draggable card: draft-window staged picks, and the DragOverlay preview.
-export const StaticApplicantCard = memo(function StaticApplicantCard(actions: ApplicantCardActions) {
+// Non-draggable card: draft-window staged picks, and the DragOverlay preview
+// (which passes `draggable` so the preview keeps the grip). Clicking opens review.
+export const StaticApplicantCard = memo(function StaticApplicantCard({
+  draggable,
+  ...actions
+}: ApplicantCardActions & { draggable?: boolean }) {
   return (
-    <div className={cardClassName(actions.app, { wishlisted: actions.isWishlisted })}>
-      <ApplicantCardInner {...actions} />
+    <div
+      onClick={() => actions.onReview(actions.app)}
+      className={cardClassName(actions.app, { wishlisted: actions.isWishlisted })}
+    >
+      <ApplicantCardInner {...actions} draggable={draggable} />
     </div>
   );
 });

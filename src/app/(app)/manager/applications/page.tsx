@@ -1029,6 +1029,7 @@ export default function ManagerApplicationsPage() {
                 app={activeApp}
                 periodEndsAt={selectedPeriod?.ends_at}
                 onReview={onReviewApp}
+                draggable
               />
             ) : null}
           </DragOverlay>
