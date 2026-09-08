@@ -30,6 +30,7 @@ import { ApplicationSheetModal } from "@/components/application-sheet-modal";
 import { ProjectAnalyticsModal } from "@/components/project-analytics-modal";
 import { rankLabel } from "@/lib/application-rank";
 import { CoffeeChatIndicator, InfosessionIndicator, LateBadge, type CoffeeState } from "@/components/applicant-indicators";
+import { DraftPanels } from "@/components/draft-panels";
 
 type Applicant = { user_id: string; preferred_firstname: string | null; lastname: string | null };
 
@@ -117,6 +118,7 @@ export default function ManagerApplicationsPage() {
   const [projAnalyticsOpen, setProjAnalyticsOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetReloadToken, setSheetReloadToken] = useState(0);
+  const [appsReloadToken, setAppsReloadToken] = useState(0);
   const [reviewFor, setReviewFor] = useState<
     { id: string; name: string; status: ReviewStatus; projectId?: string | null; focus?: FocusSection } | null
   >(null);
@@ -309,7 +311,7 @@ export default function ManagerApplicationsPage() {
         })),
       );
     })();
-  }, [selectedPeriodId, selectedProjectId, reviewableProjects]);
+  }, [selectedPeriodId, selectedProjectId, reviewableProjects, appsReloadToken]);
 
   // Period funnel stats track the period alone, so they survive the project
   // picker switching to "All projects".
@@ -524,6 +526,18 @@ export default function ManagerApplicationsPage() {
                   </div>
                 ))}
               </div>
+            )}
+
+            {selectedPeriodId && selectedProjectId && (
+              <DraftPanels
+                projectId={selectedProjectId}
+                periodId={selectedPeriodId}
+                applicants={(apps ?? []).map((a) => ({ applicationId: a.id, name: applicantName(a), status: a.status }))}
+                onDrafted={() => {
+                  setAppsReloadToken((n) => n + 1);
+                  loadRoster(selectedProjectId);
+                }}
+              />
             )}
           </div>
 
