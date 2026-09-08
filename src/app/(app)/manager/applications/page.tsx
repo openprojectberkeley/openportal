@@ -261,7 +261,7 @@ export default function ManagerApplicationsPage() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const { isExec, canSimulate, persona } = useRoleSim();
+  const { ready: roleSimReady, isExec, canSimulate, persona } = useRoleSim();
   // VP Tech/President only (mirrors canEditWindow in manager/coffee-chats/page.tsx):
   // canSimulate is real-role VP Tech/President, persona==="exec" hides it while
   // previewing a lower "View as" persona.
@@ -304,6 +304,13 @@ export default function ManagerApplicationsPage() {
   const { setNodeRef: setReviewZoneRef, isOver: isOverReviewZone } = useDroppable({ id: LEFT_TO_REVIEW_DROPZONE_ID });
 
   useEffect(() => {
+    // Wait for the role-simulation provider's own async load: canSimulate/
+    // persona start at their no-access defaults (false/"member") until then,
+    // so fetching against them first would compute the wrong reviewable-
+    // projects scope -- and since the URL's ?project= slug is only resolved
+    // against the first non-null list (below), that wrong list would burn
+    // the one shot before the correct, "ready" list ever loads.
+    if (!roleSimReady) return;
     setReviewableProjects(null);
     (async () => {
       const supabase = createClient();
@@ -340,7 +347,7 @@ export default function ManagerApplicationsPage() {
         setReviewableProjects(list);
       }
     })();
-  }, [canSimulate, persona]);
+  }, [roleSimReady, canSimulate, persona]);
 
   useEffect(() => {
     setSelectedProjectId((cur) => {
