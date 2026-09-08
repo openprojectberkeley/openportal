@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/client";
 import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { ChevronDown, SlidersHorizontal, RotateCcw, Mail, BarChart3, Table2, UserPlus, GripVertical, X } from "lucide-react";
 import { DndContext, useDraggable, useDroppable, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
@@ -248,6 +249,9 @@ function PeriodStatusText({ period }: { period: ApplicationPeriod }) {
 }
 
 export default function ManagerApplicationsPage() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const { isExec, canSimulate, persona } = useRoleSim();
   // VP Tech/President only (mirrors canEditWindow in manager/coffee-chats/page.tsx):
   // canSimulate is real-role VP Tech/President, persona==="exec" hides it while
@@ -274,7 +278,15 @@ export default function ManagerApplicationsPage() {
   // ones they PM. null = still loading.
   const [reviewableProjects, setReviewableProjects] = useState<ReviewableProject[] | null>(null);
   const [fullAccessReview, setFullAccessReview] = useState(false);
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  // Seeded from the URL (?project=...) so a reload lands back on the same
+  // project instead of falling through to the default below; the effect
+  // that computes the default still validates it once reviewableProjects
+  // loads (falls back if it's not a project this viewer can review).
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(() => {
+    const fromUrl = searchParams.get("project");
+    if (!fromUrl) return null;
+    return fromUrl === "all" ? ALL_PROJECTS : fromUrl;
+  });
   const allSelected = selectedProjectId === ALL_PROJECTS;
   // Everyone currently on the selected project (left column). null = loading.
   const [roster, setRoster] = useState<RosterMember[] | null>(null);
@@ -335,6 +347,17 @@ export default function ManagerApplicationsPage() {
       return reviewableProjects[0]?.id ?? null;
     });
   }, [reviewableProjects, fullAccessReview]);
+
+  // Keeps ?project= in sync so a reload (or a shared link) lands back on the
+  // same project/"All projects" instead of falling through to the default.
+  useEffect(() => {
+    if (!selectedProjectId) return;
+    const param = selectedProjectId === ALL_PROJECTS ? "all" : selectedProjectId;
+    if (searchParams.get("project") === param) return;
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("project", param);
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  }, [selectedProjectId, pathname, router, searchParams]);
 
   // Roster of the selected project (left column) — who's already on the team.
   const loadRoster = useCallback(async (projectId: string) => {
