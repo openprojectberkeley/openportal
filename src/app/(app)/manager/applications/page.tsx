@@ -6,7 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ChevronDown, SlidersHorizontal, RotateCcw, Mail, BarChart3, Table2, UserPlus, GripVertical, X } from "lucide-react";
 import { DndContext, useDraggable, useDroppable, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { useRoleSim } from "@/components/role-simulation-provider";
-import { useDraftPicks, type PickRow } from "@/lib/use-draft-picks";
+import { useDraftPicks } from "@/lib/use-draft-picks";
 import { DraftWindowPanel, DRAFT_WINDOW_DROPZONE_ID } from "@/components/draft-panels";
 import { PersonName } from "@/components/person-profile-provider";
 import { canReviewAllProjects } from "@/lib/roles";
@@ -93,6 +93,10 @@ function ReturningIndicator({ returning }: { returning: boolean }) {
 
 // Drop target id for the wishlist zone on the left, under the roster.
 const WISHLIST_DROPZONE_ID = "wishlist-dropzone";
+// Drop target id for the "Left to review" queue on the right -- dropping an
+// applicant here sends them back to the plain review pool, out of the
+// wishlist and/or draft window.
+const LEFT_TO_REVIEW_DROPZONE_ID = "left-to-review-dropzone";
 
 // Name + status/indicator badges shared by the "left to review" row and the
 // wishlist card — only the surrounding controls (drag handle vs. remove
@@ -280,6 +284,7 @@ export default function ManagerApplicationsPage() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   const dndSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+  const { setNodeRef: setReviewZoneRef, isOver: isOverReviewZone } = useDroppable({ id: LEFT_TO_REVIEW_DROPZONE_ID });
 
   useEffect(() => {
     setReviewableProjects(null);
@@ -390,20 +395,10 @@ export default function ManagerApplicationsPage() {
   }, [selectedProjectId]);
 
   // Draft-round state for the selected project (Confirmed/Draft window,
-  // shown below the Wishlist once a draft is active). Wishlisting itself
-  // stays owned above (application_wishlist) -- this only tracks staging an
-  // already-wishlisted applicant into the current round and submitting.
+  // shown once a draft is active). Independent of the wishlist -- an
+  // applicant can be dragged into the draft window from "Left to review" or
+  // the wishlist, and dragged back out to either, directly.
   const draftPicks = useDraftPicks(!allSelected ? selectedProjectId : null, selectedPeriodId);
-
-  const handleMoveToDraftWindow = useCallback(async (applicationId: string) => {
-    const ok = await draftPicks.moveToDraftWindow(applicationId);
-    if (ok) removeFromWishlist(applicationId);
-  }, [draftPicks, removeFromWishlist]);
-
-  const handleMoveBackToWishlist = async (pick: PickRow) => {
-    const ok = await draftPicks.moveBackToWishlist(pick);
-    if (ok) addToWishlist(pick.application_id);
-  };
 
   const handleSubmitDraftPicks = async () => {
     const ok = await draftPicks.submit();
@@ -414,11 +409,24 @@ export default function ManagerApplicationsPage() {
     return ok;
   };
 
+  // Three peer drop zones (Wishlist, Draft window, Left to review) any
+  // applicant card can move between directly -- whichever zone it lands on
+  // becomes its new home, and it's removed from the other two (harmless
+  // no-op if it wasn't in them).
   const onDragEnd = useCallback((event: DragEndEvent) => {
     const id = String(event.active.id);
-    if (event.over?.id === WISHLIST_DROPZONE_ID) addToWishlist(id);
-    else if (event.over?.id === DRAFT_WINDOW_DROPZONE_ID) handleMoveToDraftWindow(id);
-  }, [addToWishlist, handleMoveToDraftWindow]);
+    const overId = event.over?.id;
+    if (overId === WISHLIST_DROPZONE_ID) {
+      addToWishlist(id);
+      draftPicks.removeFromDraftWindow(id);
+    } else if (overId === DRAFT_WINDOW_DROPZONE_ID) {
+      draftPicks.addToDraftWindow(id);
+      removeFromWishlist(id);
+    } else if (overId === LEFT_TO_REVIEW_DROPZONE_ID) {
+      removeFromWishlist(id);
+      draftPicks.removeFromDraftWindow(id);
+    }
+  }, [addToWishlist, removeFromWishlist, draftPicks]);
 
   // Headline numbers for the cross-project view, which has no per-project list.
   useEffect(() => {
@@ -543,17 +551,25 @@ export default function ManagerApplicationsPage() {
   const selectedPeriod = periods?.find((p) => p.id === selectedPeriodId) ?? null;
   const selectedProject = reviewableProjects?.find((p) => p.id === selectedProjectId) ?? null;
 
-  const wishlistApps = apps && wishlistIds ? apps.filter((a) => wishlistIds.has(a.id)) : [];
+  // Applicants currently staged in the draft window or already confirmed
+  // this draft -- excluded from the wishlist and "Left to review" pools so
+  // an applicant is never shown (or draggable) in two places at once.
+  const draftedIds = new Set([
+    ...draftPicks.draftWindowPicks.map((p) => p.application_id),
+    ...draftPicks.confirmedPicks.map((p) => p.application_id),
+  ]);
+
+  const wishlistApps = apps && wishlistIds ? apps.filter((a) => wishlistIds.has(a.id) && !draftedIds.has(a.id)) : [];
   const nameById = new Map((apps ?? []).map((a) => [a.id, applicantName(a)]));
 
   // Group applicants into rank sections (1st choice, 2nd choice, …) for the
-  // currently selected project, most-preferred first. Wishlisted applicants
-  // are excluded — they're shown (and reviewed) on the left instead, never
-  // both places at once.
+  // currently selected project, most-preferred first. Wishlisted and
+  // drafted applicants are excluded — they're shown (and reviewed) on the
+  // left instead, never both places at once.
   const groupedApps = apps
     ? Object.entries(
         apps
-          .filter((a) => !wishlistIds?.has(a.id))
+          .filter((a) => !wishlistIds?.has(a.id) && !draftedIds.has(a.id))
           .reduce<Record<number, AppRow[]>>((acc, a) => {
             (acc[a.rank] ??= []).push(a);
             return acc;
@@ -780,7 +796,6 @@ export default function ManagerApplicationsPage() {
                   isMyTurn={draftPicks.isMyTurn}
                   draftWindowPicks={draftPicks.draftWindowPicks}
                   confirmedPicks={draftPicks.confirmedPicks}
-                  onMoveBackToWishlist={handleMoveBackToWishlist}
                   onSubmit={handleSubmitDraftPicks}
                 />
               )}
@@ -799,19 +814,22 @@ export default function ManagerApplicationsPage() {
                   </Button>
                 )}
               </div>
-              {apps === null ? (
-                <ApplicationListSkeleton rows={4} />
-              ) : apps.length === 0 ? (
-                <div className="px-4 py-10 text-center text-sm text-muted-foreground border rounded-xl">
-                  No submitted applications for this project yet.
-                </div>
-              ) : groupedApps.length === 0 ? (
-                <div className="px-4 py-10 text-center text-sm text-muted-foreground border rounded-xl">
-                  Everyone left to review is on your wishlist.
-                </div>
-              ) : (
-                <div className="flex flex-col gap-3">
-                  {groupedApps.map(([rank, list]) => (
+              <div
+                ref={setReviewZoneRef}
+                className={`flex flex-col gap-3 rounded-xl transition-colors ${isOverReviewZone ? "ring-2 ring-primary ring-offset-1" : ""}`}
+              >
+                {apps === null ? (
+                  <ApplicationListSkeleton rows={4} />
+                ) : apps.length === 0 ? (
+                  <div className="px-4 py-10 text-center text-sm text-muted-foreground border rounded-xl">
+                    No submitted applications for this project yet.
+                  </div>
+                ) : groupedApps.length === 0 ? (
+                  <div className="px-4 py-10 text-center text-sm text-muted-foreground border-2 border-dashed rounded-xl">
+                    Everyone left to review is on your wishlist or in the draft window.
+                  </div>
+                ) : (
+                  groupedApps.map(([rank, list]) => (
                     <div key={rank} className="flex flex-col gap-1.5">
                       <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                         {rankLabel(rank)} ({list.length})
@@ -825,9 +843,9 @@ export default function ManagerApplicationsPage() {
                         />
                       ))}
                     </div>
-                  ))}
-                </div>
-              )}
+                  ))
+                )}
+              </div>
             </div>
           </div>
         </DndContext>

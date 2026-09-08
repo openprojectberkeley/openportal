@@ -1,7 +1,7 @@
 "use client";
 
 import { createClient } from "@/lib/supabase/client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 export type RoundProjectInfo = { id: string; round_number: number; pick_count: number; submitted_at: string | null };
 export type PickRow = { id: string; round_project_id: string; application_id: string };
@@ -55,7 +55,10 @@ export function useDraftPicks(projectId: string | null, periodId: string | null)
     .sort((a, b) => a.round_number - b.round_number)[0] ?? null;
   const isMyTurn = !!nextRound && nextRound.id === currentPickId;
 
-  const draftWindowPicks = nextRound ? picks.filter((p) => p.round_project_id === nextRound.id) : [];
+  const draftWindowPicks = useMemo(
+    () => (nextRound ? picks.filter((p) => p.round_project_id === nextRound.id) : []),
+    [nextRound, picks],
+  );
 
   const confirmedPicks = picks
     .map((p) => ({ ...p, round: roundProjectById.get(p.round_project_id) ?? null }))
@@ -63,9 +66,9 @@ export function useDraftPicks(projectId: string | null, periodId: string | null)
     .sort((a, b) => a.round.round_number - b.round.round_number);
 
   // Stages an applicant into the current upcoming round's draft window.
-  // Does not touch the wishlist -- the caller (which owns wishlist state)
-  // removes it from there on success.
-  const moveToDraftWindow = useCallback(async (applicationId: string) => {
+  // Independent of the wishlist -- an applicant can be dragged in directly
+  // from "Left to review" too, not just from the wishlist.
+  const addToDraftWindow = useCallback(async (applicationId: string) => {
     if (!nextRound) return false;
     const supabase = createClient();
     const { error: insertError } = await supabase
@@ -76,15 +79,17 @@ export function useDraftPicks(projectId: string | null, periodId: string | null)
     return true;
   }, [nextRound, loadAll]);
 
-  // Un-stages a draft-window pick. Does not touch the wishlist -- the caller
-  // re-adds it there on success.
-  const moveBackToWishlist = useCallback(async (pick: PickRow) => {
+  // Un-stages an applicant from the draft window, wherever it's dragged to
+  // next. No-op (succeeds) if they aren't currently staged.
+  const removeFromDraftWindow = useCallback(async (applicationId: string) => {
+    const pick = draftWindowPicks.find((p) => p.application_id === applicationId);
+    if (!pick) return true;
     const supabase = createClient();
     const { error: deleteError } = await supabase.from("draft_picks").delete().eq("id", pick.id);
     if (deleteError) { setError("Couldn't remove that applicant from the draft window."); return false; }
     await loadAll();
     return true;
-  }, [loadAll]);
+  }, [draftWindowPicks, loadAll]);
 
   const submit = useCallback(async () => {
     if (!nextRound) return false;
@@ -103,8 +108,8 @@ export function useDraftPicks(projectId: string | null, periodId: string | null)
     confirmedPicks,
     error,
     setError,
-    moveToDraftWindow,
-    moveBackToWishlist,
+    addToDraftWindow,
+    removeFromDraftWindow,
     submit,
     reload: loadAll,
   };
