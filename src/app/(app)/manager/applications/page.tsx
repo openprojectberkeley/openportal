@@ -3,11 +3,11 @@
 import { createClient } from "@/lib/supabase/client";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { ChevronDown, SlidersHorizontal, RotateCcw, Mail, BarChart3, Table2, UserPlus, GripVertical, X, ArrowRight } from "lucide-react";
+import { ChevronDown, SlidersHorizontal, RotateCcw, Mail, BarChart3, Table2, UserPlus, GripVertical, X } from "lucide-react";
 import { DndContext, useDraggable, useDroppable, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { useRoleSim } from "@/components/role-simulation-provider";
 import { useDraftPicks, type PickRow } from "@/lib/use-draft-picks";
-import { DraftWindowPanel } from "@/components/draft-panels";
+import { DraftWindowPanel, DRAFT_WINDOW_DROPZONE_ID } from "@/components/draft-panels";
 import { PersonName } from "@/components/person-profile-provider";
 import { canReviewAllProjects } from "@/lib/roles";
 import {
@@ -148,38 +148,39 @@ function ApplicantRow({
 
 // A shortlisted applicant, shown only on the left — carries the Review
 // action itself (rather than duplicating it on the right) plus a remove (×)
-// to send them back to "Left to review". When a draft is active and this
-// project has room in its upcoming round, also offers moving straight into
-// the draft window below.
+// to send them back to "Left to review". Draggable into the draft window
+// below once a draft is active, same gesture as "Left to review" → Wishlist.
 function WishlistCard({
   app,
   periodEndsAt,
   onReview,
   onRemove,
-  onMoveToDraft,
 }: {
   app: AppRow;
   periodEndsAt: string | undefined;
   onReview: () => void;
   onRemove: () => void;
-  onMoveToDraft?: () => void;
 }) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: app.id });
+  const style = transform ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` } : undefined;
   return (
-    <div className="flex items-center gap-2 border rounded-lg px-3 py-2 bg-background">
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={`flex items-center gap-2 border rounded-lg px-3 py-2 bg-background ${isDragging ? "relative z-10 opacity-50 shadow-lg" : ""}`}
+    >
+      <button
+        {...attributes}
+        {...listeners}
+        className="text-muted-foreground/40 hover:text-muted-foreground cursor-grab touch-none shrink-0"
+        aria-label="Drag to draft window"
+      >
+        <GripVertical size={14} />
+      </button>
       <ApplicantMeta app={app} periodEndsAt={periodEndsAt} />
       <Button size="sm" variant="outline" className="h-7 px-2.5 text-xs" onClick={onReview}>
         Review
       </Button>
-      {onMoveToDraft && (
-        <button
-          onClick={onMoveToDraft}
-          className="text-muted-foreground/50 hover:text-foreground shrink-0"
-          aria-label="Move to draft window"
-          title="Move to draft window"
-        >
-          <ArrowRight size={15} />
-        </button>
-      )}
       <Button
         variant="ghost"
         size="sm"
@@ -199,13 +200,11 @@ function WishlistDropzone({
   periodEndsAt,
   onReview,
   onRemove,
-  onMoveToDraft,
 }: {
   apps: AppRow[];
   periodEndsAt: string | undefined;
   onReview: (app: AppRow) => void;
   onRemove: (id: string) => void;
-  onMoveToDraft?: (id: string) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: WISHLIST_DROPZONE_ID });
   return (
@@ -225,7 +224,6 @@ function WishlistDropzone({
             periodEndsAt={periodEndsAt}
             onReview={() => onReview(a)}
             onRemove={() => onRemove(a.id)}
-            onMoveToDraft={onMoveToDraft ? () => onMoveToDraft(a.id) : undefined}
           />
         ))
       )}
@@ -391,9 +389,36 @@ export default function ManagerApplicationsPage() {
     await supabase.from("application_wishlist").delete().eq("application_id", applicationId).eq("project_id", selectedProjectId);
   }, [selectedProjectId]);
 
+  // Draft-round state for the selected project (Confirmed/Draft window,
+  // shown below the Wishlist once a draft is active). Wishlisting itself
+  // stays owned above (application_wishlist) -- this only tracks staging an
+  // already-wishlisted applicant into the current round and submitting.
+  const draftPicks = useDraftPicks(!allSelected ? selectedProjectId : null, selectedPeriodId);
+
+  const handleMoveToDraftWindow = useCallback(async (applicationId: string) => {
+    const ok = await draftPicks.moveToDraftWindow(applicationId);
+    if (ok) removeFromWishlist(applicationId);
+  }, [draftPicks, removeFromWishlist]);
+
+  const handleMoveBackToWishlist = async (pick: PickRow) => {
+    const ok = await draftPicks.moveBackToWishlist(pick);
+    if (ok) addToWishlist(pick.application_id);
+  };
+
+  const handleSubmitDraftPicks = async () => {
+    const ok = await draftPicks.submit();
+    if (ok && selectedProjectId && !allSelected) {
+      loadRoster(selectedProjectId);
+      setAppsReloadToken((n) => n + 1);
+    }
+    return ok;
+  };
+
   const onDragEnd = useCallback((event: DragEndEvent) => {
-    if (event.over?.id === WISHLIST_DROPZONE_ID) addToWishlist(String(event.active.id));
-  }, [addToWishlist]);
+    const id = String(event.active.id);
+    if (event.over?.id === WISHLIST_DROPZONE_ID) addToWishlist(id);
+    else if (event.over?.id === DRAFT_WINDOW_DROPZONE_ID) handleMoveToDraftWindow(id);
+  }, [addToWishlist, handleMoveToDraftWindow]);
 
   // Headline numbers for the cross-project view, which has no per-project list.
   useEffect(() => {
@@ -519,32 +544,7 @@ export default function ManagerApplicationsPage() {
   const selectedProject = reviewableProjects?.find((p) => p.id === selectedProjectId) ?? null;
 
   const wishlistApps = apps && wishlistIds ? apps.filter((a) => wishlistIds.has(a.id)) : [];
-
-  // Draft-round state for the selected project (Confirmed/Draft window,
-  // shown below the Wishlist once a draft is active). Wishlisting itself
-  // stays owned above (application_wishlist) -- this only tracks staging an
-  // already-wishlisted applicant into the current round and submitting.
-  const draftPicks = useDraftPicks(!allSelected ? selectedProjectId : null, selectedPeriodId);
   const nameById = new Map((apps ?? []).map((a) => [a.id, applicantName(a)]));
-
-  const handleMoveToDraftWindow = async (applicationId: string) => {
-    const ok = await draftPicks.moveToDraftWindow(applicationId);
-    if (ok) removeFromWishlist(applicationId);
-  };
-
-  const handleMoveBackToWishlist = async (pick: PickRow) => {
-    const ok = await draftPicks.moveBackToWishlist(pick);
-    if (ok) addToWishlist(pick.application_id);
-  };
-
-  const handleSubmitDraftPicks = async () => {
-    const ok = await draftPicks.submit();
-    if (ok && selectedProjectId && !allSelected) {
-      loadRoster(selectedProjectId);
-      setAppsReloadToken((n) => n + 1);
-    }
-    return ok;
-  };
 
   // Group applicants into rank sections (1st choice, 2nd choice, …) for the
   // currently selected project, most-preferred first. Wishlisted applicants
@@ -768,7 +768,6 @@ export default function ManagerApplicationsPage() {
                   periodEndsAt={selectedPeriod?.ends_at}
                   onReview={(a) => setReviewFor({ id: a.id, name: applicantName(a), status: a.status })}
                   onRemove={removeFromWishlist}
-                  onMoveToDraft={draftPicks.canAddToDraftWindow ? handleMoveToDraftWindow : undefined}
                 />
               </div>
 

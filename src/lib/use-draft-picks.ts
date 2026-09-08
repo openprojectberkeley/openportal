@@ -56,7 +56,6 @@ export function useDraftPicks(projectId: string | null, periodId: string | null)
   const isMyTurn = !!nextRound && nextRound.id === currentPickId;
 
   const draftWindowPicks = nextRound ? picks.filter((p) => p.round_project_id === nextRound.id) : [];
-  const canAddToDraftWindow = !!nextRound && draftWindowPicks.length < nextRound.pick_count;
 
   const confirmedPicks = picks
     .map((p) => ({ ...p, round: roundProjectById.get(p.round_project_id) ?? null }))
@@ -102,7 +101,6 @@ export function useDraftPicks(projectId: string | null, periodId: string | null)
     isMyTurn,
     draftWindowPicks,
     confirmedPicks,
-    canAddToDraftWindow,
     error,
     setError,
     moveToDraftWindow,
