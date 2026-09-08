@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, SlidersHorizontal, Mail, BarChart3, Table2, UserPlus } from "lucide-react";
+import { flipMove } from "@/lib/flip-move";
 import {
   DndContext,
   DragOverlay,
@@ -39,6 +40,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { ApplicationListSkeleton } from "@/components/skeletons";
 import { ApplicationPeriodsDialog, type ApplicationPeriod } from "@/components/application-periods-dialog";
 import { EmailBlastDialog } from "@/components/email-blast-dialog";
@@ -114,16 +117,18 @@ function WishlistDropzone({
   draftActive,
   addToDraftDisabled,
   onReview,
-  onRemove,
+  onWishlistToggle,
   onAddToDraft,
+  showRecruitingStatus,
 }: {
   apps: AppRow[];
   periodEndsAt: string | undefined;
   draftActive: boolean;
   addToDraftDisabled: (id: string) => boolean;
   onReview: (app: AppRow) => void;
-  onRemove: (id: string) => void;
+  onWishlistToggle: (id: string) => void;
   onAddToDraft: (id: string) => void;
+  showRecruitingStatus?: boolean;
 }) {
   // The droppable ref sits on the outer div, so an empty wishlist is still a
   // valid drop target even though the SortableContext below is unmounted.
@@ -143,8 +148,9 @@ function WishlistDropzone({
               periodEndsAt={periodEndsAt}
               isWishlisted
               showRank
+              showRecruitingStatus={showRecruitingStatus}
               onReview={onReview}
-              onRemove={onRemove}
+              onWishlistToggle={onWishlistToggle}
               showAddToDraft={draftActive}
               onAddToDraft={onAddToDraft}
               addToDraftDisabled={addToDraftDisabled(a.id)}
@@ -190,7 +196,7 @@ export default function ManagerApplicationsPage() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const { ready: roleSimReady, isExec, canSimulate, persona } = useRoleSim();
+  const { ready: roleSimReady, isExec, isBoardOrExec, canSimulate, persona } = useRoleSim();
   // VP Tech/President only (mirrors canEditWindow in manager/coffee-chats/page.tsx):
   // canSimulate is real-role VP Tech/President, persona==="exec" hides it while
   // previewing a lower "View as" persona.
@@ -206,6 +212,11 @@ export default function ManagerApplicationsPage() {
   const [projAnalyticsOpen, setProjAnalyticsOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetReloadToken, setSheetReloadToken] = useState(0);
+  // Coffee / infosession badges on applicant cards — off by default for denser drafting.
+  const [showRecruitingStatus, setShowRecruitingStatus] = useState(false);
+  // Bumped when sheet recruiting edits change coffee/info/returning so the
+  // card list reloads the same derived flags.
+  const [appsReloadToken, setAppsReloadToken] = useState(0);
   const [reviewFor, setReviewFor] = useState<
     { id: string; name: string; status: ReviewStatus; projectId?: string | null; focus?: FocusSection } | null
   >(null);
@@ -414,18 +425,27 @@ export default function ManagerApplicationsPage() {
     await syncWishlistOrder(next);
   }, [wishlist, selectedProjectId, currentUserId, syncWishlistOrder]);
 
+  // Root of the Applicants column (wishlist + choice groups). Click add/remove
+  // FLIP-animates cards between the two; drag uses dnd-kit instead.
+  const applicantsColumnRef = useRef<HTMLDivElement>(null);
+
   // Button-driven add: append to the end of the wishlist. A no-op if already
   // shortlisted. The applicant leaves their choice group below (a move, not a
   // copy) -- groupedApps filters the wishlist out.
   const addToWishlist = useCallback(async (applicationId: string) => {
     if (!selectedProjectId || selectedProjectId === ALL_PROJECTS) return;
     let position = 0;
-    setWishlist((prev) => {
-      const cur = prev ?? [];
-      if (cur.includes(applicationId)) return cur;
-      position = cur.length;
-      return [...cur, applicationId];
-    });
+    let changed = false;
+    flipMove(applicantsColumnRef.current, () => {
+      setWishlist((prev) => {
+        const cur = prev ?? [];
+        if (cur.includes(applicationId)) return cur;
+        changed = true;
+        position = cur.length;
+        return [...cur, applicationId];
+      });
+    }, { emphasizeId: applicationId });
+    if (!changed) return;
     const supabase = createClient();
     await supabase.from("application_wishlist").upsert(
       { application_id: applicationId, project_id: selectedProjectId, created_by: currentUserId, position },
@@ -435,7 +455,9 @@ export default function ManagerApplicationsPage() {
 
   const removeFromWishlist = useCallback(async (applicationId: string) => {
     if (!selectedProjectId || selectedProjectId === ALL_PROJECTS) return;
-    setWishlist((prev) => (prev ? prev.filter((id) => id !== applicationId) : prev));
+    flipMove(applicantsColumnRef.current, () => {
+      setWishlist((prev) => (prev ? prev.filter((id) => id !== applicationId) : prev));
+    }, { emphasizeId: applicationId });
     const supabase = createClient();
     await supabase.from("application_wishlist").delete().eq("application_id", applicationId).eq("project_id", selectedProjectId);
   }, [selectedProjectId]);
@@ -698,7 +720,7 @@ export default function ManagerApplicationsPage() {
         }),
       );
     })();
-  }, [selectedPeriodId, selectedProjectId, reviewableProjects]);
+  }, [selectedPeriodId, selectedProjectId, reviewableProjects, appsReloadToken]);
 
   // Period funnel stats track the period alone, so they survive the project
   // picker switching to "All projects".
@@ -985,6 +1007,7 @@ export default function ManagerApplicationsPage() {
                 confirmedPicks={draftPicks.confirmedPicks}
                 onSubmit={handleSubmitDraftPicks}
                 onRemove={draftPicks.removeFromDraftWindow}
+                showRecruitingStatus={showRecruitingStatus}
               />
             </div>
 
@@ -993,13 +1016,28 @@ export default function ManagerApplicationsPage() {
                 exactly one of the two, and a card drags freely between them.
                 The wishlist is a sibling of (never nested in) ApplicantsZone so
                 the two stay distinct drop targets. */}
-            <div className="flex flex-col gap-4">
+            <div ref={applicantsColumnRef} className="flex flex-col gap-4">
               <div className="flex items-center justify-between gap-2">
-                <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Applicants
-                </h2>
+                <div className="flex min-w-0 items-center gap-3">
+                  <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Applicants
+                  </h2>
+                  <div className="flex items-center gap-1.5">
+                    <Switch
+                      id="show-recruiting-status"
+                      checked={showRecruitingStatus}
+                      onCheckedChange={setShowRecruitingStatus}
+                    />
+                    <Label
+                      htmlFor="show-recruiting-status"
+                      className="cursor-pointer text-[11px] font-medium text-muted-foreground"
+                    >
+                      Coffee & info
+                    </Label>
+                  </div>
+                </div>
                 {selectedPeriodId && selectedProjectId && (
-                  <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs" onClick={() => setSheetOpen(true)}>
+                  <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs shrink-0" onClick={() => setSheetOpen(true)}>
                     <Table2 size={13} className="mr-1.5" />
                     Sheet view
                   </Button>
@@ -1016,8 +1054,9 @@ export default function ManagerApplicationsPage() {
                   draftActive={draftActive}
                   addToDraftDisabled={(id) => draftedIds.has(id)}
                   onReview={onReviewApp}
-                  onRemove={removeFromWishlist}
+                  onWishlistToggle={removeFromWishlist}
                   onAddToDraft={stageInDraft}
+                  showRecruitingStatus={showRecruitingStatus}
                 />
               </div>
 
@@ -1043,6 +1082,7 @@ export default function ManagerApplicationsPage() {
                           key={a.id}
                           app={a}
                           periodEndsAt={selectedPeriod?.ends_at}
+                          showRecruitingStatus={showRecruitingStatus}
                           onAddToWishlist={addToWishlist}
                           showAddToDraft={draftActive}
                           onAddToDraft={stageInDraft}
@@ -1063,6 +1103,7 @@ export default function ManagerApplicationsPage() {
               <StaticApplicantCard
                 app={activeApp}
                 periodEndsAt={selectedPeriod?.ends_at}
+                showRecruitingStatus={showRecruitingStatus}
                 onReview={onReviewApp}
                 draggable
               />
@@ -1080,7 +1121,12 @@ export default function ManagerApplicationsPage() {
         projectId={allSelected ? null : selectedProjectId}
         projectName={selectedProject?.name}
         allProjects={allSelected}
+        canEditRecruiting={isBoardOrExec}
         onReview={(row) => setReviewFor(row)}
+        onRecruitingChanged={() => {
+          setAppsReloadToken((n) => n + 1);
+          if (isExec && selectedPeriodId) loadStats(selectedPeriodId);
+        }}
         reloadToken={sheetReloadToken}
       />
 

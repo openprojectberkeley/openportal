@@ -21,6 +21,12 @@ import { ScrollArea } from "@/components/overlay-scrollbar";
 import { PersonName } from "@/components/person-profile-provider";
 import { CoffeeChatIndicator, InfosessionIndicator, LateBadge, type CoffeeState } from "@/components/applicant-indicators";
 import { coffeeWithByApplicant } from "@/lib/coffee-chat-indicator";
+import {
+  SheetCoffeeCell,
+  SheetInfosessionCell,
+  SheetReturningCell,
+  type CoffeeEditResult,
+} from "@/components/sheet-recruiting-editors";
 import { type FocusSection, type ReviewStatus } from "@/components/application-review-modal";
 import { pct } from "@/components/donut-chart";
 import { rankLabel } from "@/lib/application-rank";
@@ -31,6 +37,7 @@ import {
   techClassLabel,
 } from "@/lib/application-profile";
 import { csvSlug, downloadCsv } from "@/lib/csv";
+import { isReturningMember, type MemberStatus } from "@/lib/member-status";
 import { cn, compareReviewPriority, isLate } from "@/lib/utils";
 
 type PageProject = { id: string; name: string; type: string; essay_prompt: string | null };
@@ -54,11 +61,16 @@ type SheetRow = {
   rank: number;
   gradYear: string;
   returning: boolean;
+  // Raw members.status — needed so returning edits only flip non_member ↔ inactive.
+  memberStatus: MemberStatus | null;
   coffee: CoffeeState;
   // Hosts this applicant completed (done) or booked (booked) a coffee chat with.
   coffeeWith: string[];
+  coffeeHostIds: string[];
   projectCoffee: "met" | "missing" | null; // null = not a studio project
   infosession: boolean;
+  // Applicant currently holds a board/exec role (auto-valid).
+  boardExec: boolean;
   // Cleared both recruiting requirements: completed a coffee chat (or exempt as
   // a returning member) and attended an info session. Mirrors both_valid (0063).
   valid: boolean;
@@ -75,6 +87,39 @@ type SheetRow = {
   // Lowercased blob of everything on the row, for the search box.
   search: string;
 };
+
+function sheetValid(r: Pick<SheetRow, "boardExec" | "returning" | "coffee" | "infosession">): boolean {
+  return r.boardExec || r.returning || (r.coffee === "done" && r.infosession);
+}
+
+// Same priority as coffeeWithByApplicant: completed hosts when any chat is done,
+// otherwise booked hosts.
+function coffeeHostIdsByApplicant(
+  chats: { applicant_id: string; member_id: string; complete: boolean }[],
+): Record<string, string[]> {
+  const completedIds: Record<string, string[]> = {};
+  const bookedIds: Record<string, string[]> = {};
+  const done = new Set<string>();
+  for (const ch of chats) {
+    if (ch.complete) {
+      done.add(ch.applicant_id);
+      (completedIds[ch.applicant_id] ??= []).push(ch.member_id);
+    } else {
+      (bookedIds[ch.applicant_id] ??= []).push(ch.member_id);
+    }
+  }
+  const out: Record<string, string[]> = {};
+  for (const aid of new Set([...Object.keys(completedIds), ...Object.keys(bookedIds)])) {
+    const ids = done.has(aid) ? completedIds[aid] ?? [] : bookedIds[aid] ?? [];
+    const seen = new Set<string>();
+    out[aid] = ids.filter((id) => {
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+  }
+  return out;
+}
 
 type TriFilter = "any" | "yes" | "no";
 type CoffeeFilter = "any" | CoffeeState;
@@ -318,12 +363,15 @@ async function loadApplicantContext(supabase: ReturnType<typeof createClient>, i
   // applicant -> members they've completed a chat with, for the PM check.
   const completedWith: Record<string, Set<string>> = {};
   let coffeeWithById: Record<string, string[]> = {};
+  let coffeeHostIdsById: Record<string, string[]> = {};
   const attendedInfo = new Set<string>();
   // Applicants who currently hold a board- or exec-level role; they're
   // auto-valid, regardless of coffee chat / info session.
   const boardExecIds = new Set<string>();
 
-  if (!ids.length) return { memById, coffeeById, completedWith, coffeeWithById, attendedInfo, boardExecIds };
+  if (!ids.length) {
+    return { memById, coffeeById, completedWith, coffeeWithById, coffeeHostIdsById, attendedInfo, boardExecIds };
+  }
 
   const idSet = new Set(ids);
   const [{ data: mem }, { data: chats }, { data: info }, { data: roleRows }] = await Promise.all([
@@ -373,13 +421,14 @@ async function loadApplicantContext(supabase: ReturnType<typeof createClient>, i
     }
   }
   coffeeWithById = coffeeWithByApplicant(chatRows, hostNameById);
+  coffeeHostIdsById = coffeeHostIdsByApplicant(chatRows);
 
   for (const r of (info ?? []) as { applicant_id: string | null; member_id: string | null }[]) {
     if (r.applicant_id && idSet.has(r.applicant_id)) attendedInfo.add(r.applicant_id);
     if (r.member_id && idSet.has(r.member_id)) attendedInfo.add(r.member_id);
   }
 
-  return { memById, coffeeById, completedWith, coffeeWithById, attendedInfo, boardExecIds };
+  return { memById, coffeeById, completedWith, coffeeWithById, coffeeHostIdsById, attendedInfo, boardExecIds };
 }
 
 // Spreadsheet-style scan of every applicant who ranked one project in the
@@ -396,7 +445,9 @@ export function ApplicationSheetModal({
   projectId,
   projectName,
   allProjects = false,
+  canEditRecruiting = false,
   onReview,
+  onRecruitingChanged,
   reloadToken = 0,
 }: {
   open: boolean;
@@ -412,6 +463,8 @@ export function ApplicationSheetModal({
   // period, rather than the single project the reviewer picked. Gated to
   // reviewers with full application access.
   allProjects?: boolean;
+  // Board/exec can edit coffee / infosession / returning cells inline.
+  canEditRecruiting?: boolean;
   onReview: (row: {
     id: string;
     name: string;
@@ -420,11 +473,16 @@ export function ApplicationSheetModal({
     projectId?: string | null;
     focus?: FocusSection;
   }) => void;
+  // Fired after a recruiting-field edit so the parent list can refresh.
+  onRecruitingChanged?: () => void;
   // Bump after accept/reject so the sheet refreshes decision columns while open.
   reloadToken?: number;
 }) {
   const [rows, setRows] = useState<SheetRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Studio project PMs for the active page — used to refresh projectCoffee after
+  // an inline coffee-chat edit without reloading the whole sheet.
+  const [projectPmIds, setProjectPmIds] = useState<Set<string>>(new Set());
 
   // The projects this sheet can page through, and where we are in them.
   const [pageProjects, setPageProjects] = useState<PageProject[] | null>(null);
@@ -614,8 +672,10 @@ export function ApplicationSheetModal({
           .eq("is_pm", true);
         for (const p of (pms ?? []) as { user_id: string }[]) projectPms.add(p.user_id);
       }
+      setProjectPmIds(projectPms);
 
-      const { memById, coffeeById, completedWith, coffeeWithById, attendedInfo, boardExecIds } = await loadApplicantContext(supabase, ids);
+      const { memById, coffeeById, completedWith, coffeeWithById, coffeeHostIdsById, attendedInfo, boardExecIds } =
+        await loadApplicantContext(supabase, ids);
 
       const next: SheetRow[] = raw.map((r) => {
         const aid = r.applicant_id ?? "";
@@ -629,13 +689,14 @@ export function ApplicationSheetModal({
           .slice(0, 3)
           .map(([k]) => techAreaLabel(k));
 
-        const returning = m?.status === "active" || m?.status === "inactive";
+        const memberStatus = (m?.status as MemberStatus | null | undefined) ?? null;
+        const returning = isReturningMember(memberStatus);
         const coffee = coffeeById[aid] ?? "none";
         const infosession = attendedInfo.has(aid);
         // Board/exec members and returning members are auto-valid; everyone
         // else must clear both the coffee-chat and info-session requirements.
         const boardExec = boardExecIds.has(aid);
-        const valid = boardExec || returning || (coffee === "done" && infosession);
+        const valid = sheetValid({ boardExec, returning, coffee, infosession });
         const met = !!project && project.type === "studio" && [...projectPms].some((pm) => completedWith[aid]?.has(pm));
 
         const ranking = r.application_rankings[0];
@@ -674,10 +735,13 @@ export function ApplicationSheetModal({
           rank: project ? ranking?.rank ?? 0 : 0,
           gradYear: (m?.grad_year && String(m.grad_year).trim()) || "—",
           returning,
+          memberStatus,
           coffee,
           coffeeWith: coffeeWithById[aid] ?? [],
+          coffeeHostIds: coffeeHostIdsById[aid] ?? [],
           projectCoffee: project?.type === "studio" ? ((met ? "met" : "missing") as "met" | "missing") : null,
           infosession,
+          boardExec,
           valid,
           techClasses: r.tech_classes ?? [],
           techClassesOther: r.tech_classes_other,
@@ -1024,6 +1088,42 @@ export function ApplicationSheetModal({
       exportColumns.map((c) => c.header),
       filtered.map((r) => exportColumns.map((c) => c.value(r))),
     );
+  };
+
+  const patchRow = (applicantId: string, patch: (row: SheetRow) => SheetRow) => {
+    setRows((prev) =>
+      prev
+        ? prev.map((r) => {
+            if (r.applicantId !== applicantId) return r;
+            const next = patch(r);
+            return { ...next, valid: sheetValid(next) };
+          })
+        : prev,
+    );
+    onRecruitingChanged?.();
+  };
+
+  const onCoffeeSaved = (applicantId: string, next: CoffeeEditResult) => {
+    patchRow(applicantId, (r) => {
+      const projectCoffee =
+        r.projectCoffee === null
+          ? null
+          : next.coffee === "none"
+            ? ("missing" as const)
+            : next.coffee === "done" && next.coffeeHostIds.some((id) => projectPmIds.has(id))
+              ? ("met" as const)
+              // Other completed chats are left in the DB; keep Met if we already had it.
+              : r.projectCoffee === "met"
+                ? ("met" as const)
+                : ("missing" as const);
+      return {
+        ...r,
+        coffee: next.coffee,
+        coffeeWith: next.coffeeWith,
+        coffeeHostIds: next.coffeeHostIds,
+        projectCoffee,
+      };
+    });
   };
 
   return (
@@ -1412,14 +1512,31 @@ export function ApplicationSheetModal({
                       })}
                       <td className={cn(td, "whitespace-nowrap")}>{r.gradYear}</td>
                       <td className={td}>
-                        {r.returning ? (
+                        {canEditRecruiting && r.applicantId ? (
+                          <SheetReturningCell
+                            applicantId={r.applicantId}
+                            returning={r.returning}
+                            memberStatus={r.memberStatus}
+                            onSaved={(returning, memberStatus) =>
+                              patchRow(r.applicantId, (row) => ({ ...row, returning, memberStatus }))
+                            }
+                          />
+                        ) : r.returning ? (
                           <span className="text-indigo-600">Yes</span>
                         ) : (
                           <span className="text-muted-foreground">No</span>
                         )}
                       </td>
                       <td className={td}>
-                        {r.coffee === "none" ? (
+                        {canEditRecruiting && r.applicantId ? (
+                          <SheetCoffeeCell
+                            applicantId={r.applicantId}
+                            state={r.coffee}
+                            withNames={r.coffeeWith}
+                            hostIds={r.coffeeHostIds}
+                            onSaved={(next) => onCoffeeSaved(r.applicantId, next)}
+                          />
+                        ) : r.coffee === "none" ? (
                           <span className="text-muted-foreground">—</span>
                         ) : (
                           <CoffeeChatIndicator state={r.coffee} withNames={r.coffeeWith} />
@@ -1442,7 +1559,15 @@ export function ApplicationSheetModal({
                         </td>
                       )}
                       <td className={td}>
-                        {r.infosession ? (
+                        {canEditRecruiting && r.applicantId ? (
+                          <SheetInfosessionCell
+                            applicantId={r.applicantId}
+                            attended={r.infosession}
+                            onSaved={(infosession) =>
+                              patchRow(r.applicantId, (row) => ({ ...row, infosession }))
+                            }
+                          />
+                        ) : r.infosession ? (
                           <InfosessionIndicator attended />
                         ) : (
                           <span className="text-muted-foreground">—</span>

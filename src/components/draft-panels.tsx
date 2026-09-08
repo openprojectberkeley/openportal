@@ -90,6 +90,7 @@ export function DraftWindowPanel({
   confirmedPicks,
   onSubmit,
   onRemove,
+  showRecruitingStatus,
 }: {
   appById: Map<string, AppRow>;
   periodEndsAt: string | undefined;
@@ -113,6 +114,7 @@ export function DraftWindowPanel({
   // must stay visible and removable rather than silently vanishing while
   // still taking up a slot.
   onRemove: (applicationId: string) => void;
+  showRecruitingStatus?: boolean;
 }) {
   const [submitting, setSubmitting] = useState(false);
   const { setNodeRef, isOver } = useDroppable({ id: DRAFT_WINDOW_DROPZONE_ID, disabled: !canStage });
@@ -233,6 +235,7 @@ export function DraftWindowPanel({
                   key={p.id}
                   app={app}
                   periodEndsAt={periodEndsAt}
+                  showRecruitingStatus={showRecruitingStatus}
                   onReview={onReview}
                   onRemove={onRemove}
                 />

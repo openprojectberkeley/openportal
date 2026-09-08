@@ -68,10 +68,13 @@ export function ApplicantMeta({
   app,
   periodEndsAt,
   rank,
+  showRecruitingStatus,
 }: {
   app: AppRow;
   periodEndsAt: string | undefined;
   rank?: boolean;
+  // Coffee chat + infosession indicators. Off by default so drafting cards stay dense.
+  showRecruitingStatus?: boolean;
 }) {
   return (
     <div className="flex min-w-0 flex-1 items-center gap-1.5">
@@ -87,8 +90,12 @@ export function ApplicantMeta({
       <StatusBadge status={app.status} />
       <ReturningIndicator returning={app.returning} />
       <LateBadge submittedAt={app.submitted_at} endsAt={periodEndsAt} />
-      <CoffeeChatIndicator state={app.coffee} withNames={app.coffeeWith} />
-      <InfosessionIndicator attended={app.infosession} />
+      {showRecruitingStatus && (
+        <>
+          <CoffeeChatIndicator state={app.coffee} withNames={app.coffeeWith} />
+          <InfosessionIndicator attended={app.infosession} />
+        </>
+      )}
     </div>
   );
 }
@@ -96,27 +103,31 @@ export function ApplicantMeta({
 // Actions an applicant card can carry, independent of how (or whether) the card
 // is draggable. Callbacks take the app / id (not a pre-bound closure) so callers
 // can pass stable references and the cards can be memoized -- important because
-// the whole page re-renders on every drag-over frame. The star only shows on the
-// Applicants list (where nothing is wishlisted yet -- shortlisting *moves* the
-// card to the wishlist); the draft button only when a draft is active; onRemove
-// only on wishlist / draft cards.
+// the whole page re-renders on every drag-over frame. Applicants use
+// onAddToWishlist (outline star); wishlist uses onWishlistToggle (filled gold
+// star); draft window uses onRemove (X).
 export type ApplicantCardActions = {
   app: AppRow;
   periodEndsAt: string | undefined;
   onReview: (app: AppRow) => void;
-  // Wishlist cards: gold ring, plus a quiet ordinal standing in for the choice
-  // heading they were moved out of.
+  // Wishlist cards: filled gold star + quiet ordinal for the choice heading
+  // they were moved out of.
   isWishlisted?: boolean;
   showRank?: boolean;
+  // When true, show coffee chat + infosession indicators on the card.
+  showRecruitingStatus?: boolean;
   // Applicants list: the star moves this applicant onto the wishlist. Never set
-  // on a wishlist card (those carry onRemove instead), so it only ever adds.
+  // on a wishlist card (those carry onWishlistToggle instead), so it only ever adds.
   onAddToWishlist?: (id: string) => void;
+  // Wishlist cards: filled gold star removes from the wishlist (a move back
+  // into the choice groups).
+  onWishlistToggle?: (id: string) => void;
   // Stage into the draft window. Shown only when a draft is active; disabled
   // once the applicant is already staged / confirmed.
   showAddToDraft?: boolean;
   onAddToDraft?: (id: string) => void;
   addToDraftDisabled?: boolean;
-  // Remove from the list this card lives in (wishlist / draft window).
+  // Remove from the draft window (X). Not used on wishlist cards.
   onRemove?: (id: string) => void;
 };
 
@@ -164,8 +175,11 @@ function OverlayButton({
 function ApplicantCardInner({
   app,
   periodEndsAt,
+  isWishlisted,
   showRank,
+  showRecruitingStatus,
   onAddToWishlist,
+  onWishlistToggle,
   showAddToDraft,
   onAddToDraft,
   addToDraftDisabled,
@@ -174,7 +188,7 @@ function ApplicantCardInner({
 }: ApplicantCardActions & { draggable?: boolean }) {
   const invalid = !app.valid;
   const reasons = invalid ? invalidReasons(app) : [];
-  const hasOverlay = !!(onAddToWishlist || (showAddToDraft && onAddToDraft) || onRemove);
+  const hasOverlay = !!(onAddToWishlist || onWishlistToggle || (showAddToDraft && onAddToDraft) || onRemove);
   return (
     <>
       {invalid ? (
@@ -194,7 +208,21 @@ function ApplicantCardInner({
         <GripVertical size={14} className="shrink-0 text-muted-foreground/40" aria-hidden />
       ) : null}
 
-      <ApplicantMeta app={app} periodEndsAt={periodEndsAt} rank={showRank} />
+      <ApplicantMeta
+        app={app}
+        periodEndsAt={periodEndsAt}
+        rank={showRank}
+        showRecruitingStatus={showRecruitingStatus}
+      />
+
+      {/* Persistent wishlisted indicator; sits in the same 28px box (and card
+          padding) as the overlay's star toggle so the two line up exactly, and
+          fades out as the overlay fades in. */}
+      {isWishlisted && onWishlistToggle && (
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center text-amber-500 transition-opacity group-hover:opacity-0" aria-hidden>
+          <Star size={14} className="fill-amber-500" />
+        </span>
+      )}
 
       {hasOverlay && (
         <div className="absolute inset-y-0 right-0 flex items-center gap-0.5 rounded-r-lg pl-10 pr-3 bg-gradient-to-l from-background via-background/95 to-transparent opacity-0 pointer-events-none transition-opacity group-hover:opacity-100 group-hover:pointer-events-auto">
@@ -217,6 +245,15 @@ function ApplicantCardInner({
               <Star size={14} />
             </OverlayButton>
           )}
+          {onWishlistToggle && (
+            <OverlayButton
+              onClick={() => onWishlistToggle(app.id)}
+              label="Remove from wishlist"
+              className="text-amber-500 hover:text-amber-600"
+            >
+              <Star size={14} className="fill-amber-500" />
+            </OverlayButton>
+          )}
           {onRemove && (
             <OverlayButton
               onClick={() => onRemove(app.id)}
@@ -232,15 +269,13 @@ function ApplicantCardInner({
   );
 }
 
-function cardClassName(app: AppRow, opts?: { grab?: boolean; dragClass?: string; wishlisted?: boolean }): string {
+function cardClassName(app: AppRow, opts?: { grab?: boolean; dragClass?: string }): string {
   const invalid = !app.valid;
   return [
     "group relative flex items-center gap-2 border rounded-lg px-3 py-2 select-none transition-colors cursor-pointer",
     invalid
       ? "border-red-200 bg-red-50/60 dark:border-red-900/50 dark:bg-red-950/20"
-      : opts?.wishlisted
-        ? "border-amber-400/70 ring-1 ring-amber-400/50 bg-amber-50/40 dark:bg-amber-950/10"
-        : "bg-background",
+      : "bg-background",
     opts?.grab ? "active:cursor-grabbing touch-none" : "",
     opts?.dragClass ?? "",
   ].join(" ");
@@ -265,11 +300,12 @@ export const SortableApplicantCard = memo(function SortableApplicantCard(actions
   return (
     <div
       ref={setNodeRef}
+      data-app-id={actions.app.id}
       style={style}
       {...attributes}
       {...listeners}
       onClick={() => actions.onReview(actions.app)}
-      className={cardClassName(actions.app, { grab: true, wishlisted: actions.isWishlisted })}
+      className={cardClassName(actions.app, { grab: true })}
     >
       <ApplicantCardInner {...actions} draggable />
     </div>
@@ -284,8 +320,9 @@ export const StaticApplicantCard = memo(function StaticApplicantCard({
 }: ApplicantCardActions & { draggable?: boolean }) {
   return (
     <div
+      data-app-id={actions.app.id}
       onClick={() => actions.onReview(actions.app)}
-      className={cardClassName(actions.app, { wishlisted: actions.isWishlisted })}
+      className={cardClassName(actions.app)}
     >
       <ApplicantCardInner {...actions} draggable={draggable} />
     </div>
