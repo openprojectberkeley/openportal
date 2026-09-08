@@ -67,7 +67,7 @@ function DraftStatus({
 
   return (
     <div className="flex items-start gap-2 rounded-lg border bg-muted/30 px-3 py-2">
-      <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${dot}`} aria-hidden />
+      <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${dot}`} aria-hidden />
       <div className="flex flex-col gap-0.5">
         <span className="text-sm font-medium">{headline}</span>
         {sub && <span className="text-xs text-muted-foreground">{sub}</span>}

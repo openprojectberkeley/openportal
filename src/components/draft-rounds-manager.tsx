@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/supabase/client";
 import { useCallback, useEffect, useState } from "react";
-import { CheckCheck, ChevronDown, ChevronLeft, ChevronRight, GripVertical, Play, Plus, RotateCcw, Trash2, X } from "lucide-react";
+import { Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, GripVertical, Play, Plus, RotateCcw, Trash2, X } from "lucide-react";
 import {
   DndContext,
   PointerSensor,
@@ -13,6 +13,7 @@ import {
 } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -69,6 +70,10 @@ export function DraftRoundsManager() {
   const [error, setError] = useState<string | null>(null);
   const [confirmTarget, setConfirmTarget] = useState<ConfirmTarget | null>(null);
   const [working, setWorking] = useState(false);
+  // Live draft board: per round-project, its picks + whether the round is
+  // submitted (confirmed), plus a name lookup for the picked applicants.
+  const [boardRows, setBoardRows] = useState<Record<string, { submittedAt: string | null; appIds: string[] }>>({});
+  const [nameByAppId, setNameByAppId] = useState<Record<string, string>>({});
 
   useEffect(() => {
     (async () => {
@@ -125,26 +130,71 @@ export function DraftRoundsManager() {
     setCompletedAt(data?.completed_at ?? null);
   }, []);
 
+  // Lightweight, flash-free load for the live board (picks + submitted state +
+  // applicant names). Doesn't touch the editable `rounds`, so it's safe to run
+  // on every realtime event. Applicant names come in two follow-ups since
+  // applications.applicant_id points at auth.users, not members (no FK to join).
+  const loadBoard = useCallback(async (periodId: string) => {
+    const supabase = createClient();
+    const { data: rpRows } = await supabase
+      .from("draft_round_projects")
+      .select("id, submitted_at, draft_picks(id, application_id), draft_rounds!inner(period_id)")
+      .eq("draft_rounds.period_id", periodId);
+    const rows = (rpRows ?? []) as unknown as { id: string; submitted_at: string | null; draft_picks: { id: string; application_id: string }[] }[];
+
+    const nextBoard: Record<string, { submittedAt: string | null; appIds: string[] }> = {};
+    const appIdSet = new Set<string>();
+    for (const r of rows) {
+      nextBoard[r.id] = { submittedAt: r.submitted_at, appIds: r.draft_picks.map((p) => p.application_id) };
+      r.draft_picks.forEach((p) => appIdSet.add(p.application_id));
+    }
+    setBoardRows(nextBoard);
+
+    if (appIdSet.size === 0) { setNameByAppId({}); return; }
+    const appIds = [...appIdSet];
+    const { data: apps } = await supabase.from("applications").select("id, applicant_id").in("id", appIds);
+    const appToUser: Record<string, string> = {};
+    const userIds: string[] = [];
+    for (const a of (apps ?? []) as { id: string; applicant_id: string | null }[]) {
+      if (a.applicant_id) { appToUser[a.id] = a.applicant_id; userIds.push(a.applicant_id); }
+    }
+    const { data: mems } = userIds.length
+      ? await supabase.from("members").select("user_id, preferred_firstname, lastname").in("user_id", userIds)
+      : { data: [] };
+    const userName: Record<string, string> = {};
+    for (const m of (mems ?? []) as { user_id: string; preferred_firstname: string | null; lastname: string | null }[]) {
+      userName[m.user_id] = [m.preferred_firstname, m.lastname].filter(Boolean).join(" ") || "Applicant";
+    }
+    const nameByApp: Record<string, string> = {};
+    for (const appId of appIds) nameByApp[appId] = userName[appToUser[appId]] ?? "Applicant";
+    setNameByAppId(nameByApp);
+  }, []);
+
   useEffect(() => {
     if (selectedPeriodId) {
       loadRounds(selectedPeriodId);
       loadDraftState(selectedPeriodId);
+      loadBoard(selectedPeriodId);
     } else {
       setRounds(null);
       setCurrentPickId(null);
       setCompletedAt(null);
+      setBoardRows({});
+      setNameByAppId({});
     }
-  }, [selectedPeriodId, loadRounds, loadDraftState]);
+  }, [selectedPeriodId, loadRounds, loadDraftState, loadBoard]);
 
-  // Live-refresh the draft state (whose turn / completed / reset) as it moves,
-  // e.g. when a PM submits or another exec advances the pick -- without a
-  // reload. Only the lightweight state is refreshed here (not the full editable
-  // rounds structure, which would flash a skeleton and could interrupt setup
-  // edits in progress).
-  const refreshDraftState = useCallback(() => {
-    if (selectedPeriodId) loadDraftState(selectedPeriodId);
-  }, [selectedPeriodId, loadDraftState]);
-  useDraftRealtime(selectedPeriodId, refreshDraftState);
+  // Live-refresh the draft state (whose turn / completed / reset) and the board
+  // (who's picked what) as they move -- when a PM stages/submits or another
+  // exec advances -- without a reload. Both are lightweight and flash-free; the
+  // full editable rounds structure is deliberately NOT reloaded here (it would
+  // flash a skeleton and could interrupt setup edits in progress).
+  const refreshLive = useCallback(() => {
+    if (!selectedPeriodId) return;
+    loadDraftState(selectedPeriodId);
+    loadBoard(selectedPeriodId);
+  }, [selectedPeriodId, loadDraftState, loadBoard]);
+  useDraftRealtime(selectedPeriodId, refreshLive);
 
   const selectedPeriod = periods?.find((p) => p.id === selectedPeriodId) ?? null;
 
@@ -426,6 +476,15 @@ export function DraftRoundsManager() {
         </div>
       )}
 
+      {selectedPeriodId && (currentPickId !== null || completedAt) && sequence.length > 0 && (
+        <DraftBoard
+          sequence={sequence}
+          currentPickId={currentPickId}
+          boardRows={boardRows}
+          nameByAppId={nameByAppId}
+        />
+      )}
+
       {selectedPeriodId && (
         <div className="flex flex-col gap-4">
           {rounds === null ? (
@@ -491,6 +550,106 @@ export function DraftRoundsManager() {
           return completeDraft();
         }}
       />
+    </div>
+  );
+}
+
+// Live two-column draft board (shown once the draft has started): LEFT the
+// pick order with the current turn highlighted + a check on submitted stops;
+// RIGHT the picks each project has made so far, staged vs confirmed.
+function DraftBoard({
+  sequence,
+  currentPickId,
+  boardRows,
+  nameByAppId,
+}: {
+  sequence: PickStop[];
+  currentPickId: string | null;
+  boardRows: Record<string, { submittedAt: string | null; appIds: string[] }>;
+  nameByAppId: Record<string, string>;
+}) {
+  const currentIndex = currentPickId ? sequence.findIndex((s) => s.id === currentPickId) : -1;
+
+  // Picks grouped by project, in first-appearance (pick) order.
+  const byProject: { projectId: string; name: string; picks: { appId: string; confirmed: boolean }[] }[] = [];
+  const indexByProject = new Map<string, number>();
+  for (const stop of sequence) {
+    const row = boardRows[stop.id];
+    if (!row || row.appIds.length === 0) continue;
+    let idx = indexByProject.get(stop.project_id);
+    if (idx === undefined) {
+      idx = byProject.length;
+      indexByProject.set(stop.project_id, idx);
+      byProject.push({ projectId: stop.project_id, name: stop.name, picks: [] });
+    }
+    const confirmed = !!row.submittedAt;
+    for (const appId of row.appIds) byProject[idx].picks.push({ appId, confirmed });
+  }
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      {/* LEFT: pick order */}
+      <div className="border rounded-xl p-4 flex flex-col gap-3">
+        <h3 className="text-sm font-semibold">
+          Pick order
+          {currentIndex >= 0 && (
+            <span className="ml-2 font-normal text-muted-foreground">
+              Pick {currentIndex + 1} of {sequence.length}
+            </span>
+          )}
+        </h3>
+        <div className="flex flex-col gap-1.5">
+          {sequence.map((stop, i) => {
+            const submitted = !!boardRows[stop.id]?.submittedAt;
+            const isCurrent = stop.id === currentPickId;
+            return (
+              <div
+                key={stop.id}
+                className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${
+                  isCurrent ? "border-primary ring-1 ring-primary bg-primary/5" : "bg-background"
+                }`}
+              >
+                <span className="w-5 shrink-0 text-xs font-medium text-muted-foreground">{i + 1}.</span>
+                <span className="flex-1 min-w-0 truncate font-medium">{stop.name}</span>
+                <span className="shrink-0 text-xs text-muted-foreground">
+                  R{stop.round_number} · {stop.pick_count} pick{stop.pick_count === 1 ? "" : "s"}
+                </span>
+                {submitted ? (
+                  <Check size={14} className="shrink-0 text-green-600" aria-label="Submitted" />
+                ) : isCurrent ? (
+                  <span className="shrink-0 text-xs font-medium text-primary">On the clock</span>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* RIGHT: who's picked what */}
+      <div className="border rounded-xl p-4 flex flex-col gap-3">
+        <h3 className="text-sm font-semibold">Picks so far</h3>
+        {byProject.length === 0 ? (
+          <p className="text-xs text-muted-foreground py-2">No picks staged yet.</p>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {byProject.map((proj) => (
+              <div key={proj.projectId} className="flex flex-col gap-1.5">
+                <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{proj.name}</span>
+                {proj.picks.map((pick, i) => (
+                  <div key={`${pick.appId}-${i}`} className="flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm bg-background">
+                    <span className="flex-1 min-w-0 truncate">{nameByAppId[pick.appId] ?? "Applicant"}</span>
+                    {pick.confirmed ? (
+                      <Badge className="bg-green-600 hover:bg-green-600 shrink-0">Confirmed</Badge>
+                    ) : (
+                      <Badge variant="outline" className="shrink-0">Staged</Badge>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

@@ -1,7 +1,6 @@
 "use client";
 
 import { memo } from "react";
-import { useDraggable } from "@dnd-kit/core";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { AlertTriangle, GripVertical, RotateCcw, Star, UserPlus, X } from "lucide-react";
@@ -9,6 +8,7 @@ import { PersonName } from "@/components/person-profile-provider";
 import { Badge } from "@/components/ui/badge";
 import type { ReviewStatus } from "@/components/application-review-modal";
 import { CoffeeChatIndicator, InfosessionIndicator, LateBadge, type CoffeeState } from "@/components/applicant-indicators";
+import { rankLabel } from "@/lib/application-rank";
 
 export type Applicant = { user_id: string; preferred_firstname: string | null; lastname: string | null };
 
@@ -61,11 +61,29 @@ function ReturningIndicator({ returning }: { returning: boolean }) {
 }
 
 // Name + status/indicator badges shared by every applicant-card variant
-// (Applicants, Wishlist, Draft window).
-export function ApplicantMeta({ app, periodEndsAt }: { app: AppRow; periodEndsAt: string | undefined }) {
+// (Applicants, Wishlist, Draft window). `rank` adds a quiet ordinal ("1st")
+// after the name -- used by the wishlist, whose cards have been pulled out of
+// their "1st choice"/"2nd choice" heading and would otherwise lose that signal.
+export function ApplicantMeta({
+  app,
+  periodEndsAt,
+  rank,
+}: {
+  app: AppRow;
+  periodEndsAt: string | undefined;
+  rank?: boolean;
+}) {
   return (
     <div className="flex min-w-0 flex-1 items-center gap-1.5">
       <PersonName userId={app.applicant?.user_id} name={applicantName(app)} className="text-sm font-medium truncate" />
+      {rank && app.rank > 0 && (
+        <span
+          className="shrink-0 text-[11px] tabular-nums text-muted-foreground/70"
+          title={rankLabel(app.rank)}
+        >
+          {rankLabel(app.rank).split(" ")[0]}
+        </span>
+      )}
       <StatusBadge status={app.status} />
       <ReturningIndicator returning={app.returning} />
       <LateBadge submittedAt={app.submitted_at} endsAt={periodEndsAt} />
@@ -78,16 +96,21 @@ export function ApplicantMeta({ app, periodEndsAt }: { app: AppRow; periodEndsAt
 // Actions an applicant card can carry, independent of how (or whether) the card
 // is draggable. Callbacks take the app / id (not a pre-bound closure) so callers
 // can pass stable references and the cards can be memoized -- important because
-// the whole page re-renders on every drag-over frame. The wishlist toggle (with
-// its gold ring + persistent star) only shows on the Applicants list; the draft
-// button only when a draft is active; onRemove only on wishlist / draft cards.
+// the whole page re-renders on every drag-over frame. The star only shows on the
+// Applicants list (where nothing is wishlisted yet -- shortlisting *moves* the
+// card to the wishlist); the draft button only when a draft is active; onRemove
+// only on wishlist / draft cards.
 export type ApplicantCardActions = {
   app: AppRow;
   periodEndsAt: string | undefined;
   onReview: (app: AppRow) => void;
-  // Applicants list: gold ring + a persistent star; the star toggles wishlist.
+  // Wishlist cards: gold ring, plus a quiet ordinal standing in for the choice
+  // heading they were moved out of.
   isWishlisted?: boolean;
-  onWishlistToggle?: (id: string) => void;
+  showRank?: boolean;
+  // Applicants list: the star moves this applicant onto the wishlist. Never set
+  // on a wishlist card (those carry onRemove instead), so it only ever adds.
+  onAddToWishlist?: (id: string) => void;
   // Stage into the draft window. Shown only when a draft is active; disabled
   // once the applicant is already staged / confirmed.
   showAddToDraft?: boolean;
@@ -141,8 +164,8 @@ function OverlayButton({
 function ApplicantCardInner({
   app,
   periodEndsAt,
-  isWishlisted,
-  onWishlistToggle,
+  showRank,
+  onAddToWishlist,
   showAddToDraft,
   onAddToDraft,
   addToDraftDisabled,
@@ -151,7 +174,7 @@ function ApplicantCardInner({
 }: ApplicantCardActions & { draggable?: boolean }) {
   const invalid = !app.valid;
   const reasons = invalid ? invalidReasons(app) : [];
-  const hasOverlay = !!(onWishlistToggle || (showAddToDraft && onAddToDraft) || onRemove);
+  const hasOverlay = !!(onAddToWishlist || (showAddToDraft && onAddToDraft) || onRemove);
   return (
     <>
       {invalid ? (
@@ -171,16 +194,7 @@ function ApplicantCardInner({
         <GripVertical size={14} className="shrink-0 text-muted-foreground/40" aria-hidden />
       ) : null}
 
-      <ApplicantMeta app={app} periodEndsAt={periodEndsAt} />
-
-      {/* Persistent wishlisted indicator; sits in the same 28px box (and card
-          padding) as the overlay's star toggle so the two line up exactly, and
-          fades out as the overlay fades in. */}
-      {isWishlisted && onWishlistToggle && (
-        <span className="flex h-7 w-7 shrink-0 items-center justify-center text-amber-500 transition-opacity group-hover:opacity-0" aria-hidden>
-          <Star size={14} className="fill-amber-500" />
-        </span>
-      )}
+      <ApplicantMeta app={app} periodEndsAt={periodEndsAt} rank={showRank} />
 
       {hasOverlay && (
         <div className="absolute inset-y-0 right-0 flex items-center gap-0.5 rounded-r-lg pl-10 pr-3 bg-gradient-to-l from-background via-background/95 to-transparent opacity-0 pointer-events-none transition-opacity group-hover:opacity-100 group-hover:pointer-events-auto">
@@ -194,13 +208,13 @@ function ApplicantCardInner({
               <UserPlus size={14} />
             </OverlayButton>
           )}
-          {onWishlistToggle && (
+          {onAddToWishlist && (
             <OverlayButton
-              onClick={() => onWishlistToggle(app.id)}
-              label={isWishlisted ? "Remove from wishlist" : "Add to wishlist"}
-              className={isWishlisted ? "text-amber-500 hover:text-amber-600" : "hover:text-amber-500"}
+              onClick={() => onAddToWishlist(app.id)}
+              label="Add to wishlist"
+              className="hover:text-amber-500"
             >
-              <Star size={14} className={isWishlisted ? "fill-amber-500" : ""} />
+              <Star size={14} />
             </OverlayButton>
           )}
           {onRemove && (
@@ -232,15 +246,21 @@ function cardClassName(app: AppRow, opts?: { grab?: boolean; dragClass?: string;
   ].join(" ");
 }
 
-// Sortable card for the reorderable Wishlist. The whole card is the drag
-// handle; clicking (without dragging) opens review, buttons stop propagation.
-export const SortableApplicantCard = memo(function SortableApplicantCard({
-  dndId,
-  ...actions
-}: ApplicantCardActions & { dndId: string }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: dndId });
-  // Hidden in place while dragging (the DragOverlay shows the moving copy and
-  // the list reflows to open a gap), matching the ranking page.
+// The one sortable card, shared by the wishlist and the choice groups so the two
+// match in size / border / structure and drag between each other seamlessly --
+// same arrangement as ProjectCard on the application ranking page. The sortable
+// id is the raw application id (no per-zone prefix): an applicant is in exactly
+// one of the two lists at a time, so the card re-parents between the two
+// SortableContexts on a move instead of unmounting and re-mounting under a new
+// id. Which zone it's in is decided by the page's live wishlist array.
+// The whole card is the drag handle; clicking (without dragging) opens review,
+// buttons stop propagation.
+export const SortableApplicantCard = memo(function SortableApplicantCard(actions: ApplicantCardActions) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: actions.app.id });
+  // Hidden in place while dragging. Because the card keeps its id across the
+  // move, isDragging stays true once it re-mounts in the other list -- so the
+  // card-sized gap it leaves there IS the insertion preview; there's no separate
+  // placeholder element. Matches the ranking page.
   const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0 : 1 } as React.CSSProperties;
   return (
     <div
@@ -250,33 +270,6 @@ export const SortableApplicantCard = memo(function SortableApplicantCard({
       {...listeners}
       onClick={() => actions.onReview(actions.app)}
       className={cardClassName(actions.app, { grab: true, wishlisted: actions.isWishlisted })}
-    >
-      <ApplicantCardInner {...actions} draggable />
-    </div>
-  );
-});
-
-// Plain draggable card for the immutable "Applicants" list: it's a copy
-// source (dragging it into the wishlist / draft window leaves the original in
-// place), so it uses useDraggable rather than useSortable — no sibling reflow,
-// the list never reorders. The source stays visible (dimmed) while dragging
-// since nothing actually leaves this list. Memoized so a wishlist drag (which
-// re-renders the page every frame) doesn't re-render the whole Applicants list.
-export const DraggableApplicantCard = memo(function DraggableApplicantCard({
-  dndId,
-  ...actions
-}: ApplicantCardActions & { dndId: string }) {
-  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: dndId });
-  // No transform on the source: the DragOverlay renders the moving copy, so the
-  // original stays put (just dimmed). Applying the pointer transform here would
-  // move the card off to the side and widen the page (horizontal scroll).
-  return (
-    <div
-      ref={setNodeRef}
-      {...attributes}
-      {...listeners}
-      onClick={() => actions.onReview(actions.app)}
-      className={cardClassName(actions.app, { grab: true, wishlisted: actions.isWishlisted, dragClass: isDragging ? "opacity-40" : "" })}
     >
       <ApplicantCardInner {...actions} draggable />
     </div>

@@ -12,7 +12,7 @@ import {
   PointerSensor,
   useSensor,
   useSensors,
-  pointerWithin,
+  closestCorners,
   type DragStartEvent,
   type DragOverEvent,
   type DragEndEvent,
@@ -22,7 +22,6 @@ import { useRoleSim } from "@/components/role-simulation-provider";
 import { useDraftPicks } from "@/lib/use-draft-picks";
 import { DraftWindowPanel, DRAFT_WINDOW_DROPZONE_ID } from "@/components/draft-panels";
 import {
-  DraggableApplicantCard,
   SortableApplicantCard,
   StaticApplicantCard,
   applicantName,
@@ -85,34 +84,30 @@ function slugify(name: string): string {
   return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 }
 
-// Drop target id for the wishlist zone on the left, under the roster.
+// The two zones the DnD moves applicants between -- the same multi-container
+// sortable arrangement as the applicant ranking page's RANKED_ZONE /
+// AVAILABLE_ZONE (see app/(app)/application/page.tsx). The wishlist plays
+// "your ranking" (hand-ordered), the choice groups play "available projects"
+// (order derived, never hand-sorted, but membership changes live).
+//
+// Card ids are the raw application id, with no per-zone prefix: an applicant is
+// in exactly one of the two lists at a time, so which zone a card is in is a
+// membership test against the live wishlist array rather than a prefix. That
+// also means a card re-parents between the two SortableContexts mid-drag
+// instead of unmounting -- which is what keeps dnd-kit's active node alive.
 const WISHLIST_DROPZONE_ID = "wishlist-dropzone";
-// The Applicants list is registered as a droppable purely so collision
-// detection has a real target on the right column -- otherwise closestCorners
-// resolves every drag to the wishlist and drops there no matter where the
-// pointer is. It never mutates anything: dropping here is a no-op (the list is
-// immutable, a copy source only).
 const APPLICANTS_ZONE_ID = "applicants-zone";
-
-// Draggable-id prefixes. The same applicant can be a draggable card in BOTH
-// the "Applicants" list and the wishlist at once (the copy model), so their
-// dnd-kit ids must not collide -- prefix by which list the card lives in.
-const APPLICANT_PREFIX = "applicant:";
-const WISHLIST_PREFIX = "wishlist:";
-
-function parseDndId(id: string): { zone: "applicant" | "wishlist"; appId: string } | null {
-  if (id.startsWith(APPLICANT_PREFIX)) return { zone: "applicant", appId: id.slice(APPLICANT_PREFIX.length) };
-  if (id.startsWith(WISHLIST_PREFIX)) return { zone: "wishlist", appId: id.slice(WISHLIST_PREFIX.length) };
-  return null;
-}
 
 function sameOrder(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((x, i) => x === b[i]);
 }
 
-// The reorderable wishlist under the roster: a drop target that accepts copies
-// dragged in from the Applicants list, and a SortableContext whose cards the
-// PM reorders in place (same live-reflow drag as the application ranking page).
+// The wishlist at the top of the Applicants column -- the manager-side twin of
+// the ranking page's RankZone. A drop target plus a SortableContext, so a card
+// can be dragged in from the choice groups below and dropped into any slot
+// (first or last included), or reordered in place. An applicant here is no
+// longer listed below, so each card carries a quiet ordinal standing in for the
+// choice heading it left.
 function WishlistDropzone({
   apps,
   periodEndsAt,
@@ -130,26 +125,24 @@ function WishlistDropzone({
   onRemove: (id: string) => void;
   onAddToDraft: (id: string) => void;
 }) {
-  const { setNodeRef, isOver } = useDroppable({ id: WISHLIST_DROPZONE_ID });
+  // The droppable ref sits on the outer div, so an empty wishlist is still a
+  // valid drop target even though the SortableContext below is unmounted.
+  const { setNodeRef } = useDroppable({ id: WISHLIST_DROPZONE_ID });
   return (
-    <div
-      ref={setNodeRef}
-      className={`flex flex-col gap-2 rounded-xl border-2 border-dashed p-3 min-h-[76px] transition-colors ${
-        isOver ? "border-primary bg-primary/5" : "border-muted-foreground/25"
-      }`}
-    >
+    <div ref={setNodeRef} className="min-h-40 flex flex-col gap-2">
       {apps.length === 0 ? (
-        <p className="text-xs text-muted-foreground text-center py-4">
-          Add applicants from the list to shortlist them, then drag to reorder.
-        </p>
+        <div className="flex-1 flex items-center justify-center text-center text-sm text-muted-foreground py-10 rounded-xl bg-accent/20">
+          Drag applicants here to shortlist them.
+        </div>
       ) : (
-        <SortableContext items={apps.map((a) => WISHLIST_PREFIX + a.id)} strategy={verticalListSortingStrategy}>
+        <SortableContext items={apps.map((a) => a.id)} strategy={verticalListSortingStrategy}>
           {apps.map((a) => (
             <SortableApplicantCard
               key={a.id}
-              dndId={WISHLIST_PREFIX + a.id}
               app={a}
               periodEndsAt={periodEndsAt}
+              isWishlisted
+              showRank
               onReview={onReview}
               onRemove={onRemove}
               showAddToDraft={draftActive}
@@ -163,14 +156,20 @@ function WishlistDropzone({
   );
 }
 
-// The immutable Applicants list. A no-op droppable (see APPLICANTS_ZONE_ID) so
-// collision detection resolves a drop over this column to "not the wishlist"
-// instead of the nearest zone.
-function ApplicantsZone({ children }: { children: React.ReactNode }) {
+// The choice-grouped Applicants list -- the manager-side twin of the ranking
+// page's AvailableZone. A droppable (so a wishlist card can be dragged back down
+// here to un-shortlist it, even when the list is empty) wrapping one
+// SortableContext that spans every rank group in render order; the group
+// headings sit inside it as non-sortable siblings, which is harmless since only
+// ids in `items` participate. The groups themselves are never hand-sorted --
+// their order is always derived from compareReviewPriority.
+function ApplicantsZone({ items, children }: { items: string[]; children: React.ReactNode }) {
   const { setNodeRef } = useDroppable({ id: APPLICANTS_ZONE_ID });
   return (
     <div ref={setNodeRef} className="flex flex-col gap-3 rounded-xl">
-      {children}
+      <SortableContext items={items} strategy={verticalListSortingStrategy}>
+        {children}
+      </SortableContext>
     </div>
   );
 }
@@ -384,8 +383,40 @@ export default function ManagerApplicationsPage() {
     );
   }, [selectedProjectId]);
 
+  // Persist the net result of a drag (add / remove / reorder) in one pass by
+  // diffing the dropped order against the committed one -- mirrors the ranking
+  // page's commitRanked. onDragEnd has already set the new order on screen, so
+  // this only writes.
+  const commitWishlist = useCallback(async (next: string[]) => {
+    if (!selectedProjectId || selectedProjectId === ALL_PROJECTS) return;
+    const prev = wishlist ?? [];
+    const added = next.filter((id) => !prev.includes(id));
+    const removed = prev.filter((id) => !next.includes(id));
+    const supabase = createClient();
+    if (added.length) {
+      await supabase.from("application_wishlist").upsert(
+        added.map((appId) => ({
+          application_id: appId,
+          project_id: selectedProjectId,
+          created_by: currentUserId,
+          position: next.indexOf(appId),
+        })),
+        { onConflict: "application_id,project_id", ignoreDuplicates: true },
+      );
+    }
+    if (removed.length) {
+      await supabase
+        .from("application_wishlist")
+        .delete()
+        .eq("project_id", selectedProjectId)
+        .in("application_id", removed);
+    }
+    await syncWishlistOrder(next);
+  }, [wishlist, selectedProjectId, currentUserId, syncWishlistOrder]);
+
   // Button-driven add: append to the end of the wishlist. A no-op if already
-  // shortlisted. The applicant stays in the Applicants list either way (copy).
+  // shortlisted. The applicant leaves their choice group below (a move, not a
+  // copy) -- groupedApps filters the wishlist out.
   const addToWishlist = useCallback(async (applicationId: string) => {
     if (!selectedProjectId || selectedProjectId === ALL_PROJECTS) return;
     let position = 0;
@@ -408,11 +439,6 @@ export default function ManagerApplicationsPage() {
     const supabase = createClient();
     await supabase.from("application_wishlist").delete().eq("application_id", applicationId).eq("project_id", selectedProjectId);
   }, [selectedProjectId]);
-
-  const toggleWishlist = useCallback((applicationId: string) => {
-    if (wishlist?.includes(applicationId)) removeFromWishlist(applicationId);
-    else addToWishlist(applicationId);
-  }, [wishlist, addToWishlist, removeFromWishlist]);
 
   // Draft-round state for the selected project (Confirmed/Draft window,
   // shown once a draft is active). Independent of the wishlist -- an
@@ -437,11 +463,15 @@ export default function ManagerApplicationsPage() {
   // nothing here that needs the roster/apps to reload.
   const handleSubmitDraftPicks = () => draftPicks.submit();
 
-  // ---- Drag orchestration -------------------------------------------------
-  // Same live-reflow model as the application ranking page: dragWishlist is a
-  // working copy of the wishlist mutated on hover so the list reflows under the
-  // pointer. The Applicants list is a copy source (never mutated) and the draft
-  // window is a plain drop target -- both handled on drop, not live.
+  // ---- Drag orchestration (multi-container sortable) ----------------------
+  // The same model as the application ranking page: both lists are sortable
+  // containers over raw application ids, and `dragWishlist` is a working copy of
+  // the wishlist mutated live on hover, so a card can be dropped into any slot
+  // and both lists reflow under the pointer. The choice groups derive from it
+  // too (groupedApps filters the live set), so a card leaves its group the
+  // instant it's previewed into the wishlist and returns to its sorted position
+  // when dragged back out. The draft window is the one exception -- a copy
+  // target, not a third list.
   const onDragStart = useCallback((event: DragStartEvent) => {
     setActiveDragId(String(event.active.id));
     setDragWishlistLive([...(wishlist ?? [])]);
@@ -450,84 +480,73 @@ export default function ManagerApplicationsPage() {
   const onDragOver = useCallback((event: DragOverEvent) => {
     const { active, over } = event;
     if (!over) return;
-    const from = parseDndId(String(active.id));
-    if (!from) return;
-    const overIdStr = String(over.id);
-    const overWishlist = overIdStr === WISHLIST_DROPZONE_ID || parseDndId(overIdStr)?.zone === "wishlist";
+    const activeId = String(active.id);
+    const overId = String(over.id);
+    // Dropping on the draft window stages a copy and leaves both lists exactly
+    // as they were, so hovering it must not pull the card out of the wishlist.
+    if (overId === DRAFT_WINDOW_DROPZONE_ID) return;
     const base = dragWishlistRef.current ?? wishlist ?? [];
+    const inWishlist = base.includes(activeId);
+    const overWishlist = overId === WISHLIST_DROPZONE_ID || base.includes(overId);
 
-    // Reorder within the wishlist.
-    if (from.zone === "wishlist") {
-      if (!overWishlist) return; // hovering elsewhere -- leave order, snaps back
-      const fromIdx = base.indexOf(from.appId);
-      const toIdx = overIdStr === WISHLIST_DROPZONE_ID ? base.length - 1 : base.indexOf(parseDndId(overIdStr)!.appId);
-      if (fromIdx < 0 || toIdx < 0 || fromIdx === toIdx) return;
-      setDragWishlistLive(arrayMove(base, fromIdx, toIdx));
-      return;
-    }
-
-    // Applicants card hovering the wishlist -- show an insertion preview (copy).
-    if (overWishlist) {
-      if (base.includes(from.appId)) return;
+    // Choice groups -> wishlist: insert at the hovered slot.
+    if (!inWishlist && overWishlist) {
       let newIndex: number;
-      if (overIdStr === WISHLIST_DROPZONE_ID) {
+      if (overId === WISHLIST_DROPZONE_ID) {
         newIndex = base.length;
       } else {
-        const overIndex = base.indexOf(parseDndId(overIdStr)!.appId);
+        const overIndex = base.indexOf(overId);
         const translated = active.rect.current.translated;
         const isBelow = translated && over.rect ? translated.top > over.rect.top + over.rect.height / 2 : false;
         newIndex = overIndex >= 0 ? overIndex + (isBelow ? 1 : 0) : base.length;
       }
       const next = [...base];
-      next.splice(newIndex, 0, from.appId);
+      next.splice(newIndex, 0, activeId);
       setDragWishlistLive(next);
-    } else if (base.includes(from.appId)) {
-      // Dragged back out of the wishlist -- drop the preview copy.
-      setDragWishlistLive(base.filter((id) => id !== from.appId));
-    }
-  }, [wishlist]);
-
-  const onDragEnd = useCallback((event: DragEndEvent) => {
-    const result = dragWishlistRef.current;
-    const from = parseDndId(String(event.active.id));
-    const overId = event.over?.id ? String(event.over.id) : null;
-    setActiveDragId(null);
-    setDragWishlistLive(null);
-    if (!from) return;
-
-    // Draft window is a plain drop target (copy in -- source keeps its card).
-    if (overId === DRAFT_WINDOW_DROPZONE_ID) {
-      draftPicks.addToDraftWindow(from.appId);
       return;
     }
 
-    // Only a drop that actually lands on the wishlist commits a reorder /
-    // copy-in. Dropping on the Applicants list, the gutter (over === null), or
-    // anywhere else discards the live preview -- nothing is added.
-    const overWishlist = overId === WISHLIST_DROPZONE_ID || parseDndId(overId ?? "")?.zone === "wishlist";
-    if (!overWishlist) return;
-
-    // Commit any wishlist reorder / copy-in.
-    if (result && !sameOrder(result, wishlist ?? [])) {
-      const added = result.filter((id) => !(wishlist ?? []).includes(id));
-      setWishlist(result);
-      const supabase = createClient();
-      (async () => {
-        if (added.length && selectedProjectId && selectedProjectId !== ALL_PROJECTS) {
-          await supabase.from("application_wishlist").upsert(
-            added.map((appId) => ({
-              application_id: appId,
-              project_id: selectedProjectId,
-              created_by: currentUserId,
-              position: result.indexOf(appId),
-            })),
-            { onConflict: "application_id,project_id", ignoreDuplicates: true },
-          );
-        }
-        await syncWishlistOrder(result);
-      })();
+    // Wishlist -> choice groups: pull it out; it reappears in its rank group.
+    if (inWishlist && !overWishlist) {
+      setDragWishlistLive(base.filter((id) => id !== activeId));
+      return;
     }
-  }, [wishlist, draftPicks, selectedProjectId, currentUserId, syncWishlistOrder]);
+
+    // Reorder within the wishlist.
+    if (inWishlist && overWishlist) {
+      const from = base.indexOf(activeId);
+      const to = overId === WISHLIST_DROPZONE_ID ? base.length - 1 : base.indexOf(overId);
+      if (from < 0 || to < 0 || from === to) return;
+      setDragWishlistLive(arrayMove(base, from, to));
+    }
+  }, [wishlist]);
+
+  // Unlike the ranking page this still reads the event, but only to spot a drop
+  // on the draft window. Every other drop commits whatever the last hover left
+  // in the working copy -- releasing over the gutter included, since
+  // closestCorners always resolves to a zone. Escape still reverts, via
+  // onDragCancel.
+  const onDragEnd = useCallback((event: DragEndEvent) => {
+    const result = dragWishlistRef.current;
+    const activeId = String(event.active.id);
+    const overId = event.over?.id ? String(event.over.id) : null;
+    setActiveDragId(null);
+    setDragWishlistLive(null);
+
+    // Draft window is a plain copy target -- the source keeps its card, and the
+    // wishlist is left as it was.
+    if (overId === DRAFT_WINDOW_DROPZONE_ID) {
+      draftPicks.addToDraftWindow(activeId);
+      return;
+    }
+
+    // Keep the dropped order on screen immediately; commitWishlist reconciles
+    // the DB against the still-current committed `wishlist`.
+    if (result && !sameOrder(result, wishlist ?? [])) {
+      setWishlist(result);
+      commitWishlist(result);
+    }
+  }, [wishlist, draftPicks, commitWishlist]);
 
   const onDragCancel = useCallback(() => {
     setActiveDragId(null);
@@ -695,37 +714,41 @@ export default function ManagerApplicationsPage() {
 
   // Applicants currently staged in the draft window or already confirmed this
   // draft -- used to disable their "add to draft window" button (they can't be
-  // staged twice), not to hide them: an applicant now always stays in the
-  // Applicants list, and may also sit on the wishlist and/or draft window.
+  // staged twice), not to hide them: staging is still a copy, so a staged
+  // applicant keeps their card on the wishlist or in their choice group.
   const draftedIds = new Set([
     ...draftPicks.draftWindowPicks.map((p) => p.application_id),
     ...draftPicks.confirmedPicks.map((p) => p.application_id),
   ]);
 
-  // Wishlist cards in PM order. dragWishlist (the live working copy) wins while
-  // a drag is in flight so the list reflows / shows the insertion preview.
+  // While a drag is live, both lists render from the working copy so they
+  // reflow: the wishlist shows the insertion preview, and groupedApps (which
+  // filters on wishlistSet) drops or restores the card in its choice group.
   const wishlistView = dragWishlist ?? wishlist ?? [];
   const wishlistApps = wishlistView
     .map((id) => appById.get(id))
     .filter((a): a is AppRow => !!a);
-  const wishlistSet = new Set(wishlist ?? []);
+  const wishlistSet = new Set(wishlistView);
   // Staging (add-to-draft buttons + the draft-window drop zone) is allowed
   // whenever the draft is running -- started and not yet completed -- even
   // before this project's turn, so a PM can prepare their board ahead of time.
   // Locked before the draft starts and after it completes. Submitting is still
   // gated on isMyTurn (below / in the panel).
   const draftActive = draftPicks.phase === "in_progress" && !!draftPicks.nextRound;
-  const activeApp = activeDragId ? appById.get(parseDndId(activeDragId)?.appId ?? "") ?? null : null;
+  const activeApp = activeDragId ? appById.get(activeDragId) ?? null : null;
 
   // Group applicants into rank sections (1st choice, 2nd choice, …) for the
   // currently selected project, most-preferred first. Within a rank, returning
   // members float to the top; late sinks below on-time; invalid sinks below
-  // late (returning still wins if both apply). Every applicant always appears
-  // here regardless of wishlist / draft state -- the list is a read-only,
-  // copy-only source (its cards carry buttons + a "Wishlisted" badge instead).
+  // late (returning still wins if both apply). Shortlisted applicants are
+  // filtered out -- their card has moved up to the wishlist, so nobody is
+  // listed twice -- and the filter reads the live wishlistSet, so that move
+  // happens under the pointer rather than on drop. A group whose members are
+  // all shortlisted simply stops being created.
   const groupedApps = apps
     ? Object.entries(
         apps
+          .filter((a) => !wishlistSet.has(a.id))
           .reduce<Record<number, AppRow[]>>((acc, a) => {
             (acc[a.rank] ??= []).push(a);
             return acc;
@@ -915,15 +938,14 @@ export default function ManagerApplicationsPage() {
       ) : (
         <DndContext
           sensors={dndSensors}
-          collisionDetection={pointerWithin}
+          collisionDetection={closestCorners}
           onDragStart={onDragStart}
           onDragOver={onDragOver}
           onDragEnd={onDragEnd}
           onDragCancel={onDragCancel}
         >
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-            {/* Left: who's already on the team, plus a reorderable shortlist you
-                add applicants to (by button or by dragging a copy in) */}
+            {/* Left: who's already on the team, then the draft window */}
             <div className="flex flex-col gap-6">
               <div className="flex flex-col gap-2.5">
                 <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -947,21 +969,6 @@ export default function ManagerApplicationsPage() {
                 )}
               </div>
 
-              <div className="flex flex-col gap-2.5">
-                <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Wishlist{wishlist ? ` (${wishlist.length})` : ""}
-                </h2>
-                <WishlistDropzone
-                  apps={wishlistApps}
-                  periodEndsAt={selectedPeriod?.ends_at}
-                  draftActive={draftActive}
-                  addToDraftDisabled={(id) => draftedIds.has(id)}
-                  onReview={onReviewApp}
-                  onRemove={removeFromWishlist}
-                  onAddToDraft={stageInDraft}
-                />
-              </div>
-
               {draftPicks.error && <p className="text-sm text-red-500">{draftPicks.error}</p>}
 
               <DraftWindowPanel
@@ -981,9 +988,12 @@ export default function ManagerApplicationsPage() {
               />
             </div>
 
-            {/* Right: every applicant for this project (read-only list) --
-                wishlist / draft cards are copies made from here */}
-            <div className="flex flex-col gap-2.5">
+            {/* Right: every applicant for this project -- the shortlist on top,
+                then whoever's left, grouped by choice. An applicant sits in
+                exactly one of the two, and a card drags freely between them.
+                The wishlist is a sibling of (never nested in) ApplicantsZone so
+                the two stay distinct drop targets. */}
+            <div className="flex flex-col gap-4">
               <div className="flex items-center justify-between gap-2">
                 <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   Applicants
@@ -995,12 +1005,32 @@ export default function ManagerApplicationsPage() {
                   </Button>
                 )}
               </div>
-              <ApplicantsZone>
+
+              <div className="flex flex-col gap-2.5">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Wishlist{wishlist ? ` (${wishlistView.length})` : ""}
+                </h3>
+                <WishlistDropzone
+                  apps={wishlistApps}
+                  periodEndsAt={selectedPeriod?.ends_at}
+                  draftActive={draftActive}
+                  addToDraftDisabled={(id) => draftedIds.has(id)}
+                  onReview={onReviewApp}
+                  onRemove={removeFromWishlist}
+                  onAddToDraft={stageInDraft}
+                />
+              </div>
+
+              <ApplicantsZone items={groupedApps.flatMap(([, list]) => list.map((a) => a.id))}>
                 {apps === null ? (
                   <ApplicationListSkeleton rows={4} />
                 ) : apps.length === 0 ? (
                   <div className="px-4 py-10 text-center text-sm text-muted-foreground border rounded-xl">
                     No submitted applications for this project yet.
+                  </div>
+                ) : groupedApps.length === 0 ? (
+                  <div className="px-4 py-10 text-center text-sm text-muted-foreground border rounded-xl">
+                    Everyone&apos;s on the wishlist.
                   </div>
                 ) : (
                   groupedApps.map(([rank, list]) => (
@@ -1009,13 +1039,11 @@ export default function ManagerApplicationsPage() {
                         {rankLabel(rank)} ({list.length})
                       </h3>
                       {list.map((a) => (
-                        <DraggableApplicantCard
+                        <SortableApplicantCard
                           key={a.id}
-                          dndId={APPLICANT_PREFIX + a.id}
                           app={a}
                           periodEndsAt={selectedPeriod?.ends_at}
-                          isWishlisted={wishlistSet.has(a.id)}
-                          onWishlistToggle={toggleWishlist}
+                          onAddToWishlist={addToWishlist}
                           showAddToDraft={draftActive}
                           onAddToDraft={stageInDraft}
                           addToDraftDisabled={draftedIds.has(a.id)}

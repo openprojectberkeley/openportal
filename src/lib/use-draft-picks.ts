@@ -49,7 +49,11 @@ export function useDraftPicks(projectId: string | null, periodId: string | null)
     if (!projectId || !periodId) {
       setRoundProjects([]); setPicks([]); setSequence([]); setCurrentPickId(null); setCompletedAt(null); return;
     }
-    setRoundProjects(null);
+    // Note: we deliberately do NOT reset roundProjects to null here. loadAll is
+    // also the realtime refetch, and nulling it mid-refresh briefly makes
+    // nextRound null -> the status header flickers to "no more picks"/locked
+    // and back. The clean-slate on a project/period switch is handled by the
+    // separate effect below instead.
     const supabase = createClient();
     const [{ data: stateRow }, { data: rpRows, error: rpError }] = await Promise.all([
       supabase.from("draft_state").select("current_pick_id, completed_at").eq("period_id", periodId).maybeSingle(),
@@ -98,6 +102,9 @@ export function useDraftPicks(projectId: string | null, periodId: string | null)
     setPicks((pickRows ?? []) as PickRow[]);
   }, [projectId, periodId]);
 
+  // Clean slate on a project/period switch (so stale data from the previous
+  // project doesn't linger); background refetches update in place instead.
+  useEffect(() => { setRoundProjects(null); setSequence([]); }, [projectId, periodId]);
   useEffect(() => { loadAll(); }, [loadAll]);
   useDraftRealtime(periodId, loadAll);
 
