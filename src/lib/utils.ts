@@ -19,3 +19,35 @@ export function isLate(submittedAt?: string | null, endsAt?: string | null): boo
     new Date(submittedAt).getTime() > new Date(endsAt).getTime()
   );
 }
+
+// How many days past the deadline a submission was, rounded up so any lateness
+// counts as at least one day (day 1 = the first 24h after ends_at). Returns 0
+// when not late (or when either timestamp is missing).
+export function daysLate(submittedAt?: string | null, endsAt?: string | null): number {
+  if (!isLate(submittedAt, endsAt)) return 0;
+  const ms = new Date(submittedAt!).getTime() - new Date(endsAt!).getTime();
+  return Math.ceil(ms / 86_400_000);
+}
+
+export type ReviewPriorityFields = {
+  returning: boolean;
+  submittedAt?: string | null;
+};
+
+// PM review order within a rank: returning members first, late submissions
+// last. Returning wins over late, so a returning-but-late applicant still
+// ranks above a first-time on-time one. Same-bucket ties keep earliest
+// submitted_at first (the previous default).
+export function compareReviewPriority(
+  a: ReviewPriorityFields,
+  b: ReviewPriorityFields,
+  endsAt?: string | null,
+): number {
+  if (a.returning !== b.returning) return a.returning ? -1 : 1;
+  const aLate = isLate(a.submittedAt, endsAt);
+  const bLate = isLate(b.submittedAt, endsAt);
+  if (aLate !== bLate) return aLate ? 1 : -1;
+  const aTime = a.submittedAt ? new Date(a.submittedAt).getTime() : Infinity;
+  const bTime = b.submittedAt ? new Date(b.submittedAt).getTime() : Infinity;
+  return aTime - bTime;
+}

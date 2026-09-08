@@ -30,7 +30,7 @@ import {
   techClassLabel,
 } from "@/lib/application-profile";
 import { csvSlug, downloadCsv } from "@/lib/csv";
-import { cn, isLate } from "@/lib/utils";
+import { cn, compareReviewPriority, isLate } from "@/lib/utils";
 
 type PageProject = { id: string; name: string; type: string; essay_prompt: string | null };
 
@@ -846,7 +846,19 @@ export function ApplicationSheetModal({
 
     list = [...list].sort((a, b) => {
       const cmp = effectiveSort.dir === "asc" ? base(a, b) : -base(a, b);
-      return cmp !== 0 ? cmp : a.name.localeCompare(b.name);
+      if (cmp !== 0) return cmp;
+      // Within a rank, returning members first and late submissions last —
+      // same order PMs see on the card list. Other column sorts keep name
+      // as the only tiebreaker so an explicit sort stays honest.
+      if (effectiveSort.key === "rank") {
+        const pri = compareReviewPriority(
+          { returning: a.returning, submittedAt: a.submittedAt },
+          { returning: b.returning, submittedAt: b.submittedAt },
+          periodEndsAt,
+        );
+        if (pri !== 0) return pri;
+      }
+      return a.name.localeCompare(b.name);
     });
     return list;
   }, [
@@ -864,6 +876,7 @@ export function ApplicationSheetModal({
     slotFilters,
     effectiveSort,
     isStudio,
+    periodEndsAt,
   ]);
 
   const validCount = filtered.reduce((n, r) => n + (r.valid ? 1 : 0), 0);

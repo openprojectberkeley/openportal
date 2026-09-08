@@ -38,7 +38,7 @@ function StatusBadge({ status }: { status: ReviewStatus }) {
 function ReturningIndicator({ returning }: { returning: boolean }) {
   if (!returning) return null;
   return (
-    <Badge variant="outline" className="gap-1 border-transparent text-indigo-600" title="Returning member">
+    <Badge className="gap-1 bg-indigo-600 text-white hover:bg-indigo-600" title="Returning member">
       <RotateCcw size={11} />
       Returning
     </Badge>
@@ -52,8 +52,8 @@ export function ApplicantMeta({ app, periodEndsAt }: { app: AppRow; periodEndsAt
     <div className="flex min-w-0 flex-1 items-center gap-1.5">
       <PersonName userId={app.applicant?.user_id} name={applicantName(app)} className="text-sm font-medium truncate" />
       <StatusBadge status={app.status} />
-      <LateBadge submittedAt={app.submitted_at} endsAt={periodEndsAt} />
       <ReturningIndicator returning={app.returning} />
+      <LateBadge submittedAt={app.submitted_at} endsAt={periodEndsAt} />
       <CoffeeChatIndicator state={app.coffee} />
       <InfosessionIndicator attended={app.infosession} />
     </div>

@@ -34,6 +34,7 @@ import { ApplicationAnalyticsModal } from "@/components/application-analytics-mo
 import { ApplicationSheetModal } from "@/components/application-sheet-modal";
 import { ProjectAnalyticsModal } from "@/components/project-analytics-modal";
 import { rankLabel } from "@/lib/application-rank";
+import { compareReviewPriority } from "@/lib/utils";
 import { type CoffeeState } from "@/components/applicant-indicators";
 
 // The project currently under review: which project the reviewer is
@@ -473,9 +474,11 @@ export default function ManagerApplicationsPage() {
   const appById = new Map((apps ?? []).map((a) => [a.id, a]));
 
   // Group applicants into rank sections (1st choice, 2nd choice, …) for the
-  // currently selected project, most-preferred first. Wishlisted and
-  // drafted applicants are excluded — they're shown (and reviewed) on the
-  // left instead, never both places at once.
+  // currently selected project, most-preferred first. Within a rank, returning
+  // members float to the top and late submissions sink to the bottom
+  // (returning wins if both apply). Wishlisted and drafted applicants are
+  // excluded — they're shown (and reviewed) on the left instead, never both
+  // places at once.
   const groupedApps = apps
     ? Object.entries(
         apps
@@ -485,7 +488,16 @@ export default function ManagerApplicationsPage() {
             return acc;
           }, {}),
       )
-        .map(([rank, list]) => [Number(rank), list] as [number, AppRow[]])
+        .map(([rank, list]) => [
+          Number(rank),
+          [...list].sort((a, b) =>
+            compareReviewPriority(
+              { returning: a.returning, submittedAt: a.submitted_at },
+              { returning: b.returning, submittedAt: b.submitted_at },
+              selectedPeriod?.ends_at,
+            ),
+          ),
+        ] as [number, AppRow[]])
         .sort((x, y) => x[0] - y[0])
     : [];
 

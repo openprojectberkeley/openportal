@@ -1,6 +1,6 @@
 import { Coffee, Check, Clock, Presentation, FileCheck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { cn, isLate } from "@/lib/utils";
+import { cn, isLate, daysLate } from "@/lib/utils";
 
 // Coffee-chat progress for an applicant: "done" once any chat is completed,
 // "booked" while one is booked but not yet completed, "none" if never booked.
@@ -53,14 +53,14 @@ export function LateBadge({
   className?: string;
 }) {
   if (!isLate(submittedAt, endsAt)) return null;
+  const days = daysLate(submittedAt, endsAt);
   return (
     <Badge
-      variant="outline"
-      className={cn("gap-1 border-amber-500/40 text-amber-600", className)}
+      className={cn("gap-1 bg-amber-600 text-white hover:bg-amber-600", className)}
       title="Submitted after the period deadline"
     >
       <Clock size={11} />
-      Late
+      Late - {days} {days === 1 ? "day" : "days"}
     </Badge>
   );
 }
