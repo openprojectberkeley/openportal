@@ -35,7 +35,7 @@ import { ApplicationSheetModal } from "@/components/application-sheet-modal";
 import { ProjectAnalyticsModal } from "@/components/project-analytics-modal";
 import { rankLabel } from "@/lib/application-rank";
 import { compareReviewPriority } from "@/lib/utils";
-import { type CoffeeState } from "@/components/applicant-indicators";
+import { coffeeWithByApplicant, type CoffeeState } from "@/lib/coffee-chat-indicator";
 
 // The project currently under review: which project the reviewer is
 // assigned to (or, for a full-access reviewer, has picked from all of them).
@@ -408,30 +408,56 @@ export default function ManagerApplicationsPage() {
       const byId: Record<string, Applicant> = {};
       const returningById: Record<string, boolean> = {};
       const coffeeById: Record<string, CoffeeState> = {};
+      let coffeeWithById: Record<string, string[]> = {};
       const attendedInfo = new Set<string>();
+      // Board/exec applicants are auto-valid (same as application sheet / 0067).
+      const boardExecIds = new Set<string>();
       if (ids.length) {
         const idSet = new Set(ids);
-        const [{ data: mem }, { data: chats }, { data: info }] = await Promise.all([
+        const [{ data: mem }, { data: chats }, { data: info }, { data: roleRows }] = await Promise.all([
           supabase.from("members").select("user_id, preferred_firstname, lastname, status").in("user_id", ids),
           // A booked chat has applicant_id set; `complete` marks it done. Open
           // (unbooked) slots have a null applicant_id and won't match.
-          supabase.from("coffee_chats").select("applicant_id, complete").in("applicant_id", ids),
+          supabase.from("coffee_chats").select("applicant_id, member_id, complete").in("applicant_id", ids),
           // Attendance is recorded under member_id or applicant_id depending on
           // whether they were a member at the time; both are auth user ids.
           supabase
             .from("infosesh_attendance")
             .select("applicant_id, member_id")
             .or(`applicant_id.in.(${ids.join(",")}),member_id.in.(${ids.join(",")})`),
+          // Board/exec = access_level in ('board','exec'), same as is_board_or_exec().
+          supabase
+            .from("members_roles")
+            .select("user_id, roles!inner(access_level)")
+            .in("user_id", ids)
+            .in("roles.access_level", ["board", "exec"]),
         ]);
         for (const m of (mem ?? []) as (Applicant & { status: string | null })[]) {
           byId[m.user_id] = m;
           // A past member (active or rolled-off) is "returning"; mirrors is_returning_member().
           returningById[m.user_id] = m.status === "active" || m.status === "inactive";
         }
-        for (const ch of (chats ?? []) as { applicant_id: string; complete: boolean }[]) {
+        for (const r of (roleRows ?? []) as { user_id: string | null }[]) {
+          if (r.user_id) boardExecIds.add(r.user_id);
+        }
+        const chatRows = (chats ?? []) as { applicant_id: string; member_id: string; complete: boolean }[];
+        for (const ch of chatRows) {
           if (ch.complete) coffeeById[ch.applicant_id] = "done";
           else if (coffeeById[ch.applicant_id] !== "done") coffeeById[ch.applicant_id] = "booked";
         }
+        const hostIds = [...new Set(chatRows.map((ch) => ch.member_id).filter(Boolean))];
+        const hostNameById: Record<string, string> = {};
+        if (hostIds.length) {
+          const { data: hosts } = await supabase
+            .from("members")
+            .select("user_id, preferred_firstname, lastname")
+            .in("user_id", hostIds);
+          for (const h of (hosts ?? []) as { user_id: string; preferred_firstname: string | null; lastname: string | null }[]) {
+            const name = [h.preferred_firstname, h.lastname].filter(Boolean).join(" ");
+            if (name) hostNameById[h.user_id] = name;
+          }
+        }
+        coffeeWithById = coffeeWithByApplicant(chatRows, hostNameById);
         for (const r of (info ?? []) as { applicant_id: string | null; member_id: string | null }[]) {
           if (r.applicant_id && idSet.has(r.applicant_id)) attendedInfo.add(r.applicant_id);
           if (r.member_id && idSet.has(r.member_id)) attendedInfo.add(r.member_id);
@@ -439,15 +465,23 @@ export default function ManagerApplicationsPage() {
       }
 
       setApps(
-        rows.map(({ applicant_id, ...r }) => ({
-          ...r,
-          applicant: applicant_id
-            ? byId[applicant_id] ?? { user_id: applicant_id, preferred_firstname: null, lastname: null }
-            : null,
-          coffee: (applicant_id && coffeeById[applicant_id]) || "none",
-          returning: !!applicant_id && !!returningById[applicant_id],
-          infosession: !!applicant_id && attendedInfo.has(applicant_id),
-        })),
+        rows.map(({ applicant_id, ...r }) => {
+          const coffee: CoffeeState = (applicant_id && coffeeById[applicant_id]) || "none";
+          const returning = !!applicant_id && !!returningById[applicant_id];
+          const infosession = !!applicant_id && attendedInfo.has(applicant_id);
+          const boardExec = !!applicant_id && boardExecIds.has(applicant_id);
+          return {
+            ...r,
+            applicant: applicant_id
+              ? byId[applicant_id] ?? { user_id: applicant_id, preferred_firstname: null, lastname: null }
+              : null,
+            coffee,
+            coffeeWith: (applicant_id && coffeeWithById[applicant_id]) || [],
+            returning,
+            infosession,
+            valid: boardExec || ((coffee === "done" || returning) && infosession),
+          };
+        }),
       );
     })();
   }, [selectedPeriodId, selectedProjectId, reviewableProjects]);
@@ -475,10 +509,10 @@ export default function ManagerApplicationsPage() {
 
   // Group applicants into rank sections (1st choice, 2nd choice, …) for the
   // currently selected project, most-preferred first. Within a rank, returning
-  // members float to the top and late submissions sink to the bottom
-  // (returning wins if both apply). Wishlisted and drafted applicants are
-  // excluded — they're shown (and reviewed) on the left instead, never both
-  // places at once.
+  // members float to the top; late sinks below on-time; invalid sinks below
+  // late (returning still wins if both apply). Wishlisted and drafted
+  // applicants are excluded — they're shown (and reviewed) on the left
+  // instead, never both places at once.
   const groupedApps = apps
     ? Object.entries(
         apps
@@ -492,8 +526,8 @@ export default function ManagerApplicationsPage() {
           Number(rank),
           [...list].sort((a, b) =>
             compareReviewPriority(
-              { returning: a.returning, submittedAt: a.submitted_at },
-              { returning: b.returning, submittedAt: b.submitted_at },
+              { returning: a.returning, submittedAt: a.submitted_at, valid: a.valid },
+              { returning: b.returning, submittedAt: b.submitted_at, valid: b.valid },
               selectedPeriod?.ends_at,
             ),
           ),

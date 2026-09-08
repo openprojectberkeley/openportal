@@ -129,7 +129,7 @@ export function ProfileModal({ target, cached, onLoaded, onClose }: Props) {
                     {MEMBER_STATUS_BADGE_LABEL[merged.status]}
                   </span>
                 )}
-                <CoffeeChatIndicator state={merged.coffee_chat} />
+                <CoffeeChatIndicator state={merged.coffee_chat} withNames={merged.coffee_chat_with} />
                 <InfosessionIndicator attended={merged.infosession_attended} />
                 <SubmittedApplicationIndicator submitted={merged.submitted_application} />
               </div>

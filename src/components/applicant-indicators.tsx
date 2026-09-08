@@ -1,26 +1,45 @@
+"use client";
+
 import { Coffee, Check, Clock, Presentation, FileCheck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { cn, isLate, daysLate } from "@/lib/utils";
+import { coffeeChatLabel, type CoffeeState } from "@/lib/coffee-chat-indicator";
 
-// Coffee-chat progress for an applicant: "done" once any chat is completed,
-// "booked" while one is booked but not yet completed, "none" if never booked.
-export type CoffeeState = "done" | "booked" | "none";
+export type { CoffeeState } from "@/lib/coffee-chat-indicator";
+export { coffeeChatLabel, coffeeWithByApplicant } from "@/lib/coffee-chat-indicator";
 
 // Coffee cup with a check once the applicant has completed a chat, a clock while
 // one is only booked, and nothing if they've never booked (or the value is
 // absent — e.g. a viewer who isn't an application manager).
-export function CoffeeChatIndicator({ state }: { state?: CoffeeState | null }) {
+export function CoffeeChatIndicator({
+  state,
+  withNames,
+}: {
+  state?: CoffeeState | null;
+  withNames?: string[] | null;
+}) {
   if (!state || state === "none") return null;
   const done = state === "done";
+  const label = coffeeChatLabel(state, withNames);
   return (
-    <span
-      title={done ? "Completed a coffee chat" : "Coffee chat booked"}
-      aria-label={done ? "Completed a coffee chat" : "Coffee chat booked"}
-      className={`inline-flex items-center gap-0.5 ${done ? "text-green-600" : "text-amber-600"}`}
-    >
-      <Coffee size={14} />
-      {done ? <Check size={12} className="stroke-[3]" /> : <Clock size={12} />}
-    </span>
+    <HoverCard openDelay={100} closeDelay={50}>
+      <HoverCardTrigger asChild>
+        <span
+          aria-label={label}
+          className={`inline-flex items-center gap-0.5 ${done ? "text-green-600" : "text-amber-600"}`}
+        >
+          <Coffee size={14} />
+          {done ? <Check size={12} className="stroke-[3]" /> : <Clock size={12} />}
+        </span>
+      </HoverCardTrigger>
+      <HoverCardContent
+        side="top"
+        className="w-auto max-w-[16rem] px-2.5 py-1.5 text-xs leading-snug"
+      >
+        {label}
+      </HoverCardContent>
+    </HoverCard>
   );
 }
 

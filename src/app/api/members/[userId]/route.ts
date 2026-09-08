@@ -2,7 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 import { getEffectiveAccessLevels } from "@/lib/roles-server";
 import { accessIsBoardOrExec } from "@/lib/roles";
-import type { CoffeeState } from "@/components/applicant-indicators";
+import { coffeeWithByApplicant, type CoffeeState } from "@/lib/coffee-chat-indicator";
 
 // Read-only public profile of a single member. Any authenticated member may view
 // another member's profile (used by the click-to-open profile modal), so this
@@ -63,7 +63,12 @@ export async function GET(
   // never receive these keys, so the client can't surface what it never sees.
   const isManager = accessIsBoardOrExec(await getEffectiveAccessLevels(supabase));
   let recruiting:
-    | { coffee_chat: CoffeeState; infosession_attended: boolean; submitted_application: boolean }
+    | {
+        coffee_chat: CoffeeState;
+        coffee_chat_with: string[];
+        infosession_attended: boolean;
+        submitted_application: boolean;
+      }
     | null = null;
   if (isManager) {
     // The submitted-application check is scoped to the current cycle, so resolve
@@ -72,7 +77,7 @@ export async function GET(
     const [{ data: chats }, { data: info }, { data: apps }] = await Promise.all([
       // A booked chat has applicant_id set; `complete` marks it done. Open
       // (unbooked) slots have a null applicant_id and won't match.
-      supabase.from("coffee_chats").select("complete").eq("applicant_id", userId),
+      supabase.from("coffee_chats").select("member_id, complete").eq("applicant_id", userId),
       // Attendance is recorded under applicant_id or member_id depending on
       // whether they were a member at the time; both are auth user ids.
       supabase
@@ -91,13 +96,31 @@ export async function GET(
             .limit(1)
         : Promise.resolve({ data: [] as { status: string }[] }),
     ]);
-    const coffee_chat: CoffeeState = (chats ?? []).some((c) => c.complete)
+    const chatRows = ((chats ?? []) as { member_id: string; complete: boolean }[]).map((c) => ({
+      applicant_id: userId,
+      member_id: c.member_id,
+      complete: c.complete,
+    }));
+    const coffee_chat: CoffeeState = chatRows.some((c) => c.complete)
       ? "done"
-      : (chats ?? []).length > 0
+      : chatRows.length > 0
         ? "booked"
         : "none";
+    const hostIds = [...new Set(chatRows.map((c) => c.member_id).filter(Boolean))];
+    const hostNameById: Record<string, string> = {};
+    if (hostIds.length) {
+      const { data: hosts } = await supabase
+        .from("members")
+        .select("user_id, preferred_firstname, lastname")
+        .in("user_id", hostIds);
+      for (const h of (hosts ?? []) as { user_id: string; preferred_firstname: string | null; lastname: string | null }[]) {
+        const name = [h.preferred_firstname, h.lastname].filter(Boolean).join(" ");
+        if (name) hostNameById[h.user_id] = name;
+      }
+    }
     recruiting = {
       coffee_chat,
+      coffee_chat_with: coffeeWithByApplicant(chatRows, hostNameById)[userId] ?? [],
       infosession_attended: (info ?? []).length > 0,
       submitted_application: (apps ?? []).length > 0,
     };

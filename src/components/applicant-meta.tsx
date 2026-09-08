@@ -1,7 +1,7 @@
 "use client";
 
 import { useDraggable } from "@dnd-kit/core";
-import { GripVertical, RotateCcw, X } from "lucide-react";
+import { AlertTriangle, GripVertical, RotateCcw, X } from "lucide-react";
 import { PersonName } from "@/components/person-profile-provider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,16 +16,29 @@ export type AppRow = {
   submitted_at: string | null;
   applicant: Applicant | null;
   coffee: CoffeeState;
+  // Hosts this applicant completed (done) or booked (booked) a coffee chat with.
+  coffeeWith: string[];
   // Applicant was a member before (status active/inactive) vs. a first-timer.
   returning: boolean;
   // This applicant's rank (1-7) for the currently selected project.
   rank: number;
   // Applicant checked in to at least one info session.
   infosession: boolean;
+  // Board/exec, or (coffee done or returning) and attended an info session.
+  valid: boolean;
 };
 
 export function applicantName(a: AppRow): string {
   return [a.applicant?.preferred_firstname, a.applicant?.lastname].filter(Boolean).join(" ") || "Applicant";
+}
+
+// Why an applicant fails recruiting validity — same wording as analytics invalidIssues.
+function invalidReasons(app: AppRow): string[] {
+  const coffeeOk = app.coffee === "done" || app.returning;
+  const issues: string[] = [];
+  if (!coffeeOk) issues.push(app.coffee === "booked" ? "Coffee booked (incomplete)" : "No coffee chat");
+  if (!app.infosession) issues.push("No info session");
+  return issues;
 }
 
 function StatusBadge({ status }: { status: ReviewStatus }) {
@@ -54,7 +67,7 @@ export function ApplicantMeta({ app, periodEndsAt }: { app: AppRow; periodEndsAt
       <StatusBadge status={app.status} />
       <ReturningIndicator returning={app.returning} />
       <LateBadge submittedAt={app.submitted_at} endsAt={periodEndsAt} />
-      <CoffeeChatIndicator state={app.coffee} />
+      <CoffeeChatIndicator state={app.coffee} withNames={app.coffeeWith} />
       <InfosessionIndicator attended={app.infosession} />
     </div>
   );
@@ -81,20 +94,50 @@ export function DraggableApplicantCard({
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: app.id });
   const style = transform ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` } : undefined;
+  const invalid = !app.valid;
+  const reasons = invalid ? invalidReasons(app) : [];
+  const warningLabel = invalid
+    ? `${reasons.length ? reasons.join(". ") : "Missing recruiting requirements"}. Can still be drafted into projects.`
+    : undefined;
   return (
     <div
       ref={setNodeRef}
       style={style}
-      className={`flex items-center gap-2 border rounded-lg px-3 py-2 bg-background ${isDragging ? "relative z-10 opacity-50 shadow-lg" : ""}`}
+      className={`flex items-center gap-2 border rounded-lg px-3 py-2 ${
+        invalid
+          ? "border-red-200 bg-red-50/60 dark:border-red-900/50 dark:bg-red-950/20"
+          : "bg-background"
+      } ${isDragging ? "relative z-10 opacity-50 shadow-lg" : ""}`}
     >
-      <button
-        {...attributes}
-        {...listeners}
-        className="text-muted-foreground/40 hover:text-muted-foreground cursor-grab touch-none shrink-0"
-        aria-label="Drag to move"
-      >
-        <GripVertical size={14} />
-      </button>
+      {/* CSS tooltip (not HoverCard/title): dnd-kit listeners on the same node
+          block Radix hover-open, and native title never fires on drag handles. */}
+      <span className="relative shrink-0 group">
+        <button
+          type="button"
+          {...attributes}
+          {...listeners}
+          className={`cursor-grab touch-none ${
+            invalid
+              ? "text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+              : "text-muted-foreground/40 hover:text-muted-foreground"
+          }`}
+          aria-label={warningLabel ?? "Drag to move"}
+        >
+          {invalid ? <AlertTriangle size={14} /> : <GripVertical size={14} />}
+        </button>
+        {invalid && !isDragging && (
+          <span className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-1.5 hidden w-max max-w-[14rem] -translate-x-1/2 flex-col gap-1 rounded-md bg-foreground px-2.5 py-1.5 text-background shadow-lg group-hover:flex">
+            {reasons.length > 0 ? (
+              <span className="text-[11px] leading-snug font-medium">
+                {reasons.join(" · ")}
+              </span>
+            ) : (
+              <span className="text-[11px] leading-snug font-medium">Missing recruiting requirements</span>
+            )}
+            <span className="text-[11px] leading-snug opacity-80">Can still be drafted into projects.</span>
+          </span>
+        )}
+      </span>
       <ApplicantMeta app={app} periodEndsAt={periodEndsAt} />
       <Button size="sm" variant="outline" className="h-7 px-2.5 text-xs" onClick={onReview}>
         Review

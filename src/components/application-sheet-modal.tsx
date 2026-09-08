@@ -20,6 +20,7 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/overlay-scrollbar";
 import { PersonName } from "@/components/person-profile-provider";
 import { CoffeeChatIndicator, InfosessionIndicator, LateBadge, type CoffeeState } from "@/components/applicant-indicators";
+import { coffeeWithByApplicant } from "@/lib/coffee-chat-indicator";
 import { type FocusSection, type ReviewStatus } from "@/components/application-review-modal";
 import { pct } from "@/components/donut-chart";
 import { rankLabel } from "@/lib/application-rank";
@@ -54,6 +55,8 @@ type SheetRow = {
   gradYear: string;
   returning: boolean;
   coffee: CoffeeState;
+  // Hosts this applicant completed (done) or booked (booked) a coffee chat with.
+  coffeeWith: string[];
   projectCoffee: "met" | "missing" | null; // null = not a studio project
   infosession: boolean;
   // Cleared both recruiting requirements: completed a coffee chat (or exempt as
@@ -314,12 +317,13 @@ async function loadApplicantContext(supabase: ReturnType<typeof createClient>, i
   const coffeeById: Record<string, CoffeeState> = {};
   // applicant -> members they've completed a chat with, for the PM check.
   const completedWith: Record<string, Set<string>> = {};
+  let coffeeWithById: Record<string, string[]> = {};
   const attendedInfo = new Set<string>();
   // Applicants who currently hold a board- or exec-level role; they're
   // auto-valid, regardless of coffee chat / info session.
   const boardExecIds = new Set<string>();
 
-  if (!ids.length) return { memById, coffeeById, completedWith, attendedInfo, boardExecIds };
+  if (!ids.length) return { memById, coffeeById, completedWith, coffeeWithById, attendedInfo, boardExecIds };
 
   const idSet = new Set(ids);
   const [{ data: mem }, { data: chats }, { data: info }, { data: roleRows }] = await Promise.all([
@@ -349,18 +353,33 @@ async function loadApplicantContext(supabase: ReturnType<typeof createClient>, i
     if (r.user_id) boardExecIds.add(r.user_id);
   }
 
-  for (const ch of (chats ?? []) as { applicant_id: string; member_id: string; complete: boolean }[]) {
+  const chatRows = (chats ?? []) as { applicant_id: string; member_id: string; complete: boolean }[];
+  for (const ch of chatRows) {
     if (ch.complete) coffeeById[ch.applicant_id] = "done";
     else if (coffeeById[ch.applicant_id] !== "done") coffeeById[ch.applicant_id] = "booked";
     if (ch.complete) (completedWith[ch.applicant_id] ??= new Set()).add(ch.member_id);
   }
+
+  const hostIds = [...new Set(chatRows.map((ch) => ch.member_id).filter(Boolean))];
+  const hostNameById: Record<string, string> = {};
+  if (hostIds.length) {
+    const { data: hosts } = await supabase
+      .from("members")
+      .select("user_id, preferred_firstname, lastname")
+      .in("user_id", hostIds);
+    for (const h of (hosts ?? []) as { user_id: string; preferred_firstname: string | null; lastname: string | null }[]) {
+      const name = [h.preferred_firstname, h.lastname].filter(Boolean).join(" ");
+      if (name) hostNameById[h.user_id] = name;
+    }
+  }
+  coffeeWithById = coffeeWithByApplicant(chatRows, hostNameById);
 
   for (const r of (info ?? []) as { applicant_id: string | null; member_id: string | null }[]) {
     if (r.applicant_id && idSet.has(r.applicant_id)) attendedInfo.add(r.applicant_id);
     if (r.member_id && idSet.has(r.member_id)) attendedInfo.add(r.member_id);
   }
 
-  return { memById, coffeeById, completedWith, attendedInfo, boardExecIds };
+  return { memById, coffeeById, completedWith, coffeeWithById, attendedInfo, boardExecIds };
 }
 
 // Spreadsheet-style scan of every applicant who ranked one project in the
@@ -596,7 +615,7 @@ export function ApplicationSheetModal({
         for (const p of (pms ?? []) as { user_id: string }[]) projectPms.add(p.user_id);
       }
 
-      const { memById, coffeeById, completedWith, attendedInfo, boardExecIds } = await loadApplicantContext(supabase, ids);
+      const { memById, coffeeById, completedWith, coffeeWithById, attendedInfo, boardExecIds } = await loadApplicantContext(supabase, ids);
 
       const next: SheetRow[] = raw.map((r) => {
         const aid = r.applicant_id ?? "";
@@ -656,6 +675,7 @@ export function ApplicationSheetModal({
           gradYear: (m?.grad_year && String(m.grad_year).trim()) || "—",
           returning,
           coffee,
+          coffeeWith: coffeeWithById[aid] ?? [],
           projectCoffee: project?.type === "studio" ? ((met ? "met" : "missing") as "met" | "missing") : null,
           infosession,
           valid,
@@ -847,13 +867,13 @@ export function ApplicationSheetModal({
     list = [...list].sort((a, b) => {
       const cmp = effectiveSort.dir === "asc" ? base(a, b) : -base(a, b);
       if (cmp !== 0) return cmp;
-      // Within a rank, returning members first and late submissions last —
-      // same order PMs see on the card list. Other column sorts keep name
-      // as the only tiebreaker so an explicit sort stays honest.
+      // Within a rank, returning members first, late below on-time, invalid
+      // below late — same order PMs see on the card list. Other column sorts
+      // keep name as the only tiebreaker so an explicit sort stays honest.
       if (effectiveSort.key === "rank") {
         const pri = compareReviewPriority(
-          { returning: a.returning, submittedAt: a.submittedAt },
-          { returning: b.returning, submittedAt: b.submittedAt },
+          { returning: a.returning, submittedAt: a.submittedAt, valid: a.valid },
+          { returning: b.returning, submittedAt: b.submittedAt, valid: b.valid },
           periodEndsAt,
         );
         if (pri !== 0) return pri;
@@ -1402,7 +1422,7 @@ export function ApplicationSheetModal({
                         {r.coffee === "none" ? (
                           <span className="text-muted-foreground">—</span>
                         ) : (
-                          <CoffeeChatIndicator state={r.coffee} />
+                          <CoffeeChatIndicator state={r.coffee} withNames={r.coffeeWith} />
                         )}
                       </td>
                       {isStudio && (

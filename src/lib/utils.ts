@@ -32,18 +32,23 @@ export function daysLate(submittedAt?: string | null, endsAt?: string | null): n
 export type ReviewPriorityFields = {
   returning: boolean;
   submittedAt?: string | null;
+  // Recruiting-valid (coffee/info, or board/exec). Missing treated as valid so
+  // older call sites keep working; pass false to sink invalid below late.
+  valid?: boolean;
 };
 
-// PM review order within a rank: returning members first, late submissions
-// last. Returning wins over late, so a returning-but-late applicant still
-// ranks above a first-time on-time one. Same-bucket ties keep earliest
-// submitted_at first (the previous default).
+// PM review order within a rank: returning members first, then on-time, then
+// late, then invalid last. Returning wins over late/invalid; late still beats
+// invalid. Same-bucket ties keep earliest submitted_at first.
 export function compareReviewPriority(
   a: ReviewPriorityFields,
   b: ReviewPriorityFields,
   endsAt?: string | null,
 ): number {
   if (a.returning !== b.returning) return a.returning ? -1 : 1;
+  const aValid = a.valid !== false;
+  const bValid = b.valid !== false;
+  if (aValid !== bValid) return aValid ? -1 : 1;
   const aLate = isLate(a.submittedAt, endsAt);
   const bLate = isLate(b.submittedAt, endsAt);
   if (aLate !== bLate) return aLate ? 1 : -1;

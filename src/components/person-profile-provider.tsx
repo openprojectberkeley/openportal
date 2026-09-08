@@ -37,6 +37,7 @@ export type PublicProfile = {
   // Recruiting status, present only when the viewer is an application manager
   // (board/exec/PM); the API omits these for other viewers.
   coffee_chat?: CoffeeState | null;
+  coffee_chat_with?: string[] | null;
   infosession_attended?: boolean | null;
   submitted_application?: boolean | null;
 };
@@ -161,7 +162,7 @@ export function PersonName({ userId, name, preloaded, className }: PersonNamePro
           <div className="flex flex-col gap-1.5 min-w-0">
             <div className="flex items-center gap-1.5 min-w-0">
               <span className="font-semibold text-sm truncate">{name}</span>
-              <CoffeeChatIndicator state={cached?.coffee_chat} />
+              <CoffeeChatIndicator state={cached?.coffee_chat} withNames={cached?.coffee_chat_with} />
               <InfosessionIndicator attended={cached?.infosession_attended} />
               <SubmittedApplicationIndicator submitted={cached?.submitted_application} />
             </div>
