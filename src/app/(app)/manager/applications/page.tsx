@@ -3,7 +3,7 @@
 import { createClient } from "@/lib/supabase/client";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, SlidersHorizontal, RotateCcw, Mail, BarChart3, Table2, UserPlus, GripVertical, X } from "lucide-react";
 import { DndContext, useDraggable, useDroppable, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { useRoleSim } from "@/components/role-simulation-provider";
@@ -73,6 +73,15 @@ function pickDefault(list: ApplicationPeriod[]): string | null {
 
 function applicantName(a: AppRow): string {
   return [a.applicant?.preferred_firstname, a.applicant?.lastname].filter(Boolean).join(" ") || "Applicant";
+}
+
+// A readable ?project= value ("op-launch-website") instead of a raw uuid.
+// Not guaranteed unique (two projects could share a name), but that's a
+// cosmetic-only edge case here -- the first match wins, and the existing
+// reviewableProjects check still keeps a reload from landing on a project
+// this viewer can't actually access.
+function slugify(name: string): string {
+  return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 }
 
 function StatusBadge({ status }: { status: ReviewStatus }) {
@@ -278,16 +287,12 @@ export default function ManagerApplicationsPage() {
   // ones they PM. null = still loading.
   const [reviewableProjects, setReviewableProjects] = useState<ReviewableProject[] | null>(null);
   const [fullAccessReview, setFullAccessReview] = useState(false);
-  // Seeded from the URL (?project=...) so a reload lands back on the same
-  // project instead of falling through to the default below; the effect
-  // that computes the default still validates it once reviewableProjects
-  // loads (falls back if it's not a project this viewer can review).
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(() => {
-    const fromUrl = searchParams.get("project");
-    if (!fromUrl) return null;
-    return fromUrl === "all" ? ALL_PROJECTS : fromUrl;
-  });
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const allSelected = selectedProjectId === ALL_PROJECTS;
+  // The ?project= slug from the URL at first load, resolved against
+  // reviewableProjects once that loads (below), then cleared -- only tried
+  // once, so it doesn't fight the user's own later picks.
+  const initialProjectParam = useRef(searchParams.get("project"));
   // Everyone currently on the selected project (left column). null = loading.
   const [roster, setRoster] = useState<RosterMember[] | null>(null);
   const [allCounts, setAllCounts] = useState<{ applicants: number; projects: number } | null>(null);
@@ -342,22 +347,37 @@ export default function ManagerApplicationsPage() {
       if (!reviewableProjects) return cur;
       if (cur === ALL_PROJECTS) return fullAccessReview ? cur : null;
       if (cur && reviewableProjects.some((p) => p.id === cur)) return cur;
+
+      // First load only: try the ?project= slug from the URL before falling
+      // back to the default, so a reload lands back on the same project.
+      const slug = initialProjectParam.current;
+      initialProjectParam.current = null;
+      if (slug) {
+        if (slug === "all") { if (fullAccessReview) return ALL_PROJECTS; }
+        else {
+          const match = reviewableProjects.find((p) => slugify(p.name) === slug);
+          if (match) return match.id;
+        }
+      }
+
       // Full-access reviewers land on the cross-project view; PMs land on a project.
       if (fullAccessReview) return ALL_PROJECTS;
       return reviewableProjects[0]?.id ?? null;
     });
   }, [reviewableProjects, fullAccessReview]);
 
-  // Keeps ?project= in sync so a reload (or a shared link) lands back on the
-  // same project/"All projects" instead of falling through to the default.
+  // Keeps ?project= (a readable name slug, not the raw id) in sync so a
+  // reload or a shared link lands back on the same project/"All projects".
   useEffect(() => {
     if (!selectedProjectId) return;
-    const param = selectedProjectId === ALL_PROJECTS ? "all" : selectedProjectId;
-    if (searchParams.get("project") === param) return;
+    const param = selectedProjectId === ALL_PROJECTS
+      ? "all"
+      : slugify(reviewableProjects?.find((p) => p.id === selectedProjectId)?.name ?? "");
+    if (!param || searchParams.get("project") === param) return;
     const params = new URLSearchParams(searchParams.toString());
     params.set("project", param);
     router.replace(`${pathname}?${params.toString()}`, { scroll: false });
-  }, [selectedProjectId, pathname, router, searchParams]);
+  }, [selectedProjectId, reviewableProjects, pathname, router, searchParams]);
 
   // Roster of the selected project (left column) — who's already on the team.
   const loadRoster = useCallback(async (projectId: string) => {
