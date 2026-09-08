@@ -4,13 +4,14 @@ import { createClient } from "@/lib/supabase/client";
 import { fetchBusyIntervals, requestFreeBusyToken } from "@/lib/google-calendar";
 import Link from "next/link";
 import Script from "next/script";
-import { useCallback, useEffect, useState } from "react";
+import { cloneElement, useCallback, useEffect, useState } from "react";
 import { CalendarCheck, Check, ChevronLeft, ChevronRight, Lock, MapPin, UserX, X } from "lucide-react";
 import { useRoleSim } from "@/components/role-simulation-provider";
 import { usePersonProfile, initials } from "@/components/person-profile-provider";
 import { ScrollArea } from "@/components/overlay-scrollbar";
 import { SlotCardsSkeleton } from "@/components/skeletons";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
 
@@ -137,7 +138,7 @@ type UpcomingSlot = {
 // Hover tooltip listing every booked sub-slot inside an hour cell.
 function SlotTooltip({ infos, defaultLocation }: { infos: UpcomingSlot[]; defaultLocation: string }) {
   return (
-    <div className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1.5 hidden w-max max-w-[14rem] -translate-x-1/2 flex-col gap-1.5 rounded-md bg-foreground px-2.5 py-1.5 text-background shadow-lg group-hover:flex">
+    <TooltipContent side="top" className="flex max-w-[14rem] flex-col gap-1.5">
       {infos.map((info) => {
         const loc = info.location ?? (defaultLocation.trim() || null);
         return (
@@ -163,7 +164,7 @@ function SlotTooltip({ infos, defaultLocation }: { infos: UpcomingSlot[]; defaul
           </div>
         );
       })}
-    </div>
+    </TooltipContent>
   );
 }
 
@@ -932,26 +933,29 @@ export default function ManagerCoffeeChatsPage() {
                 key={a.user_id}
                 className="flex items-center gap-1 pl-1 pr-1 py-0.5 rounded-full bg-foreground/10 hover:bg-foreground/20 transition-colors"
               >
-                <button
-                  type="button"
-                  onClick={() =>
-                    openProfile({ userId: a.user_id, name: a.name, preloaded: { email: a.email, avatar_url: a.avatarUrl } })
-                  }
-                  title={a.email ?? undefined}
-                  className="group relative flex items-center gap-1.5 text-xs font-medium"
-                >
-                  {a.avatarUrl ? (
-                    <img src={a.avatarUrl} alt={a.name} className="h-5 w-5 rounded-full object-cover flex-shrink-0" />
-                  ) : (
-                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-foreground/15 text-[9px] font-semibold flex-shrink-0">
-                      {initials(a.name)}
-                    </span>
-                  )}
-                  {a.name}
-                  <span className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1.5 hidden w-max max-w-[16rem] -translate-x-1/2 rounded-md bg-foreground px-2.5 py-1.5 text-[11px] text-background shadow-lg group-hover:block">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        openProfile({ userId: a.user_id, name: a.name, preloaded: { email: a.email, avatar_url: a.avatarUrl } })
+                      }
+                      className="flex items-center gap-1.5 text-xs font-medium"
+                    >
+                      {a.avatarUrl ? (
+                        <img src={a.avatarUrl} alt={a.name} className="h-5 w-5 rounded-full object-cover flex-shrink-0" />
+                      ) : (
+                        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-foreground/15 text-[9px] font-semibold flex-shrink-0">
+                          {initials(a.name)}
+                        </span>
+                      )}
+                      {a.name}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="max-w-[16rem]">
                     {a.email ?? "No email on file"}
-                  </span>
-                </button>
+                  </TooltipContent>
+                </Tooltip>
                 <button
                   type="button"
                   onClick={() => toggleComplete(a.id, slot.meeting_time, !a.complete)}
@@ -1267,8 +1271,8 @@ export default function ManagerCoffeeChatsPage() {
                       dragRect.f0 <= hourFineStart + div - 1 && dragRect.f1 >= hourFineStart &&
                       isEditable(date, hour) && !past && !hourLocked;
 
-                    return (
-                      <div key={di} className="relative group">
+                    const cell = (
+                      <div className="relative">
                         <div className={`flex flex-col h-9 overflow-hidden ${past ? "opacity-40 cursor-not-allowed" : ""} ${frame}`}>
                           {Array.from({ length: cellDiv }, (_, si) => {
                             const offset = si * cellDur;
@@ -1328,8 +1332,16 @@ export default function ManagerCoffeeChatsPage() {
                             <MapPin size={7} />
                           </span>
                         )}
-                        {bookedInfos.length > 0 && <SlotTooltip infos={bookedInfos} defaultLocation={defaultLocation} />}
                       </div>
+                    );
+                    if (bookedInfos.length === 0) {
+                      return cloneElement(cell, { key: di });
+                    }
+                    return (
+                      <Tooltip key={di}>
+                        <TooltipTrigger asChild>{cell}</TooltipTrigger>
+                        <SlotTooltip infos={bookedInfos} defaultLocation={defaultLocation} />
+                      </Tooltip>
                     );
                   })}
                 </div>

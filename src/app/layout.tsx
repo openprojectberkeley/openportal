@@ -4,6 +4,7 @@ import { Analytics } from "@vercel/analytics/next";
 import { ThemeProvider } from "next-themes";
 import { RoleSimulationProvider } from "@/components/role-simulation-provider";
 import { PersonProfileProvider } from "@/components/person-profile-provider";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { WindowScrollbar } from "@/components/overlay-scrollbar";
 import "./globals.css";
 
@@ -40,9 +41,13 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          <RoleSimulationProvider>
-            <PersonProfileProvider>{children}</PersonProfileProvider>
-          </RoleSimulationProvider>
+          <TooltipProvider delayDuration={100} skipDelayDuration={300}>
+            <RoleSimulationProvider>
+              <PersonProfileProvider>
+                {children}
+              </PersonProfileProvider>
+            </RoleSimulationProvider>
+          </TooltipProvider>
           <WindowScrollbar />
         </ThemeProvider>
         <Analytics />

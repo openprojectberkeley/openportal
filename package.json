@@ -21,6 +21,7 @@
     "@radix-ui/react-popover": "^1.1.23",
     "@radix-ui/react-slot": "^1.2.2",
     "@radix-ui/react-switch": "^1.3.7",
+    "@radix-ui/react-tooltip": "^1.2.16",
     "@supabase/ssr": "latest",
     "@supabase/supabase-js": "latest",
     "@vercel/analytics": "^2.0.1",

@@ -1,13 +1,14 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { Suspense, useState, useEffect, useCallback } from "react";
+import { Suspense, cloneElement, useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { useRefreshOnReturn } from "@/lib/use-refresh-on-return";
 import { loadCoffeeChatWindowBounds, earliestBookableIso } from "@/lib/coffee-chat-window";
 import { bucketOpenSlots, groupSlotsByDay, keepSelectionIfOpen, type DayGroup } from "@/lib/coffee-chat-slots";
 import { AvailabilitySkeleton } from "@/components/skeletons";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { PersonName } from "@/components/person-profile-provider";
 import { MapPin, Info } from "lucide-react";
 
@@ -265,11 +266,10 @@ function BookingPageInner() {
                   <div className="flex flex-wrap gap-2">
                     {day.slots.map((slot) => {
                       const isSelected = selected === slot.meeting_time;
-                      return (
+                      const slotButton = (
                         <button
-                          key={slot.meeting_time}
                           onClick={() => setSelected(slot.meeting_time)}
-                          className={`group relative flex flex-col items-center px-4 py-2 rounded-md border text-sm font-medium transition-colors ${
+                          className={`flex flex-col items-center px-4 py-2 rounded-md border text-sm font-medium transition-colors ${
                             isSelected
                               ? "bg-foreground text-background border-foreground"
                               : "hover:bg-accent"
@@ -285,17 +285,23 @@ function BookingPageInner() {
                               </>
                             )}
                           </span>
-                          {slot.attendees.length > 0 && (
-                            <span className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1.5 hidden w-max max-w-[14rem] -translate-x-1/2 flex-col gap-0.5 rounded-md bg-foreground px-2.5 py-1.5 text-background shadow-lg group-hover:flex">
-                              <span className="text-[11px] font-semibold">
-                                Booking with {slot.filled} other{slot.filled === 1 ? "" : "s"}
-                              </span>
-                              <span className="text-[11px] leading-snug opacity-90">
-                                {slot.attendees.map((a) => a.name).join(", ")}
-                              </span>
-                            </span>
-                          )}
                         </button>
+                      );
+                      if (slot.attendees.length === 0) {
+                        return cloneElement(slotButton, { key: slot.meeting_time });
+                      }
+                      return (
+                        <Tooltip key={slot.meeting_time}>
+                          <TooltipTrigger asChild>{slotButton}</TooltipTrigger>
+                          <TooltipContent side="top" className="flex max-w-[14rem] flex-col gap-0.5">
+                            <span className="font-semibold">
+                              Booking with {slot.filled} other{slot.filled === 1 ? "" : "s"}
+                            </span>
+                            <span className="opacity-90">
+                              {slot.attendees.map((a) => a.name).join(", ")}
+                            </span>
+                          </TooltipContent>
+                        </Tooltip>
                       );
                     })}
                   </div>

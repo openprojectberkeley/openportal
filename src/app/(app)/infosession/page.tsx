@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 // ── Update these two dates for each recruitment cycle ──────────────────────
 const SESSIONS = [
   { date: new Date("2026-08-31T20:00:00-07:00"), label: "Monday, August 31, 2026 · 8:00 – 9:30 PM PT · GPBB 100", location: "GPBB 100" },
@@ -113,17 +114,20 @@ export default function InfosessionPage() {
             Submit Attendance
           </button>
         ) : (
-          <div className="group relative w-full">
-            <button
-              disabled
-              className="w-full rounded-md bg-foreground text-background px-4 py-2.5 text-sm font-medium opacity-30 cursor-not-allowed"
-            >
-              Submit Attendance
-            </button>
-            <div className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 whitespace-nowrap rounded-md bg-foreground text-background text-xs px-3 py-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-              Available at infosession time
-            </div>
-          </div>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              {/* Wrapper div is the trigger: the disabled button emits no pointer events. */}
+              <div className="w-full">
+                <button
+                  disabled
+                  className="w-full rounded-md bg-foreground text-background px-4 py-2.5 text-sm font-medium opacity-30 cursor-not-allowed"
+                >
+                  Submit Attendance
+                </button>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="top">Available at infosession time</TooltipContent>
+          </Tooltip>
         )}
       </div>
     </div>

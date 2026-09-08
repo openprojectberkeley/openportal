@@ -6,10 +6,10 @@ import { createClient } from "@/lib/supabase/client";
 import { useRoleSim } from "@/components/role-simulation-provider";
 import { Button } from "@/components/ui/button";
 import {
-  HoverCard,
-  HoverCardContent,
-  HoverCardTrigger,
-} from "@/components/ui/hover-card";
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 type SendState = "idle" | "sending" | "sent" | "error";
@@ -114,8 +114,8 @@ export function SupportButton() {
         </div>
       )}
 
-      <HoverCard openDelay={200} closeDelay={100}>
-        <HoverCardTrigger asChild>
+      <Tooltip>
+        <TooltipTrigger asChild>
           <Button
             type="button"
             size="icon"
@@ -125,11 +125,11 @@ export function SupportButton() {
           >
             <CircleHelp className="size-5" />
           </Button>
-        </HoverCardTrigger>
-        <HoverCardContent side="left" align="end" className="w-auto py-2 text-sm">
+        </TooltipTrigger>
+        <TooltipContent side="left" align="end">
           Stuck? Contact Tech for support
-        </HoverCardContent>
-      </HoverCard>
+        </TooltipContent>
+      </Tooltip>
     </>
   );
 }

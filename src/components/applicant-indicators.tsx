@@ -2,7 +2,7 @@
 
 import { Coffee, Check, Clock, Presentation, FileCheck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn, isLate, daysLate } from "@/lib/utils";
 import { coffeeChatLabel, type CoffeeState } from "@/lib/coffee-chat-indicator";
 
@@ -23,8 +23,8 @@ export function CoffeeChatIndicator({
   const done = state === "done";
   const label = coffeeChatLabel(state, withNames);
   return (
-    <HoverCard openDelay={100} closeDelay={50}>
-      <HoverCardTrigger asChild>
+    <Tooltip>
+      <TooltipTrigger asChild>
         <span
           aria-label={label}
           className={`inline-flex items-center gap-0.5 ${done ? "text-green-600" : "text-amber-600"}`}
@@ -32,14 +32,11 @@ export function CoffeeChatIndicator({
           <Coffee size={14} />
           {done ? <Check size={12} className="stroke-[3]" /> : <Clock size={12} />}
         </span>
-      </HoverCardTrigger>
-      <HoverCardContent
-        side="top"
-        className="w-auto max-w-[16rem] px-2.5 py-1.5 text-xs leading-snug"
-      >
+      </TooltipTrigger>
+      <TooltipContent side="top" className="max-w-[16rem]">
         {label}
-      </HoverCardContent>
-    </HoverCard>
+      </TooltipContent>
+    </Tooltip>
   );
 }
 

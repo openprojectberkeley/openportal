@@ -1,7 +1,9 @@
 "use client";
 
 import { useDraggable } from "@dnd-kit/core";
-import { AlertTriangle, GripVertical, RotateCcw, X } from "lucide-react";
+import { useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { AlertTriangle, RotateCcw, Star, UserPlus, X } from "lucide-react";
 import { PersonName } from "@/components/person-profile-provider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -59,7 +61,7 @@ function ReturningIndicator({ returning }: { returning: boolean }) {
 }
 
 // Name + status/indicator badges shared by every applicant-card variant
-// (Left to review, Wishlist, Draft window).
+// (Applicants, Wishlist, Draft window).
 export function ApplicantMeta({ app, periodEndsAt }: { app: AppRow; periodEndsAt: string | undefined }) {
   return (
     <div className="flex min-w-0 flex-1 items-center gap-1.5">
@@ -73,73 +75,95 @@ export function ApplicantMeta({ app, periodEndsAt }: { app: AppRow; periodEndsAt
   );
 }
 
-// A draggable applicant card: drag handle + full meta + Review action, plus
-// an optional Remove (×). This is the one card used for every list an
-// applicant can appear in before they're confirmed -- "Left to review",
-// Wishlist, and the draft window -- so the same info (status/late/returning/
-// coffee/infosession badges + the Review button) stays visible and
-// draggable the whole way through. It only goes away once an applicant is
-// actually confirmed (drafted), which renders a plain name + round badge
-// instead (see DraftWindowPanel's Confirmed section).
-export function DraggableApplicantCard({
-  app,
-  periodEndsAt,
-  onReview,
-  onRemove,
-}: {
+// Actions an applicant card can carry, independent of how (or whether) the card
+// is draggable. The wishlist toggle + "on the wishlist" badge only show on the
+// Applicants list; onAddToDraft only when a draft is active; onRemove only on
+// the wishlist / draft-window cards.
+export type ApplicantCardActions = {
   app: AppRow;
   periodEndsAt: string | undefined;
   onReview: () => void;
+  // Applicants-list toggle: add to / remove from this project's wishlist.
+  isWishlisted?: boolean;
+  onWishlistToggle?: () => void;
+  // Stage into the draft window (button peer of dragging one in). Disabled
+  // once the applicant is already staged / confirmed.
+  onAddToDraft?: () => void;
+  addToDraftDisabled?: boolean;
+  // Remove from the list this card lives in (wishlist / draft window).
   onRemove?: () => void;
-}) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: app.id });
-  const style = transform ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` } : undefined;
+};
+
+// Small helper so a button living on a draggable card doesn't start a drag.
+const stopDrag = {
+  onPointerDown: (e: React.PointerEvent) => e.stopPropagation(),
+};
+
+// The visible contents of an applicant card: meta + action buttons. Rendered
+// inside every wrapper (sortable / draggable / static) so all variants look
+// identical and the buttons behave the same.
+function ApplicantCardInner({
+  app,
+  periodEndsAt,
+  onReview,
+  isWishlisted,
+  onWishlistToggle,
+  onAddToDraft,
+  addToDraftDisabled,
+  onRemove,
+}: ApplicantCardActions) {
   const invalid = !app.valid;
   const reasons = invalid ? invalidReasons(app) : [];
-  const warningLabel = invalid
-    ? `${reasons.length ? reasons.join(". ") : "Missing recruiting requirements"}. Can still be drafted into projects.`
-    : undefined;
   return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      className={`flex items-center gap-2 border rounded-lg px-3 py-2 ${
-        invalid
-          ? "border-red-200 bg-red-50/60 dark:border-red-900/50 dark:bg-red-950/20"
-          : "bg-background"
-      } ${isDragging ? "relative z-10 opacity-50 shadow-lg" : ""}`}
-    >
-      {/* CSS tooltip (not HoverCard/title): dnd-kit listeners on the same node
-          block Radix hover-open, and native title never fires on drag handles. */}
-      <span className="relative shrink-0 group">
-        <button
-          type="button"
-          {...attributes}
-          {...listeners}
-          className={`cursor-grab touch-none ${
-            invalid
-              ? "text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
-              : "text-muted-foreground/40 hover:text-muted-foreground"
-          }`}
-          aria-label={warningLabel ?? "Drag to move"}
-        >
-          {invalid ? <AlertTriangle size={14} /> : <GripVertical size={14} />}
-        </button>
-        {invalid && !isDragging && (
-          <span className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-1.5 hidden w-max max-w-[14rem] -translate-x-1/2 flex-col gap-1 rounded-md bg-foreground px-2.5 py-1.5 text-background shadow-lg group-hover:flex">
-            {reasons.length > 0 ? (
-              <span className="text-[11px] leading-snug font-medium">
-                {reasons.join(" · ")}
-              </span>
-            ) : (
-              <span className="text-[11px] leading-snug font-medium">Missing recruiting requirements</span>
-            )}
-            <span className="text-[11px] leading-snug opacity-80">Can still be drafted into projects.</span>
+    <>
+      {invalid && (
+        // CSS fallback for the shared <Tooltip> primitive (components/ui/tooltip):
+        // dnd-kit listeners on the card block Radix hover-open, and native title
+        // never fires while a drag is armed. Styling is kept in sync with TooltipContent.
+        <span className="relative shrink-0 group/warn text-red-600 dark:text-red-400" aria-label="Missing recruiting requirements. Can still be drafted into projects.">
+          <AlertTriangle size={14} />
+          <span className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-1.5 hidden w-max max-w-xs -translate-x-1/2 flex-col gap-1 rounded-md bg-foreground px-2.5 py-1.5 text-xs leading-snug text-background shadow-lg group-hover/warn:flex">
+            <span className="font-medium">
+              {reasons.length > 0 ? reasons.join(" · ") : "Missing recruiting requirements"}
+            </span>
+            <span className="opacity-80">Can still be drafted into projects.</span>
           </span>
-        )}
-      </span>
+        </span>
+      )}
       <ApplicantMeta app={app} periodEndsAt={periodEndsAt} />
-      <Button size="sm" variant="outline" className="h-7 px-2.5 text-xs" onClick={onReview}>
+      {onAddToDraft && (
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 px-2 text-xs shrink-0"
+          onClick={(e) => { e.stopPropagation(); onAddToDraft(); }}
+          disabled={addToDraftDisabled}
+          title="Add to draft window"
+          {...stopDrag}
+        >
+          <UserPlus size={14} />
+        </Button>
+      )}
+      {onWishlistToggle && (
+        <Button
+          size="sm"
+          variant={isWishlisted ? "secondary" : "outline"}
+          className="h-7 px-2 text-xs shrink-0"
+          onClick={(e) => { e.stopPropagation(); onWishlistToggle(); }}
+          title={isWishlisted ? "Remove from wishlist" : "Add to wishlist"}
+          aria-label={isWishlisted ? "Remove from wishlist" : "Add to wishlist"}
+          {...stopDrag}
+        >
+          <Star size={14} className={isWishlisted ? "fill-amber-500 text-amber-500" : ""} />
+        </Button>
+      )}
+      <Button
+        size="sm"
+        variant="outline"
+        className="h-7 px-2.5 text-xs shrink-0"
+        onClick={(e) => { e.stopPropagation(); onReview(); }}
+        {...stopDrag}
+      >
         Review
       </Button>
       {onRemove && (
@@ -147,12 +171,76 @@ export function DraggableApplicantCard({
           variant="ghost"
           size="sm"
           className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive shrink-0"
-          onClick={onRemove}
+          onClick={(e) => { e.stopPropagation(); onRemove(); }}
           aria-label="Remove"
+          {...stopDrag}
         >
           <X size={14} />
         </Button>
       )}
+    </>
+  );
+}
+
+function cardClassName(app: AppRow, opts?: { grab?: boolean; dragClass?: string }): string {
+  const invalid = !app.valid;
+  return [
+    "flex items-center gap-2 border rounded-lg px-3 py-2 select-none",
+    invalid
+      ? "border-red-200 bg-red-50/60 dark:border-red-900/50 dark:bg-red-950/20"
+      : "bg-background",
+    opts?.grab ? "cursor-grab active:cursor-grabbing touch-none" : "",
+    opts?.dragClass ?? "",
+  ].join(" ");
+}
+
+// Sortable card for the reorderable Wishlist. The whole card is the drag
+// handle; buttons stop propagation so they don't start a drag.
+export function SortableApplicantCard({ dndId, ...actions }: ApplicantCardActions & { dndId: string }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: dndId });
+  // Hidden in place while dragging (the DragOverlay shows the moving copy and
+  // the list reflows to open a gap), matching the ranking page.
+  const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0 : 1 } as React.CSSProperties;
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+      className={cardClassName(actions.app, { grab: true })}
+    >
+      <ApplicantCardInner {...actions} />
+    </div>
+  );
+}
+
+// Plain draggable card for the immutable "Applicants" list: it's a copy
+// source (dragging it into the wishlist / draft window leaves the original in
+// place), so it uses useDraggable rather than useSortable — no sibling reflow,
+// the list never reorders. The source stays visible (dimmed) while dragging
+// since nothing actually leaves this list.
+export function DraggableApplicantCard({ dndId, ...actions }: ApplicantCardActions & { dndId: string }) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: dndId });
+  // No transform on the source: the DragOverlay renders the moving copy, so the
+  // original stays put (just dimmed). Applying the pointer transform here would
+  // move the card off to the side and widen the page (horizontal scroll).
+  return (
+    <div
+      ref={setNodeRef}
+      {...attributes}
+      {...listeners}
+      className={cardClassName(actions.app, { grab: true, dragClass: isDragging ? "opacity-40" : "" })}
+    >
+      <ApplicantCardInner {...actions} />
+    </div>
+  );
+}
+
+// Non-draggable card: draft-window staged picks, and the DragOverlay preview.
+export function StaticApplicantCard(actions: ApplicantCardActions) {
+  return (
+    <div className={cardClassName(actions.app)}>
+      <ApplicantCardInner {...actions} />
     </div>
   );
 }

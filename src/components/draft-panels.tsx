@@ -4,22 +4,23 @@ import { useState } from "react";
 import { useDroppable } from "@dnd-kit/core";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { DraggableApplicantCard, applicantName, type AppRow } from "@/components/applicant-meta";
+import { StaticApplicantCard, applicantName, type AppRow } from "@/components/applicant-meta";
 import type { PickRow } from "@/lib/use-draft-picks";
 
-// Drop target id for the draft-window zone -- a peer of the wishlist and
-// "Left to review" drop zones on applications/page.tsx (same DndContext).
-// An applicant card can be dragged in from either, and dragged back out to
-// either, directly -- staging isn't gated behind the wishlist.
+// Drop target id for the draft-window zone -- a peer drop target of the
+// wishlist on applications/page.tsx (same DndContext). An applicant card can
+// be dragged in from the Applicants list or the wishlist (a copy -- the source
+// keeps its card), or staged via the card's "add to draft window" button.
 export const DRAFT_WINDOW_DROPZONE_ID = "draft-window-dropzone";
 
 // Shown on the Applications manager page, only once a draft is active for
 // the selected period. Draft window is a capped staging area for the
-// project's upcoming round -- drag an applicant card in from anywhere
-// (Wishlist or "Left to review"), drag one back out the same way. Staged
-// picks keep the full applicant card (Review button, status/late/returning/
-// coffee/infosession badges) the whole time; that only goes away once a
-// pick is actually confirmed, shown below as a plain name + round badge.
+// project's upcoming round -- drag an applicant card in from the Applicants
+// list or the wishlist (or use the card button). A staged pick is removed
+// here via its own remove button. Staged picks keep the full applicant card
+// (Review button, status/late/returning/coffee/infosession badges) the whole
+// time; that only goes away once a pick is actually confirmed, shown below as
+// a plain name + round badge.
 export function DraftWindowPanel({
   appById,
   periodEndsAt,
@@ -39,9 +40,9 @@ export function DraftWindowPanel({
   draftWindowPicks: PickRow[];
   confirmedPicks: (PickRow & { round: { round_number: number } })[];
   onSubmit: () => Promise<boolean>;
-  // Un-stages a pick, sending the applicant back to "Left to review" (same
-  // gesture as the wishlist's remove button, minus the drag). Also used for
-  // an orphaned pick -- one whose applicant isn't in the current review
+  // Un-stages a pick from the draft window (the applicant stays in the
+  // Applicants list regardless). Also used for an orphaned pick -- one whose
+  // applicant isn't in the current review
   // list anymore (e.g. they unranked this project, or their status
   // changed) -- which still counts against pick_count on the server, so it
   // must stay visible and removable rather than silently vanishing while
@@ -138,7 +139,7 @@ export function DraftWindowPanel({
                 );
               }
               return (
-                <DraggableApplicantCard
+                <StaticApplicantCard
                   key={p.id}
                   app={app}
                   periodEndsAt={periodEndsAt}

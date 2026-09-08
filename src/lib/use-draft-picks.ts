@@ -66,8 +66,8 @@ export function useDraftPicks(projectId: string | null, periodId: string | null)
     .sort((a, b) => a.round.round_number - b.round.round_number);
 
   // Stages an applicant into the current upcoming round's draft window.
-  // Independent of the wishlist -- an applicant can be dragged in directly
-  // from "Left to review" too, not just from the wishlist.
+  // Independent of the wishlist -- an applicant can be staged straight from
+  // the Applicants list too, not just from the wishlist.
   const addToDraftWindow = useCallback(async (applicationId: string) => {
     if (!nextRound) return false;
     const supabase = createClient();
