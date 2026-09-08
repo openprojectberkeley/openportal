@@ -3,8 +3,11 @@
 import { createClient } from "@/lib/supabase/client";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { ChevronDown, SlidersHorizontal, RotateCcw, Mail, BarChart3, Table2, UserPlus } from "lucide-react";
+import { ChevronDown, SlidersHorizontal, RotateCcw, Mail, BarChart3, Table2, UserPlus, GripVertical, X, ArrowRight } from "lucide-react";
+import { DndContext, useDraggable, useDroppable, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { useRoleSim } from "@/components/role-simulation-provider";
+import { useDraftPicks, type PickRow } from "@/lib/use-draft-picks";
+import { DraftWindowPanel } from "@/components/draft-panels";
 import { PersonName } from "@/components/person-profile-provider";
 import { canReviewAllProjects } from "@/lib/roles";
 import {
@@ -30,7 +33,6 @@ import { ApplicationSheetModal } from "@/components/application-sheet-modal";
 import { ProjectAnalyticsModal } from "@/components/project-analytics-modal";
 import { rankLabel } from "@/lib/application-rank";
 import { CoffeeChatIndicator, InfosessionIndicator, LateBadge, type CoffeeState } from "@/components/applicant-indicators";
-import { DraftPanels } from "@/components/draft-panels";
 
 type Applicant = { user_id: string; preferred_firstname: string | null; lastname: string | null };
 
@@ -89,6 +91,148 @@ function ReturningIndicator({ returning }: { returning: boolean }) {
   );
 }
 
+// Drop target id for the wishlist zone on the left, under the roster.
+const WISHLIST_DROPZONE_ID = "wishlist-dropzone";
+
+// Name + status/indicator badges shared by the "left to review" row and the
+// wishlist card — only the surrounding controls (drag handle vs. remove
+// button) differ between the two.
+function ApplicantMeta({ app, periodEndsAt }: { app: AppRow; periodEndsAt: string | undefined }) {
+  return (
+    <div className="flex min-w-0 flex-1 items-center gap-1.5">
+      <PersonName userId={app.applicant?.user_id} name={applicantName(app)} className="text-sm font-medium truncate" />
+      <StatusBadge status={app.status} />
+      <LateBadge submittedAt={app.submitted_at} endsAt={periodEndsAt} />
+      <ReturningIndicator returning={app.returning} />
+      <CoffeeChatIndicator state={app.coffee} />
+      <InfosessionIndicator attended={app.infosession} />
+    </div>
+  );
+}
+
+// One applicant in the "left to review" queue — draggable into the wishlist.
+// Applicants already on the wishlist are excluded from this list entirely
+// (they live on the left instead, so they're never shown/reviewable twice).
+function ApplicantRow({
+  app,
+  periodEndsAt,
+  onReview,
+}: {
+  app: AppRow;
+  periodEndsAt: string | undefined;
+  onReview: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: app.id });
+  const style = transform ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` } : undefined;
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={`flex items-center gap-2 border rounded-lg px-3 py-2 bg-background ${isDragging ? "relative z-10 opacity-50 shadow-lg" : ""}`}
+    >
+      <button
+        {...attributes}
+        {...listeners}
+        className="text-muted-foreground/40 hover:text-muted-foreground cursor-grab touch-none shrink-0"
+        aria-label="Drag to wishlist"
+      >
+        <GripVertical size={14} />
+      </button>
+      <ApplicantMeta app={app} periodEndsAt={periodEndsAt} />
+      <Button size="sm" variant="outline" className="h-7 px-2.5 text-xs" onClick={onReview}>
+        Review
+      </Button>
+    </div>
+  );
+}
+
+// A shortlisted applicant, shown only on the left — carries the Review
+// action itself (rather than duplicating it on the right) plus a remove (×)
+// to send them back to "Left to review". When a draft is active and this
+// project has room in its upcoming round, also offers moving straight into
+// the draft window below.
+function WishlistCard({
+  app,
+  periodEndsAt,
+  onReview,
+  onRemove,
+  onMoveToDraft,
+}: {
+  app: AppRow;
+  periodEndsAt: string | undefined;
+  onReview: () => void;
+  onRemove: () => void;
+  onMoveToDraft?: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-2 border rounded-lg px-3 py-2 bg-background">
+      <ApplicantMeta app={app} periodEndsAt={periodEndsAt} />
+      <Button size="sm" variant="outline" className="h-7 px-2.5 text-xs" onClick={onReview}>
+        Review
+      </Button>
+      {onMoveToDraft && (
+        <button
+          onClick={onMoveToDraft}
+          className="text-muted-foreground/50 hover:text-foreground shrink-0"
+          aria-label="Move to draft window"
+          title="Move to draft window"
+        >
+          <ArrowRight size={15} />
+        </button>
+      )}
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive shrink-0"
+        onClick={onRemove}
+        aria-label="Remove from wishlist"
+      >
+        <X size={14} />
+      </Button>
+    </div>
+  );
+}
+
+// Drop zone under the roster — dragging an applicant card here shortlists them.
+function WishlistDropzone({
+  apps,
+  periodEndsAt,
+  onReview,
+  onRemove,
+  onMoveToDraft,
+}: {
+  apps: AppRow[];
+  periodEndsAt: string | undefined;
+  onReview: (app: AppRow) => void;
+  onRemove: (id: string) => void;
+  onMoveToDraft?: (id: string) => void;
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id: WISHLIST_DROPZONE_ID });
+  return (
+    <div
+      ref={setNodeRef}
+      className={`flex flex-col gap-2 rounded-xl border-2 border-dashed p-3 min-h-[76px] transition-colors ${
+        isOver ? "border-primary bg-primary/5" : "border-muted-foreground/25"
+      }`}
+    >
+      {apps.length === 0 ? (
+        <p className="text-xs text-muted-foreground text-center py-4">Drag applicants here to shortlist them.</p>
+      ) : (
+        apps.map((a) => (
+          <WishlistCard
+            key={a.id}
+            app={a}
+            periodEndsAt={periodEndsAt}
+            onReview={() => onReview(a)}
+            onRemove={() => onRemove(a.id)}
+            onMoveToDraft={onMoveToDraft ? () => onMoveToDraft(a.id) : undefined}
+          />
+        ))
+      )}
+    </div>
+  );
+}
+
 function PeriodStatusText({ period }: { period: ApplicationPeriod }) {
   const label = isOpenNow(period)
     ? "Open now"
@@ -133,12 +277,19 @@ export default function ManagerApplicationsPage() {
   // Everyone currently on the selected project (left column). null = loading.
   const [roster, setRoster] = useState<RosterMember[] | null>(null);
   const [allCounts, setAllCounts] = useState<{ applicants: number; projects: number } | null>(null);
+  // Application ids the current project's reviewers have shortlisted. null = loading.
+  const [wishlistIds, setWishlistIds] = useState<Set<string> | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+
+  const dndSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
   useEffect(() => {
+    setReviewableProjects(null);
     (async () => {
       const supabase = createClient();
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { setReviewableProjects([]); return; }
+      setCurrentUserId(user.id);
 
       const { data: roleRows } = await supabase
         .from("members_roles")
@@ -146,7 +297,12 @@ export default function ManagerApplicationsPage() {
         .eq("user_id", user.id);
       const roles = ((roleRows ?? []) as unknown as { roles: { role_name: string | null } | null }[])
         .flatMap((r) => (r.roles ? [r.roles] : []));
-      const fullAccess = canReviewAllProjects(roles);
+      // Real full-access role (VP Tech/President/VP Projects) — but "View as"
+      // (canSimulate is real VP Tech/President) lets that reviewer preview a
+      // lower persona, and the preview should behave like the real thing:
+      // simulating PM/Member drops the org-wide scope down to whatever
+      // projects they personally PM, same as an actual PM would see.
+      const fullAccess = canReviewAllProjects(roles) && (!canSimulate || persona === "exec");
       setFullAccessReview(fullAccess);
 
       if (fullAccess) {
@@ -164,7 +320,7 @@ export default function ManagerApplicationsPage() {
         setReviewableProjects(list);
       }
     })();
-  }, []);
+  }, [canSimulate, persona]);
 
   useEffect(() => {
     setSelectedProjectId((cur) => {
@@ -199,6 +355,45 @@ export default function ManagerApplicationsPage() {
     setRoster(null);
     loadRoster(selectedProjectId);
   }, [selectedProjectId, loadRoster]);
+
+  // Wishlist for the selected project (left column, under the roster).
+  const loadWishlist = useCallback(async (projectId: string) => {
+    const supabase = createClient();
+    const { data } = await supabase.from("application_wishlist").select("application_id").eq("project_id", projectId);
+    setWishlistIds(new Set((data ?? []).map((r: { application_id: string }) => r.application_id)));
+  }, []);
+
+  useEffect(() => {
+    if (!selectedProjectId || selectedProjectId === ALL_PROJECTS) { setWishlistIds(null); return; }
+    setWishlistIds(null);
+    loadWishlist(selectedProjectId);
+  }, [selectedProjectId, loadWishlist]);
+
+  const addToWishlist = useCallback(async (applicationId: string) => {
+    if (!selectedProjectId || selectedProjectId === ALL_PROJECTS) return;
+    setWishlistIds((prev) => new Set(prev).add(applicationId));
+    const supabase = createClient();
+    await supabase.from("application_wishlist").upsert(
+      { application_id: applicationId, project_id: selectedProjectId, created_by: currentUserId },
+      { onConflict: "application_id,project_id", ignoreDuplicates: true },
+    );
+  }, [selectedProjectId, currentUserId]);
+
+  const removeFromWishlist = useCallback(async (applicationId: string) => {
+    if (!selectedProjectId || selectedProjectId === ALL_PROJECTS) return;
+    setWishlistIds((prev) => {
+      if (!prev) return prev;
+      const next = new Set(prev);
+      next.delete(applicationId);
+      return next;
+    });
+    const supabase = createClient();
+    await supabase.from("application_wishlist").delete().eq("application_id", applicationId).eq("project_id", selectedProjectId);
+  }, [selectedProjectId]);
+
+  const onDragEnd = useCallback((event: DragEndEvent) => {
+    if (event.over?.id === WISHLIST_DROPZONE_ID) addToWishlist(String(event.active.id));
+  }, [addToWishlist]);
 
   // Headline numbers for the cross-project view, which has no per-project list.
   useEffect(() => {
@@ -323,14 +518,46 @@ export default function ManagerApplicationsPage() {
   const selectedPeriod = periods?.find((p) => p.id === selectedPeriodId) ?? null;
   const selectedProject = reviewableProjects?.find((p) => p.id === selectedProjectId) ?? null;
 
+  const wishlistApps = apps && wishlistIds ? apps.filter((a) => wishlistIds.has(a.id)) : [];
+
+  // Draft-round state for the selected project (Confirmed/Draft window,
+  // shown below the Wishlist once a draft is active). Wishlisting itself
+  // stays owned above (application_wishlist) -- this only tracks staging an
+  // already-wishlisted applicant into the current round and submitting.
+  const draftPicks = useDraftPicks(!allSelected ? selectedProjectId : null, selectedPeriodId);
+  const nameById = new Map((apps ?? []).map((a) => [a.id, applicantName(a)]));
+
+  const handleMoveToDraftWindow = async (applicationId: string) => {
+    const ok = await draftPicks.moveToDraftWindow(applicationId);
+    if (ok) removeFromWishlist(applicationId);
+  };
+
+  const handleMoveBackToWishlist = async (pick: PickRow) => {
+    const ok = await draftPicks.moveBackToWishlist(pick);
+    if (ok) addToWishlist(pick.application_id);
+  };
+
+  const handleSubmitDraftPicks = async () => {
+    const ok = await draftPicks.submit();
+    if (ok && selectedProjectId && !allSelected) {
+      loadRoster(selectedProjectId);
+      setAppsReloadToken((n) => n + 1);
+    }
+    return ok;
+  };
+
   // Group applicants into rank sections (1st choice, 2nd choice, …) for the
-  // currently selected project, most-preferred first.
+  // currently selected project, most-preferred first. Wishlisted applicants
+  // are excluded — they're shown (and reviewed) on the left instead, never
+  // both places at once.
   const groupedApps = apps
     ? Object.entries(
-        apps.reduce<Record<number, AppRow[]>>((acc, a) => {
-          (acc[a.rank] ??= []).push(a);
-          return acc;
-        }, {}),
+        apps
+          .filter((a) => !wishlistIds?.has(a.id))
+          .reduce<Record<number, AppRow[]>>((acc, a) => {
+            (acc[a.rank] ??= []).push(a);
+            return acc;
+          }, {}),
       )
         .map(([rank, list]) => [Number(rank), list] as [number, AppRow[]])
         .sort((x, y) => x[0] - y[0])
@@ -505,97 +732,106 @@ export default function ManagerApplicationsPage() {
           </div>
         </div>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-          {/* Left: who's already on the team */}
-          <div className="flex flex-col gap-2.5">
-            <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              On the team{roster ? ` (${roster.length})` : ""}
-            </h2>
-            {roster === null ? (
-              <ApplicationListSkeleton rows={3} />
-            ) : roster.length === 0 ? (
-              <div className="px-4 py-10 text-center text-sm text-muted-foreground border rounded-xl">
-                No one on this project yet.
-              </div>
-            ) : (
+        <DndContext sensors={dndSensors} onDragEnd={onDragEnd}>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+            {/* Left: who's already on the team, plus a shortlist you can drag
+                applicants from the right into */}
+            <div className="flex flex-col gap-6">
               <div className="flex flex-col gap-2.5">
-                {roster.map((m) => (
-                  <div key={m.user_id} className="flex items-center gap-2 border rounded-xl px-4 py-3">
-                    <PersonName userId={m.user_id} name={m.name} className="text-sm font-medium" />
-                    {m.isPm && <Badge variant="outline">PM</Badge>}
+                <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  On the team{roster ? ` (${roster.length})` : ""}
+                </h2>
+                {roster === null ? (
+                  <ApplicationListSkeleton rows={3} />
+                ) : roster.length === 0 ? (
+                  <div className="px-4 py-10 text-center text-sm text-muted-foreground border rounded-xl">
+                    No one on this project yet.
                   </div>
-                ))}
+                ) : (
+                  <div className="flex flex-col gap-2.5">
+                    {roster.map((m) => (
+                      <div key={m.user_id} className="flex items-center gap-2 border rounded-xl px-4 py-3">
+                        <PersonName userId={m.user_id} name={m.name} className="text-sm font-medium" />
+                        {m.isPm && <Badge variant="outline">PM</Badge>}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
-            )}
 
-            {selectedPeriodId && selectedProjectId && (
-              <DraftPanels
-                projectId={selectedProjectId}
-                periodId={selectedPeriodId}
-                applicants={(apps ?? []).map((a) => ({ applicationId: a.id, name: applicantName(a), status: a.status }))}
-                onDrafted={() => {
-                  setAppsReloadToken((n) => n + 1);
-                  loadRoster(selectedProjectId);
-                }}
-              />
-            )}
-          </div>
+              <div className="flex flex-col gap-2.5">
+                <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Wishlist{wishlistIds ? ` (${wishlistApps.length})` : ""}
+                </h2>
+                <WishlistDropzone
+                  apps={wishlistApps}
+                  periodEndsAt={selectedPeriod?.ends_at}
+                  onReview={(a) => setReviewFor({ id: a.id, name: applicantName(a), status: a.status })}
+                  onRemove={removeFromWishlist}
+                  onMoveToDraft={draftPicks.canAddToDraftWindow ? handleMoveToDraftWindow : undefined}
+                />
+              </div>
 
-          {/* Right: applicants left to pick from */}
-          <div className="flex flex-col gap-2.5">
-            <div className="flex items-center justify-between gap-2">
-              <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Left to review
-              </h2>
-              {selectedPeriodId && selectedProjectId && (
-                <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs" onClick={() => setSheetOpen(true)}>
-                  <Table2 size={13} className="mr-1.5" />
-                  Sheet view
-                </Button>
+              {draftPicks.error && <p className="text-sm text-red-500">{draftPicks.error}</p>}
+
+              {draftPicks.draftStarted && (
+                <DraftWindowPanel
+                  nameById={nameById}
+                  nextRound={draftPicks.nextRound}
+                  isMyTurn={draftPicks.isMyTurn}
+                  draftWindowPicks={draftPicks.draftWindowPicks}
+                  confirmedPicks={draftPicks.confirmedPicks}
+                  onMoveBackToWishlist={handleMoveBackToWishlist}
+                  onSubmit={handleSubmitDraftPicks}
+                />
               )}
             </div>
-            {apps === null ? (
-              <ApplicationListSkeleton rows={4} />
-            ) : apps.length === 0 ? (
-              <div className="px-4 py-10 text-center text-sm text-muted-foreground border rounded-xl">
-                No submitted applications for this project yet.
+
+            {/* Right: applicants left to pick from */}
+            <div className="flex flex-col gap-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Left to review
+                </h2>
+                {selectedPeriodId && selectedProjectId && (
+                  <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs" onClick={() => setSheetOpen(true)}>
+                    <Table2 size={13} className="mr-1.5" />
+                    Sheet view
+                  </Button>
+                )}
               </div>
-            ) : (
-              <div className="flex flex-col gap-3">
-                {groupedApps.map(([rank, list]) => (
-                  <div key={rank} className="flex flex-col gap-1.5">
-                    <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      {rankLabel(rank)} ({list.length})
-                    </h3>
-                    {list.map((a) => {
-                      const name = applicantName(a);
-                      return (
-                        <div key={a.id} className="flex items-center gap-2 border rounded-lg px-3 py-2">
-                          <div className="flex min-w-0 flex-1 items-center gap-1.5">
-                            <PersonName userId={a.applicant?.user_id} name={name} className="text-sm font-medium truncate" />
-                            <StatusBadge status={a.status} />
-                            <LateBadge submittedAt={a.submitted_at} endsAt={selectedPeriod?.ends_at} />
-                            <ReturningIndicator returning={a.returning} />
-                            <CoffeeChatIndicator state={a.coffee} />
-                            <InfosessionIndicator attended={a.infosession} />
-                          </div>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-7 px-2.5 text-xs"
-                            onClick={() => setReviewFor({ id: a.id, name, status: a.status })}
-                          >
-                            Review
-                          </Button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ))}
-              </div>
-            )}
+              {apps === null ? (
+                <ApplicationListSkeleton rows={4} />
+              ) : apps.length === 0 ? (
+                <div className="px-4 py-10 text-center text-sm text-muted-foreground border rounded-xl">
+                  No submitted applications for this project yet.
+                </div>
+              ) : groupedApps.length === 0 ? (
+                <div className="px-4 py-10 text-center text-sm text-muted-foreground border rounded-xl">
+                  Everyone left to review is on your wishlist.
+                </div>
+              ) : (
+                <div className="flex flex-col gap-3">
+                  {groupedApps.map(([rank, list]) => (
+                    <div key={rank} className="flex flex-col gap-1.5">
+                      <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        {rankLabel(rank)} ({list.length})
+                      </h3>
+                      {list.map((a) => (
+                        <ApplicantRow
+                          key={a.id}
+                          app={a}
+                          periodEndsAt={selectedPeriod?.ends_at}
+                          onReview={() => setReviewFor({ id: a.id, name: applicantName(a), status: a.status })}
+                        />
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        </DndContext>
       )}
 
       <ApplicationSheetModal

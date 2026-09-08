@@ -1,7 +1,8 @@
 -- Lets a project's PM (not just VP Tech/President/VP Projects) participate
--- in the draft from the Applications manager page: keep a wishlist of
--- applicants they want, stage picks for their upcoming round in a capped
--- "draft window", and submit those picks once it's their project's turn.
+-- in the draft from the Applications manager page: stage picks for their
+-- upcoming round in a capped "draft window" (populated from that project's
+-- existing application_wishlist shortlist, 0073) and submit those picks once
+-- it's their project's turn.
 --
 --   1. draft_round_projects.submitted_at: set once a round's picks are
 --      submitted for that project -- distinguishes "still staging" (the
@@ -14,16 +15,13 @@
 --      for the project-scoped draft_round_projects) alongside the existing
 --      admin-only "for all" policies (RLS policies for the same command are
 --      OR'd, so this only ever widens read access, never write).
---   3. draft_wishlist_entries: a PM's shortlist for their project, independent
---      of any specific round -- position is a plain reorder column (not
---      unique, same reasoning as draft_round_projects.pick_order in 0070).
---   4. draft_picks: which applicants are staged/confirmed for a specific
+--   3. draft_picks: which applicants are staged/confirmed for a specific
 --      round_project_id. While draft_round_projects.submitted_at is null for
 --      that row, its draft_picks rows ARE the draft window's contents; once
 --      submitted, the same rows become that round's confirmed picks -- no
 --      separate staging table needed. draft_picks_guard() (BEFORE INSERT)
 --      enforces the round isn't already submitted and stays within pick_count.
---   5. submit_draft_picks(p_round_project_id): SECURITY DEFINER RPC --
+--   4. submit_draft_picks(p_round_project_id): SECURITY DEFINER RPC --
 --      requires can_review_project() on the round's project AND that it's
 --      currently that round_project's turn (draft_state.current_pick_id).
 --      Places every staged applicant via the existing accept_application()
@@ -54,31 +52,7 @@ for select
 to authenticated
 using ( public.is_board_or_exec() );
 
--- 3. A PM's per-project shortlist -----------------------------------------
-
-create table if not exists public.draft_wishlist_entries (
-  id             uuid primary key default gen_random_uuid(),
-  project_id     uuid not null references public.projects(id) on delete cascade,
-  application_id uuid not null references public.applications(id) on delete cascade,
-  position       int not null,
-  created_at     timestamptz not null default now(),
-  unique (project_id, application_id)
-);
-
-create index if not exists draft_wishlist_entries_project_position_idx
-  on public.draft_wishlist_entries(project_id, position);
-
-alter table public.draft_wishlist_entries enable row level security;
-
-drop policy if exists "draft_wishlist_entries_all" on public.draft_wishlist_entries;
-create policy "draft_wishlist_entries_all"
-on public.draft_wishlist_entries
-for all
-to authenticated
-using ( public.can_review_project(project_id) )
-with check ( public.can_review_project(project_id) );
-
--- 4. Staged/confirmed picks for one round_project turn ---------------------
+-- 3. Staged/confirmed picks for one round_project turn ---------------------
 
 create table if not exists public.draft_picks (
   id                uuid primary key default gen_random_uuid(),
@@ -171,7 +145,7 @@ create trigger draft_picks_guard_trigger
 before insert on public.draft_picks
 for each row execute function public.draft_picks_guard();
 
--- 5. Submit: place every staged applicant, mark the round submitted -------
+-- 4. Submit: place every staged applicant, mark the round submitted -------
 
 create or replace function public.submit_draft_picks(p_round_project_id uuid)
 returns void
