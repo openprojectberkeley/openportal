@@ -29,6 +29,7 @@ export function DraftWindowPanel({
   draftWindowPicks,
   confirmedPicks,
   onSubmit,
+  onRemoveOrphan,
 }: {
   appById: Map<string, AppRow>;
   periodEndsAt: string | undefined;
@@ -38,6 +39,11 @@ export function DraftWindowPanel({
   draftWindowPicks: PickRow[];
   confirmedPicks: (PickRow & { round: { round_number: number } })[];
   onSubmit: () => Promise<boolean>;
+  // A staged pick whose applicant isn't in the current review list anymore
+  // (e.g. they unranked this project, or their status changed) -- still
+  // counts against pick_count on the server, so it must stay visible and
+  // removable rather than silently vanishing while still taking up a slot.
+  onRemoveOrphan: (applicationId: string) => void;
 }) {
   const [submitting, setSubmitting] = useState(false);
   const { setNodeRef, isOver } = useDroppable({ id: DRAFT_WINDOW_DROPZONE_ID, disabled: !nextRound });
@@ -104,7 +110,23 @@ export function DraftWindowPanel({
           ) : (
             draftWindowPicks.map((p) => {
               const app = appById.get(p.application_id);
-              if (!app) return null;
+              if (!app) {
+                return (
+                  <div key={p.id} className="flex items-center gap-2 border border-amber-400/50 rounded-lg px-3 py-2 bg-amber-50 dark:bg-amber-950/30">
+                    <span className="flex-1 min-w-0 truncate text-sm text-muted-foreground italic">
+                      Applicant no longer in this project&apos;s review list
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive shrink-0"
+                      onClick={() => onRemoveOrphan(p.application_id)}
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                );
+              }
               return (
                 <DraggableApplicantCard key={p.id} app={app} periodEndsAt={periodEndsAt} onReview={() => onReview(app)} />
               );
