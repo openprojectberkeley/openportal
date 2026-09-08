@@ -26,7 +26,7 @@ export type AppRow = {
   rank: number;
   // Applicant checked in to at least one info session.
   infosession: boolean;
-  // Board/exec, or (coffee done or returning) and attended an info session.
+  // Board/exec or returning, or coffee done and attended an info session.
   valid: boolean;
 };
 
@@ -36,9 +36,9 @@ export function applicantName(a: AppRow): string {
 
 // Why an applicant fails recruiting validity — same wording as analytics invalidIssues.
 function invalidReasons(app: AppRow): string[] {
-  const coffeeOk = app.coffee === "done" || app.returning;
+  if (app.returning) return [];
   const issues: string[] = [];
-  if (!coffeeOk) issues.push(app.coffee === "booked" ? "Coffee booked (incomplete)" : "No coffee chat");
+  if (app.coffee !== "done") issues.push(app.coffee === "booked" ? "Coffee booked (incomplete)" : "No coffee chat");
   if (!app.infosession) issues.push("No info session");
   return issues;
 }

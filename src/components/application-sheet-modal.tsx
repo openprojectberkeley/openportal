@@ -632,10 +632,10 @@ export function ApplicationSheetModal({
         const returning = m?.status === "active" || m?.status === "inactive";
         const coffee = coffeeById[aid] ?? "none";
         const infosession = attendedInfo.has(aid);
-        // Board/exec members are auto-valid; everyone else must clear both the
-        // coffee-chat (or returning) and info-session requirements.
+        // Board/exec members and returning members are auto-valid; everyone
+        // else must clear both the coffee-chat and info-session requirements.
         const boardExec = boardExecIds.has(aid);
-        const valid = boardExec || ((coffee === "done" || returning) && infosession);
+        const valid = boardExec || returning || (coffee === "done" && infosession);
         const met = !!project && project.type === "studio" && [...projectPms].some((pm) => completedWith[aid]?.has(pm));
 
         const ranking = r.application_rankings[0];

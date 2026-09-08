@@ -674,7 +674,7 @@ export default function ManagerApplicationsPage() {
             coffeeWith: (applicant_id && coffeeWithById[applicant_id]) || [],
             returning,
             infosession,
-            valid: boardExec || ((coffee === "done" || returning) && infosession),
+            valid: boardExec || returning || (coffee === "done" && infosession),
           };
         }),
       );
@@ -709,7 +709,12 @@ export default function ManagerApplicationsPage() {
     .map((id) => appById.get(id))
     .filter((a): a is AppRow => !!a);
   const wishlistSet = new Set(wishlist ?? []);
-  const draftActive = !!draftPicks.nextRound;
+  // Staging (add-to-draft buttons + the draft-window drop zone) is allowed
+  // whenever the draft is running -- started and not yet completed -- even
+  // before this project's turn, so a PM can prepare their board ahead of time.
+  // Locked before the draft starts and after it completes. Submitting is still
+  // gated on isMyTurn (below / in the panel).
+  const draftActive = draftPicks.phase === "in_progress" && !!draftPicks.nextRound;
   const activeApp = activeDragId ? appById.get(parseDndId(activeDragId)?.appId ?? "") ?? null : null;
 
   // Group applicants into rank sections (1st choice, 2nd choice, …) for the
@@ -959,19 +964,21 @@ export default function ManagerApplicationsPage() {
 
               {draftPicks.error && <p className="text-sm text-red-500">{draftPicks.error}</p>}
 
-              {draftPicks.draftStarted && (
-                <DraftWindowPanel
-                  appById={appById}
-                  periodEndsAt={selectedPeriod?.ends_at}
-                  onReview={onReviewApp}
-                  nextRound={draftPicks.nextRound}
-                  isMyTurn={draftPicks.isMyTurn}
-                  draftWindowPicks={draftPicks.draftWindowPicks}
-                  confirmedPicks={draftPicks.confirmedPicks}
-                  onSubmit={handleSubmitDraftPicks}
-                  onRemove={draftPicks.removeFromDraftWindow}
-                />
-              )}
+              <DraftWindowPanel
+                appById={appById}
+                periodEndsAt={selectedPeriod?.ends_at}
+                onReview={onReviewApp}
+                phase={draftPicks.phase}
+                currentTurn={draftPicks.currentTurn}
+                myPosition={draftPicks.myPosition}
+                canStage={draftActive}
+                nextRound={draftPicks.nextRound}
+                isMyTurn={draftPicks.isMyTurn}
+                draftWindowPicks={draftPicks.draftWindowPicks}
+                confirmedPicks={draftPicks.confirmedPicks}
+                onSubmit={handleSubmitDraftPicks}
+                onRemove={draftPicks.removeFromDraftWindow}
+              />
             </div>
 
             {/* Right: every applicant for this project (read-only list) --

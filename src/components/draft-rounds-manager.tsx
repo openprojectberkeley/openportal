@@ -22,6 +22,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { useDraftRealtime } from "@/lib/use-draft-realtime";
 
 type Period = { id: string; name: string; status: "draft" | "open" | "closed"; starts_at: string; ends_at: string };
 type Project = { id: string; name: string };
@@ -134,6 +135,16 @@ export function DraftRoundsManager() {
       setCompletedAt(null);
     }
   }, [selectedPeriodId, loadRounds, loadDraftState]);
+
+  // Live-refresh the draft state (whose turn / completed / reset) as it moves,
+  // e.g. when a PM submits or another exec advances the pick -- without a
+  // reload. Only the lightweight state is refreshed here (not the full editable
+  // rounds structure, which would flash a skeleton and could interrupt setup
+  // edits in progress).
+  const refreshDraftState = useCallback(() => {
+    if (selectedPeriodId) loadDraftState(selectedPeriodId);
+  }, [selectedPeriodId, loadDraftState]);
+  useDraftRealtime(selectedPeriodId, refreshDraftState);
 
   const selectedPeriod = periods?.find((p) => p.id === selectedPeriodId) ?? null;
 

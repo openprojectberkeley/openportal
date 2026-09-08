@@ -31,8 +31,9 @@ type Row = {
   info_attended: number;
   info_returning: number;
   info_nothing: number;
-  // Board/exec, or (completed a coffee chat or returning) AND attended an info
-  // session (0063, board/exec exemption added in 0067).
+  // Board/exec or returning, or completed a coffee chat AND attended an info
+  // session (0063, board/exec exemption added in 0067, returning bypasses both
+  // as of 0077).
   // Optional so the modal still renders against a pre-0063 database.
   both_valid?: number;
 };
@@ -107,12 +108,12 @@ function PieCard({ title, segments, total, centerSub }: { title: string; segment
 
 const submittedTotal = (r: Row) => r.submitted + r.accepted + r.rejected;
 // Valid = cleared the requirement. A booked-but-incomplete chat doesn't count;
-// returning members are exempt from the coffee chat but not the info session,
-// and board/exec members are auto-valid regardless of either (0067). bothValid
-// is computed server-side; because of the board/exec exemption it's no longer
-// strictly the intersection of the coffee and info funnels.
+// returning members are exempt from both the coffee chat and the info session,
+// and board/exec members are auto-valid regardless of either (0067/0077). bothValid
+// is computed server-side; because of the board/exec and returning exemptions it's
+// no longer strictly the intersection of the coffee and info funnels.
 const coffeeValid = (r: Row) => r.coffee_completed + r.coffee_returning;
-const infoValid = (r: Row) => r.info_attended;
+const infoValid = (r: Row) => r.info_attended + r.info_returning;
 const bothValid = (r: Row) => r.both_valid ?? 0;
 
 // One invalid applicant from application_analytics_invalid() (0064).
@@ -131,9 +132,9 @@ function invalidName(r: InvalidRow): string {
 }
 
 function invalidIssues(r: InvalidRow): string[] {
-  const coffeeOk = r.did_complete || r.is_returning;
+  if (r.is_returning) return [];
   const issues: string[] = [];
-  if (!coffeeOk) issues.push(r.has_chat ? "Coffee booked (incomplete)" : "No coffee chat");
+  if (!r.did_complete) issues.push(r.has_chat ? "Coffee booked (incomplete)" : "No coffee chat");
   if (!r.did_att) issues.push("No info session");
   return issues;
 }
@@ -315,7 +316,7 @@ export function ApplicationAnalyticsModal({
                   </div>
                   <p className="text-[0.7rem] text-muted-foreground">
                     Cleared both requirements: coffee chat valid and info session valid. A booked-but-incomplete
-                    chat doesn&apos;t count, and returning members are exempt from the coffee chat only.
+                    chat doesn&apos;t count, and returning members are exempt from both requirements.
                   </p>
                 </div>
 
