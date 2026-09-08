@@ -3,7 +3,7 @@
 import { createClient } from "@/lib/supabase/client";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ChevronDown, SlidersHorizontal, Mail, BarChart3, Table2, UserPlus } from "lucide-react";
 import { DndContext, useDroppable, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { useRoleSim } from "@/components/role-simulation-provider";
@@ -153,10 +153,6 @@ export default function ManagerApplicationsPage() {
   const [fullAccessReview, setFullAccessReview] = useState(false);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const allSelected = selectedProjectId === ALL_PROJECTS;
-  // The ?project= slug from the URL at first load, resolved against
-  // reviewableProjects once that loads (below), then cleared -- only tried
-  // once, so it doesn't fight the user's own later picks.
-  const initialProjectParam = useRef(searchParams.get("project"));
   // Everyone currently on the selected project (left column). null = loading.
   const [roster, setRoster] = useState<RosterMember[] | null>(null);
   const [allCounts, setAllCounts] = useState<{ applicants: number; projects: number } | null>(null);
@@ -219,23 +215,27 @@ export default function ManagerApplicationsPage() {
       if (cur === ALL_PROJECTS) return fullAccessReview ? cur : null;
       if (cur && reviewableProjects.some((p) => p.id === cur)) return cur;
 
-      // First load only: try the ?project= slug from the URL before falling
-      // back to the default, so a reload lands back on the same project.
-      const slug = initialProjectParam.current;
-      initialProjectParam.current = null;
-      if (slug) {
-        if (slug === "all") { if (fullAccessReview) return ALL_PROJECTS; }
-        else {
-          const match = reviewableProjects.find((p) => slugify(p.name) === slug);
-          if (match) return match.id;
-        }
+      // No valid selection yet -- try the live ?project= slug from the URL
+      // before falling back to the default, so a reload lands back on the
+      // same project. Reading searchParams directly (not a one-shot ref
+      // frozen at mount) means this keeps re-trying with whatever the URL
+      // actually says on every relevant render, instead of being able to
+      // silently lose the attempt to a render-timing fluke; once `cur`
+      // above is valid it short-circuits before reaching here, so this
+      // never fights a later click from the user.
+      const slug = searchParams.get("project");
+      if (slug === "all") {
+        if (fullAccessReview) return ALL_PROJECTS;
+      } else if (slug) {
+        const match = reviewableProjects.find((p) => slugify(p.name) === slug);
+        if (match) return match.id;
       }
 
       // Full-access reviewers land on the cross-project view; PMs land on a project.
       if (fullAccessReview) return ALL_PROJECTS;
       return reviewableProjects[0]?.id ?? null;
     });
-  }, [reviewableProjects, fullAccessReview]);
+  }, [reviewableProjects, fullAccessReview, searchParams]);
 
   // Keeps ?project= (a readable name slug, not the raw id) in sync so a
   // reload or a shared link lands back on the same project/"All projects".
