@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/supabase/client";
 import { useCallback, useEffect, useState } from "react";
-import { ChevronDown, GripVertical, Plus, Trash2, X } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, GripVertical, Play, Plus, RotateCcw, Trash2, X } from "lucide-react";
 import {
   DndContext,
   PointerSensor,
@@ -31,6 +31,10 @@ type Project = { id: string; name: string };
 type RoundProject = { id: string; project_id: string; name: string; pick_order: number; pick_count: number };
 type Round = { id: string; round_number: number; projects: RoundProject[] };
 
+// One stop in the flattened draft sequence: a project's turn within a round.
+// Rounds with pick_count = 0 sit out, so they're excluded from the sequence.
+type PickStop = RoundProject & { round_id: string; round_number: number };
+
 // Pending destructive action, confirmed via the shared ConfirmDialog.
 type ConfirmTarget =
   | { kind: "round"; roundId: string; label: string }
@@ -54,6 +58,8 @@ export function DraftRoundsManager() {
   const [selectedPeriodId, setSelectedPeriodId] = useState<string | null>(null);
   const [allProjects, setAllProjects] = useState<Project[] | null>(null);
   const [rounds, setRounds] = useState<Round[] | null>(null);
+  // null current_pick_id (or no row at all) means the draft hasn't started.
+  const [currentPickId, setCurrentPickId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirmTarget, setConfirmTarget] = useState<ConfirmTarget | null>(null);
 
@@ -105,12 +111,55 @@ export function DraftRoundsManager() {
     setRounds(list);
   }, []);
 
+  const loadDraftState = useCallback(async (periodId: string) => {
+    const supabase = createClient();
+    const { data } = await supabase.from("draft_state").select("current_pick_id").eq("period_id", periodId).maybeSingle();
+    setCurrentPickId(data?.current_pick_id ?? null);
+  }, []);
+
   useEffect(() => {
-    if (selectedPeriodId) loadRounds(selectedPeriodId);
-    else setRounds(null);
-  }, [selectedPeriodId, loadRounds]);
+    if (selectedPeriodId) {
+      loadRounds(selectedPeriodId);
+      loadDraftState(selectedPeriodId);
+    } else {
+      setRounds(null);
+      setCurrentPickId(null);
+    }
+  }, [selectedPeriodId, loadRounds, loadDraftState]);
 
   const selectedPeriod = periods?.find((p) => p.id === selectedPeriodId) ?? null;
+
+  // The order picks actually happen in: every round in order, each round's
+  // projects in pick_order, skipping any project sitting out (pick_count 0).
+  const sequence: PickStop[] = (rounds ?? []).flatMap((r) =>
+    r.projects.filter((p) => p.pick_count > 0).map((p) => ({ ...p, round_id: r.id, round_number: r.round_number })),
+  );
+  const currentIndex = currentPickId ? sequence.findIndex((s) => s.id === currentPickId) : -1;
+  const currentStop = currentIndex >= 0 ? sequence[currentIndex] : null;
+
+  const setPick = async (periodId: string, pickId: string | null) => {
+    const supabase = createClient();
+    const { error: writeError } = await supabase
+      .from("draft_state")
+      .upsert({ period_id: periodId, current_pick_id: pickId, updated_at: new Date().toISOString() });
+    if (writeError) { setError("Couldn't save draft position."); return; }
+    setCurrentPickId(pickId);
+  };
+
+  const startDraft = () => {
+    if (!selectedPeriodId || sequence.length === 0) return;
+    setPick(selectedPeriodId, sequence[0].id);
+  };
+
+  const stepTo = (index: number) => {
+    if (!selectedPeriodId || index < 0 || index >= sequence.length) return;
+    setPick(selectedPeriodId, sequence[index].id);
+  };
+
+  const resetDraft = () => {
+    if (!selectedPeriodId) return;
+    setPick(selectedPeriodId, null);
+  };
 
   // A new round starts seeded with every current project, in alphabetical
   // order, one pick each -- the common case is every project drafts every
@@ -261,6 +310,50 @@ export function DraftRoundsManager() {
         </DropdownMenu>
       )}
 
+      {selectedPeriodId && rounds !== null && rounds.length > 0 && (
+        <div className="border rounded-xl p-4 flex flex-wrap items-center justify-between gap-3 bg-muted/30">
+          {currentStop === null ? (
+            <>
+              <span className="text-sm text-muted-foreground">
+                {sequence.length === 0 ? "No projects with picks to draft yet." : `${sequence.length} pick${sequence.length === 1 ? "" : "s"} queued up.`}
+              </span>
+              <Button size="sm" onClick={startDraft} disabled={sequence.length === 0}>
+                <Play size={14} className="mr-1.5" />
+                Start draft
+              </Button>
+            </>
+          ) : (
+            <>
+              <div className="flex flex-col gap-0.5">
+                <span className="text-xs text-muted-foreground">
+                  Pick {currentIndex + 1} of {sequence.length} — Round {currentStop.round_number}
+                </span>
+                <span className="text-sm font-semibold">
+                  {currentStop.name}
+                  <span className="ml-2 font-normal text-muted-foreground">
+                    ({currentStop.pick_count} pick{currentStop.pick_count === 1 ? "" : "s"})
+                  </span>
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={() => stepTo(currentIndex - 1)} disabled={currentIndex <= 0}>
+                  <ChevronLeft size={14} className="mr-1" />
+                  Back
+                </Button>
+                <Button size="sm" onClick={() => stepTo(currentIndex + 1)} disabled={currentIndex >= sequence.length - 1}>
+                  Next
+                  <ChevronRight size={14} className="ml-1" />
+                </Button>
+                <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={resetDraft}>
+                  <RotateCcw size={13} className="mr-1.5" />
+                  Reset
+                </Button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
       {selectedPeriodId && (
         <div className="flex flex-col gap-4">
           {rounds === null ? (
@@ -274,6 +367,7 @@ export function DraftRoundsManager() {
               <RoundCard
                 key={round.id}
                 round={round}
+                currentPickId={currentPickId}
                 addableProjects={(allProjects ?? []).filter((p) => !round.projects.some((rp) => rp.project_id === p.id))}
                 onDeleteRound={() => setConfirmTarget({ kind: "round", roundId: round.id, label: `Round ${round.round_number}` })}
                 onAddProject={(project) => addProjectToRound(round.id, project)}
@@ -316,6 +410,7 @@ export function DraftRoundsManager() {
 
 function RoundCard({
   round,
+  currentPickId,
   addableProjects,
   onDeleteRound,
   onAddProject,
@@ -325,6 +420,7 @@ function RoundCard({
   onPickCountCommit,
 }: {
   round: Round;
+  currentPickId: string | null;
   addableProjects: Project[];
   onDeleteRound: () => void;
   onAddProject: (project: Project) => void;
@@ -376,6 +472,7 @@ function RoundCard({
                   key={rp.id}
                   rp={rp}
                   position={i + 1}
+                  isCurrent={rp.id === currentPickId}
                   onRemove={() => onRemoveProject(rp)}
                   onPickCountChange={(value) => onPickCountChange(rp.id, value)}
                   onPickCountCommit={(value) => onPickCountCommit(rp.id, value)}
@@ -392,12 +489,14 @@ function RoundCard({
 function SortableRow({
   rp,
   position,
+  isCurrent,
   onRemove,
   onPickCountChange,
   onPickCountCommit,
 }: {
   rp: RoundProject;
   position: number;
+  isCurrent: boolean;
   onRemove: () => void;
   onPickCountChange: (value: number) => void;
   onPickCountCommit: (value: number) => void;
@@ -406,7 +505,11 @@ function SortableRow({
   const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1 };
 
   return (
-    <div ref={setNodeRef} style={style} className="flex items-center gap-2 border rounded-lg px-3 py-2 bg-background">
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={`flex items-center gap-2 rounded-lg border px-3 py-2 bg-background ${isCurrent ? "border-primary ring-1 ring-primary" : ""}`}
+    >
       <button
         {...attributes}
         {...listeners}
