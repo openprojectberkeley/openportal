@@ -68,39 +68,45 @@ const fullName = (first: string | null | undefined, last: string | null | undefi
   [first, last].filter(Boolean).join(" ") || "—";
 
 // The org runs on Pacific time, so "midnight" always means Pacific midnight,
-// regardless of the viewer's own browser timezone. Returns the *next*
-// upcoming one (the start of tomorrow, Pacific) as a UTC ISO instant.
-function nextPacificMidnightIso(): string {
+// regardless of the viewer's own browser timezone. Returns 00:00 Pacific on
+// the given Pacific calendar day (Date.UTC normalizes day overflow, e.g.
+// day 33) as a UTC ISO instant.
+function pacificMidnightIso(y: number, m: number, d: number): string {
   const tz = "America/Los_Angeles";
-  const now = new Date();
-
-  const dateParts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: tz,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(now);
-  const get = (t: string) => Number(dateParts.find((p) => p.type === t)?.value ?? 0);
-  const y = get("year"), m = get("month"), d = get("day");
-
-  // Pacific's current UTC offset in minutes (negative — e.g. -420 for PDT,
-  // -480 for PST) — needed since a fixed offset can't be hardcoded across DST.
+  // Pacific's UTC offset in minutes (negative — e.g. -420 for PDT, -480 for
+  // PST). Sample it *on the target day* (probe at noon UTC, safely away from
+  // the 2 AM transition), not at `now`: a grant made just before a DST change
+  // would otherwise apply the wrong offset to the future midnight and land an
+  // hour off.
+  const probe = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
   const offsetPart = new Intl.DateTimeFormat("en-US", { timeZone: tz, timeZoneName: "longOffset" })
-    .formatToParts(now)
+    .formatToParts(probe)
     .find((p) => p.type === "timeZoneName")?.value ?? "GMT-08:00";
   const match = /GMT([+-])(\d{2}):(\d{2})/.exec(offsetPart);
   const offsetMin = match ? (match[1] === "-" ? -1 : 1) * (Number(match[2]) * 60 + Number(match[3])) : -480;
 
-  // Tomorrow 00:00 Pacific, converted to its UTC instant.
-  const utcMillis = Date.UTC(y, m - 1, d + 1, 0, 0, 0) - offsetMin * 60_000;
+  const utcMillis = Date.UTC(y, m - 1, d, 0, 0, 0) - offsetMin * 60_000;
   return new Date(utcMillis).toISOString();
 }
 
 // Default expiry offered when granting, as a datetime-local value (reuses
 // toDateTimeLocal above so it renders in the viewer's own local time, even
 // though the underlying instant is anchored to Pacific midnight).
+//
+// It targets the *end of tomorrow* Pacific (i.e. the start of the day after
+// tomorrow), so a grant always covers at least a full day. Anchoring to the
+// next upcoming midnight instead meant an extension added in the evening
+// expired an hour or two later, at that same night's midnight — the applicant
+// got kicked out mid-application. The admin can still shorten it in the field.
 function defaultExpiryLocal(): string {
-  return toDateTimeLocal(nextPacificMidnightIso());
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Los_Angeles",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const get = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? 0);
+  return toDateTimeLocal(pacificMidnightIso(get("year"), get("month"), get("day") + 2));
 }
 
 const formatExpiry = (iso: string) => {
