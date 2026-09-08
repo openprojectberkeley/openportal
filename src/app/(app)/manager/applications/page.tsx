@@ -709,7 +709,7 @@ export default function ManagerApplicationsPage() {
                   draftWindowPicks={draftPicks.draftWindowPicks}
                   confirmedPicks={draftPicks.confirmedPicks}
                   onSubmit={handleSubmitDraftPicks}
-                  onRemoveOrphan={draftPicks.removeFromDraftWindow}
+                  onRemove={draftPicks.removeFromDraftWindow}
                 />
               )}
             </div>
