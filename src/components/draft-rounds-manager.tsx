@@ -207,15 +207,11 @@ export function DraftRoundsManager() {
   // applications.applicant_id points at auth.users, not members (no FK to join).
   const loadBoard = useCallback(async (periodId: string) => {
     const supabase = createClient();
-    const [{ data: rpRows }, { data: periodRow }] = await Promise.all([
-      supabase
-        .from("draft_round_projects")
-        .select("id, submitted_at, draft_picks(id, application_id), draft_rounds!inner(period_id)")
-        .eq("draft_rounds.period_id", periodId),
-      supabase.from("application_periods").select("ends_at").eq("id", periodId).maybeSingle(),
-    ]);
+    const { data: rpRows } = await supabase
+      .from("draft_round_projects")
+      .select("id, submitted_at, draft_picks(id, application_id), draft_rounds!inner(period_id)")
+      .eq("draft_rounds.period_id", periodId);
     const rows = (rpRows ?? []) as unknown as { id: string; submitted_at: string | null; draft_picks: { id: string; application_id: string }[] }[];
-    const periodEndsAt = (periodRow as { ends_at: string } | null)?.ends_at ?? null;
 
     const nextBoard: Record<string, { submittedAt: string | null; appIds: string[] }> = {};
     const appIdSet = new Set<string>();
@@ -281,8 +277,6 @@ export function DraftRoundsManager() {
         returning,
         coffeeDone: !!uid && coffeeDoneUsers.has(uid),
         infosession: !!uid && infoUsers.has(uid),
-        submittedAt: submittedByApp[appId] ?? null,
-        endsAt: periodEndsAt,
       });
       nextInd[appId] = { returning, invalid: !valid, submittedAt: submittedByApp[appId] ?? null };
     }

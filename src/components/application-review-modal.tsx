@@ -84,9 +84,9 @@ export function ApplicationReviewModal({
   applicantName: string;
   status: ReviewStatus;
   // The project the reviewer is currently reviewing under (the manager page's
-  // project picker). Rankings for projects the reviewer can't review are
-  // already excluded by RLS, but when there's more than one visible ranking
-  // this decides which one the "Place on" dropdown defaults to.
+  // project picker). Board/exec (including PMs) can read every ranked project's
+  // responses (0087); this still defaults the "Place on" dropdown and drives
+  // the "Jump to" pill when more than one ranking is visible.
   contextProjectId?: string | null;
   // Scroll to (and briefly highlight) this section once the application loads.
   focus?: FocusSection | null;

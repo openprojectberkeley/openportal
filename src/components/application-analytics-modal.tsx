@@ -110,11 +110,10 @@ const submittedTotal = (r: Row) => r.submitted + r.accepted + r.rejected;
 // Denominator for valid % / count: still-in-consideration applicants only
 // (excludes rejected/dropped). Matches both_valid + invalid list after 0080.
 const consideredTotal = (r: Row) => r.submitted + r.accepted;
-// Valid = board/exec or returning, or coffee done + info attended and not 3+
-// days late (0081). A booked-but-incomplete chat doesn't count. bothValid is
-// computed server-side; because of exemptions it's not strictly the
-// intersection of the coffee and info funnels. Rejected applicants are
-// excluded (0080).
+// Valid = board/exec or returning, or coffee done + info attended. A
+// booked-but-incomplete chat doesn't count. bothValid is computed server-side;
+// because of exemptions it's not strictly the intersection of the coffee and
+// info funnels. Rejected applicants are excluded (0080).
 const coffeeValid = (r: Row) => r.coffee_completed + r.coffee_returning;
 const infoValid = (r: Row) => r.info_attended + r.info_returning;
 const bothValid = (r: Row) => r.both_valid ?? 0;
@@ -128,7 +127,6 @@ type InvalidRow = {
   did_complete: boolean;
   has_chat: boolean;
   did_att: boolean;
-  is_severely_late?: boolean;
 };
 
 function invalidName(r: InvalidRow): string {
@@ -140,7 +138,6 @@ function invalidIssues(r: InvalidRow): string[] {
   const issues: string[] = [];
   if (!r.did_complete) issues.push(r.has_chat ? "Coffee booked (incomplete)" : "No coffee chat");
   if (!r.did_att) issues.push("No info session");
-  if (r.is_severely_late) issues.push("Submitted 3+ days late");
   return issues;
 }
 
@@ -324,9 +321,9 @@ export function ApplicationAnalyticsModal({
                     </div>
                   </div>
                   <p className="text-[0.7rem] text-muted-foreground">
-                    Cleared recruiting requirements: coffee chat done and info session attended,
-                    and not submitted 3+ days late. A booked-but-incomplete chat doesn&apos;t count;
-                    board/exec and returning members are exempt. Rejected applications are excluded.
+                    Cleared recruiting requirements: coffee chat done and info session attended.
+                    A booked-but-incomplete chat doesn&apos;t count; board/exec and returning
+                    members are exempt. Rejected applications are excluded.
                   </p>
                 </div>
 

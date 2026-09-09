@@ -72,7 +72,7 @@ type SheetRow = {
   infosession: boolean;
   // Applicant currently holds a board/exec role (auto-valid).
   boardExec: boolean;
-  // Board/exec or returning, or coffee done + info attended and not 3+ days late.
+  // Board/exec or returning, or coffee done + info attended.
   // Mirrors application_analytics both_valid.
   valid: boolean;
   techClasses: string[];
@@ -90,16 +90,13 @@ type SheetRow = {
 };
 
 function sheetValid(
-  r: Pick<SheetRow, "boardExec" | "returning" | "coffee" | "infosession" | "submittedAt">,
-  endsAt?: string | null,
+  r: Pick<SheetRow, "boardExec" | "returning" | "coffee" | "infosession">,
 ): boolean {
   return isRecruitingValid({
     boardExec: r.boardExec,
     returning: r.returning,
     coffeeDone: r.coffee === "done",
     infosession: r.infosession,
-    submittedAt: r.submittedAt,
-    endsAt,
   });
 }
 
@@ -710,7 +707,7 @@ export function ApplicationSheetModal({
         // Board/exec members and returning members are auto-valid; everyone
         // else must clear both the coffee-chat and info-session requirements.
         const boardExec = boardExecIds.has(aid);
-        const valid = sheetValid({ boardExec, returning, coffee, infosession, submittedAt: r.submitted_at }, periodEndsAt);
+        const valid = sheetValid({ boardExec, returning, coffee, infosession });
         const met = !!project && project.type === "studio" && [...projectPms].some((pm) => completedWith[aid]?.has(pm));
 
         const ranking = r.application_rankings[0];
@@ -786,7 +783,7 @@ export function ApplicationSheetModal({
 
       setRows(next);
     })();
-  }, [open, periodId, activePage, reloadToken, periodEndsAt]);
+  }, [open, periodId, activePage, reloadToken]);
 
   const yearOptions = useMemo(() => {
     if (!rows) return [];
@@ -1110,7 +1107,7 @@ export function ApplicationSheetModal({
         ? prev.map((r) => {
             if (r.applicantId !== applicantId) return r;
             const next = patch(r);
-            return { ...next, valid: sheetValid(next, periodEndsAt) };
+            return { ...next, valid: sheetValid(next) };
           })
         : prev,
     );

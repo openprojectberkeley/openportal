@@ -1,5 +1,7 @@
 // Integration tests for the project-scoped application review model
-// (supabase/migrations/0057_project_scoped_application_review.sql):
+// (supabase/migrations/0057_project_scoped_application_review.sql) and the
+// cross-project ranking/answer read widening
+// (supabase/migrations/0087_review_cross_project_read.sql):
 // can_review_project()/can_review_all_projects(), the applications/
 // application_rankings/application_answers SELECT policies, and the
 // accept_application/reject_application RPCs.
@@ -160,10 +162,15 @@ describe.skipIf(!RUN)("project-scoped application review (migration 0057)", () =
   });
 
   describe("application_rankings SELECT scoping", () => {
-    it("a PM sees only rankings for their own project", async () => {
-      const { data } = await pm1.client.from("application_rankings").select("project_id");
-      expect((data ?? []).every((r) => r.project_id === project1Id)).toBe(true);
-      expect((data ?? []).some((r) => r.project_id === project1Id)).toBe(true);
+    it("a PM (board/exec) sees rankings across all projects (0087)", async () => {
+      // pm1 is PM of project1 only, but SELECT is now is_board_or_exec()-wide so
+      // they can read every ranked project's responses in the review modal.
+      const { data } = await pm1.client
+        .from("application_rankings")
+        .select("project_id")
+        .eq("application_id", app1Id);
+      const projectIds = (data ?? []).map((r) => r.project_id).sort();
+      expect(projectIds).toEqual([project1Id, project2Id].sort());
     });
 
     it("a plain member sees no rankings", async () => {

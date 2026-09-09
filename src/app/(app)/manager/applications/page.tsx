@@ -58,6 +58,7 @@ import { rankLabel } from "@/lib/application-rank";
 import { compareReviewPriority, isRecruitingValid } from "@/lib/utils";
 import { DEFAULT_ACCENT } from "@/lib/portal-color";
 import { coffeeWithByApplicant, type CoffeeState } from "@/lib/coffee-chat-indicator";
+import type { WishlistProject } from "@/components/applicant-indicators";
 
 // The project currently under review: which project the reviewer is
 // assigned to (or, for a full-access reviewer, has picked from all of them).
@@ -638,8 +639,6 @@ export default function ManagerApplicationsPage() {
     // `application_rankings!inner(...)` + the two `.eq` filters below turn the
     // embed into an inner join, so only applicants who ranked the selected
     // project come back, each carrying their rank for that project.
-    const periodEndsAt =
-      periods?.find((p) => p.id === selectedPeriodId)?.ends_at ?? null;
     (async () => {
       const { data } = await supabase
         .from("applications")
@@ -656,6 +655,7 @@ export default function ManagerApplicationsPage() {
       const rows = ((data ?? []) as unknown as { id: string; status: ReviewStatus; submitted_at: string | null; applicant_id: string | null; application_rankings: { rank: number }[] }[])
         .map(({ application_rankings, ...r }) => ({ ...r, rank: application_rankings[0]?.rank ?? 0 }));
       const ids = [...new Set(rows.map((r) => r.applicant_id).filter((id): id is string => !!id))];
+      const appIds = rows.map((r) => r.id);
       const byId: Record<string, Applicant> = {};
       const returningById: Record<string, boolean> = {};
       const coffeeById: Record<string, CoffeeState> = {};
@@ -663,9 +663,11 @@ export default function ManagerApplicationsPage() {
       const attendedInfo = new Set<string>();
       // Board/exec applicants are auto-valid (same as application sheet / 0067).
       const boardExecIds = new Set<string>();
+      // Other projects' wishlists for these applicants (excludes the selected project).
+      const wishlistedById: Record<string, WishlistProject[]> = {};
       if (ids.length) {
         const idSet = new Set(ids);
-        const [{ data: mem }, { data: chats }, { data: info }, { data: roleRows }] = await Promise.all([
+        const [{ data: mem }, { data: chats }, { data: info }, { data: roleRows }, { data: wishRows }] = await Promise.all([
           supabase.from("members").select("user_id, preferred_firstname, lastname, status").in("user_id", ids),
           // A booked chat has applicant_id set; `complete` marks it done. Open
           // (unbooked) slots have a null applicant_id and won't match.
@@ -682,6 +684,14 @@ export default function ManagerApplicationsPage() {
             .select("user_id, roles!inner(access_level)")
             .in("user_id", ids)
             .in("roles.access_level", ["board", "exec"]),
+          // Cross-project shortlists (0086). Own project is filtered out below —
+          // the card already lives in (or can be added to) this project's wishlist.
+          appIds.length
+            ? supabase
+                .from("application_wishlist")
+                .select("application_id, project_id, projects(id, name, color)")
+                .in("application_id", appIds)
+            : Promise.resolve({ data: [] as never[] }),
         ]);
         for (const m of (mem ?? []) as (Applicant & { status: string | null })[]) {
           byId[m.user_id] = m;
@@ -713,6 +723,22 @@ export default function ManagerApplicationsPage() {
           if (r.applicant_id && idSet.has(r.applicant_id)) attendedInfo.add(r.applicant_id);
           if (r.member_id && idSet.has(r.member_id)) attendedInfo.add(r.member_id);
         }
+        for (const w of (wishRows ?? []) as unknown as {
+          application_id: string;
+          project_id: string;
+          projects: { id: string; name: string; color: string | null } | null;
+        }[]) {
+          if (w.project_id === selectedProjectId) continue;
+          const project: WishlistProject = {
+            id: w.project_id,
+            name: w.projects?.name ?? "Untitled project",
+            color: w.projects?.color ?? null,
+          };
+          (wishlistedById[w.application_id] ??= []).push(project);
+        }
+        for (const list of Object.values(wishlistedById)) {
+          list.sort((a, b) => a.name.localeCompare(b.name));
+        }
       }
 
       setApps(
@@ -735,14 +761,13 @@ export default function ManagerApplicationsPage() {
               returning,
               coffeeDone: coffee === "done",
               infosession,
-              submittedAt: r.submitted_at,
-              endsAt: periodEndsAt,
             }),
+            wishlistedBy: wishlistedById[r.id] ?? [],
           };
         }),
       );
     })();
-  }, [selectedPeriodId, selectedProjectId, reviewableProjects, appsReloadToken, periods]);
+  }, [selectedPeriodId, selectedProjectId, reviewableProjects, appsReloadToken]);
 
   // Period funnel stats track the period alone, so they survive the project
   // picker switching to "All projects".

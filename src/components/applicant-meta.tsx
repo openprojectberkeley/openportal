@@ -7,10 +7,9 @@ import { AlertTriangle, GripVertical, RotateCcw, Star, UserPlus, X } from "lucid
 import { PersonName } from "@/components/person-profile-provider";
 import { Badge } from "@/components/ui/badge";
 import type { ReviewStatus } from "@/components/application-review-modal";
-import { CoffeeChatIndicator, InfosessionIndicator, LateBadge, type CoffeeState } from "@/components/applicant-indicators";
+import { CoffeeChatIndicator, InfosessionIndicator, LateBadge, WishlistedByIndicator, type CoffeeState, type WishlistProject } from "@/components/applicant-indicators";
 import { rankLabel } from "@/lib/application-rank";
 import { accentStyle } from "@/lib/portal-color";
-import { isSeverelyLate } from "@/lib/utils";
 
 export type Applicant = { user_id: string; preferred_firstname: string | null; lastname: string | null };
 
@@ -28,8 +27,11 @@ export type AppRow = {
   rank: number;
   // Applicant checked in to at least one info session.
   infosession: boolean;
-  // Board/exec or returning, or coffee done + info attended and not 3+ days late.
+  // Board/exec or returning, or coffee done and attended an info session.
   valid: boolean;
+  // Other projects that have shortlisted this applicant (excludes the viewer's
+  // currently selected project). Empty when nobody else has them wishlisted.
+  wishlistedBy: WishlistProject[];
 };
 
 export function applicantName(a: AppRow): string {
@@ -37,12 +39,11 @@ export function applicantName(a: AppRow): string {
 }
 
 // Why an applicant fails recruiting validity — same wording as analytics invalidIssues.
-function invalidReasons(app: AppRow, periodEndsAt?: string | null): string[] {
+function invalidReasons(app: AppRow): string[] {
   if (app.returning) return [];
   const issues: string[] = [];
   if (app.coffee !== "done") issues.push(app.coffee === "booked" ? "Coffee booked (incomplete)" : "No coffee chat");
   if (!app.infosession) issues.push("No info session");
-  if (isSeverelyLate(app.submitted_at, periodEndsAt)) issues.push("Submitted 3+ days late");
   return issues;
 }
 
@@ -93,6 +94,7 @@ export function ApplicantMeta({
       <StatusBadge status={app.status} />
       <ReturningIndicator returning={app.returning} />
       <LateBadge submittedAt={app.submitted_at} endsAt={periodEndsAt} />
+      <WishlistedByIndicator projects={app.wishlistedBy} />
       {showRecruitingStatus && (
         <>
           <CoffeeChatIndicator state={app.coffee} withNames={app.coffeeWith} />
@@ -205,7 +207,7 @@ function ApplicantCardInner({
   draggable,
 }: ApplicantCardActions & { draggable?: boolean }) {
   const invalid = !app.valid;
-  const reasons = invalid ? invalidReasons(app, periodEndsAt) : [];
+  const reasons = invalid ? invalidReasons(app) : [];
   const hasOverlay = !!(onAddToWishlist || onWishlistToggle || (showAddToDraft && onAddToDraft) || onRemove);
   return (
     <>
