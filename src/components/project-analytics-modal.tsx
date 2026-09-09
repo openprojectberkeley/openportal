@@ -2,7 +2,6 @@
 
 import { createClient } from "@/lib/supabase/client";
 import { useEffect, useMemo, useState } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { rankLabel } from "@/lib/application-rank";
 
@@ -29,24 +28,15 @@ const PROJECT_TYPE_LABELS: Record<string, string> = { studio: "OP Studio", launc
 // Exec-only global project analytics for one period: a project × rank matrix of
 // how many submitted applicants picked each project 1st, 2nd, … plus
 // demand-vs-capacity visuals. Fetched from the application_project_rankings
-// RPC (+ project capacities) on open.
-export function ProjectAnalyticsModal({
-  open,
-  onOpenChange,
-  periodId,
-  periodName,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  periodId: string | null;
-  periodName?: string | null;
-}) {
+// RPC (+ project capacities). The period comes from the tabbed shell
+// (AnalyticsModal), which mounts this only while its tab is open — so the fetch
+// runs on mount rather than behind an `open` guard.
+export function ProjectAnalyticsBody({ periodId }: { periodId: string | null }) {
   const [rows, setRows] = useState<Row[] | null>(null);
   const [capacity, setCapacity] = useState<Map<string, number | null>>(new Map());
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!open) return;
     setRows(null);
     setError(null);
     setCapacity(new Map());
@@ -77,7 +67,7 @@ export function ProjectAnalyticsModal({
       );
       setRows((ranks.data as Row[]) ?? []);
     })();
-  }, [open, periodId]);
+  }, [periodId]);
 
   const { projects, maxRank } = useMemo(() => {
     const byProject = new Map<string, ProjectRow>();
@@ -108,131 +98,125 @@ export function ProjectAnalyticsModal({
   const maxDemandCap = withCapacity.reduce((m, p) => Math.max(m, p.firsts, p.capacity), 0);
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Project analytics{periodName ? ` · ${periodName}` : ""}</DialogTitle>
-        </DialogHeader>
+    <>
+      {rows === null ? (
+        <div className="h-64 rounded-xl border bg-muted animate-pulse" />
+      ) : (
+        <div className="flex flex-col gap-5">
+          <p className="text-xs text-muted-foreground">
+            {projects.length} projects · how many submitted applicants ranked each 1st, 2nd, … Sorted by 1st-choice count.
+          </p>
+          {error && <p className="text-sm text-red-500">{error}</p>}
 
-        {rows === null ? (
-          <div className="h-64 rounded-xl border bg-muted animate-pulse" />
-        ) : (
-          <div className="flex flex-col gap-5">
-            <p className="text-xs text-muted-foreground">
-              {projects.length} projects · how many submitted applicants ranked each 1st, 2nd, … Sorted by 1st-choice count.
-            </p>
-            {error && <p className="text-sm text-red-500">{error}</p>}
+          {projects.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No ranked applications for this period yet.</p>
+          ) : (
+            <>
+              {/* Demand vs capacity */}
+              <div className="flex flex-col gap-2 rounded-xl border bg-background p-4">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Demand vs capacity
+                </h3>
+                {withCapacity.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">No projects have a capacity set.</p>
+                ) : (
+                  <ul className="flex flex-col gap-1.5">
+                    {withCapacity.map((p) => {
+                      const over = p.firsts > p.capacity;
+                      const demandW = maxDemandCap === 0 ? 0 : Math.round((p.firsts / maxDemandCap) * 100);
+                      const capW = maxDemandCap === 0 ? 0 : Math.round((p.capacity / maxDemandCap) * 100);
+                      return (
+                        <li key={p.id} className="flex items-center gap-2 text-xs">
+                          <span className="w-28 flex-shrink-0 truncate text-foreground/90" title={p.name}>
+                            {p.name}
+                          </span>
+                          {/* Fill = 1st-choice demand (red when oversubscribed); tick marks capacity on top. */}
+                          <div className="relative h-2.5 flex-1 overflow-hidden rounded-full bg-foreground/10">
+                            <div
+                              className={cn("absolute inset-y-0 left-0 rounded-full", over ? "bg-red-500" : "bg-foreground/60")}
+                              style={{ width: `${demandW}%` }}
+                            />
+                            <div
+                              className="absolute inset-y-0 z-10 w-0.5 -translate-x-1/2 bg-background shadow-[0_0_0_1px_hsl(var(--foreground))]"
+                              style={{ left: `${capW}%` }}
+                              aria-hidden
+                            />
+                          </div>
+                          <span
+                            className={cn(
+                              "w-24 flex-shrink-0 text-right tabular-nums",
+                              over ? "text-red-500 font-medium" : "text-muted-foreground",
+                            )}
+                          >
+                            {p.firsts}/{p.capacity} ({(p.firsts / p.capacity).toFixed(1)}×)
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+                <p className="text-[0.7rem] text-muted-foreground">
+                  1st-choice demand vs estimated team size; the notch marks capacity, red bars are oversubscribed.
+                  {noCapacityCount > 0 && ` ${noCapacityCount} project${noCapacityCount === 1 ? "" : "s"} have no capacity set.`}
+                </p>
+              </div>
 
-            {projects.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No ranked applications for this period yet.</p>
-            ) : (
-              <>
-                {/* Demand vs capacity */}
-                <div className="flex flex-col gap-2 rounded-xl border bg-background p-4">
-                  <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Demand vs capacity
-                  </h3>
-                  {withCapacity.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">No projects have a capacity set.</p>
-                  ) : (
-                    <ul className="flex flex-col gap-1.5">
-                      {withCapacity.map((p) => {
-                        const over = p.firsts > p.capacity;
-                        const demandW = maxDemandCap === 0 ? 0 : Math.round((p.firsts / maxDemandCap) * 100);
-                        const capW = maxDemandCap === 0 ? 0 : Math.round((p.capacity / maxDemandCap) * 100);
-                        return (
-                          <li key={p.id} className="flex items-center gap-2 text-xs">
-                            <span className="w-28 flex-shrink-0 truncate text-foreground/90" title={p.name}>
-                              {p.name}
+              {/* Detailed matrix */}
+              <div className="flex flex-col gap-2">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  By rank
+                </h3>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-xs text-muted-foreground">
+                        <th className="py-1.5 pr-3 font-medium">Project</th>
+                        {ranks.map((rank) => (
+                          <th
+                            key={rank}
+                            className={cn(
+                              "py-1.5 px-2 text-right font-medium tabular-nums whitespace-nowrap",
+                              rank === 1 && "text-foreground",
+                            )}
+                          >
+                            {rankLabel(rank)}
+                          </th>
+                        ))}
+                        <th className="py-1.5 pl-2 text-right font-medium tabular-nums">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {projects.map((p) => (
+                        <tr key={p.id} className="border-t">
+                          <td className="py-1.5 pr-3">
+                            <span className="font-medium">{p.name}</span>
+                            <span className="ml-2 text-xs text-muted-foreground">
+                              {PROJECT_TYPE_LABELS[p.type] ?? p.type}
                             </span>
-                            {/* Fill = 1st-choice demand (red when oversubscribed); tick marks capacity on top. */}
-                            <div className="relative h-2.5 flex-1 overflow-hidden rounded-full bg-foreground/10">
-                              <div
-                                className={cn("absolute inset-y-0 left-0 rounded-full", over ? "bg-red-500" : "bg-foreground/60")}
-                                style={{ width: `${demandW}%` }}
-                              />
-                              <div
-                                className="absolute inset-y-0 z-10 w-0.5 -translate-x-1/2 bg-background shadow-[0_0_0_1px_hsl(var(--foreground))]"
-                                style={{ left: `${capW}%` }}
-                                aria-hidden
-                              />
-                            </div>
-                            <span
-                              className={cn(
-                                "w-24 flex-shrink-0 text-right tabular-nums",
-                                over ? "text-red-500 font-medium" : "text-muted-foreground",
-                              )}
-                            >
-                              {p.firsts}/{p.capacity} ({(p.firsts / p.capacity).toFixed(1)}×)
-                            </span>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  )}
-                  <p className="text-[0.7rem] text-muted-foreground">
-                    1st-choice demand vs estimated team size; the notch marks capacity, red bars are oversubscribed.
-                    {noCapacityCount > 0 && ` ${noCapacityCount} project${noCapacityCount === 1 ? "" : "s"} have no capacity set.`}
-                  </p>
-                </div>
-
-                {/* Detailed matrix */}
-                <div className="flex flex-col gap-2">
-                  <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    By rank
-                  </h3>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="text-left text-xs text-muted-foreground">
-                          <th className="py-1.5 pr-3 font-medium">Project</th>
+                          </td>
                           {ranks.map((rank) => (
-                            <th
+                            <td
                               key={rank}
                               className={cn(
-                                "py-1.5 px-2 text-right font-medium tabular-nums whitespace-nowrap",
-                                rank === 1 && "text-foreground",
+                                "py-1.5 px-2 text-right tabular-nums",
+                                rank === 1 && "bg-foreground/5 font-semibold",
+                                !p.byRank[rank] && "text-muted-foreground/50",
                               )}
                             >
-                              {rankLabel(rank)}
-                            </th>
-                          ))}
-                          <th className="py-1.5 pl-2 text-right font-medium tabular-nums">Total</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {projects.map((p) => (
-                          <tr key={p.id} className="border-t">
-                            <td className="py-1.5 pr-3">
-                              <span className="font-medium">{p.name}</span>
-                              <span className="ml-2 text-xs text-muted-foreground">
-                                {PROJECT_TYPE_LABELS[p.type] ?? p.type}
-                              </span>
+                              {p.byRank[rank] ?? 0}
                             </td>
-                            {ranks.map((rank) => (
-                              <td
-                                key={rank}
-                                className={cn(
-                                  "py-1.5 px-2 text-right tabular-nums",
-                                  rank === 1 && "bg-foreground/5 font-semibold",
-                                  !p.byRank[rank] && "text-muted-foreground/50",
-                                )}
-                              >
-                                {p.byRank[rank] ?? 0}
-                              </td>
-                            ))}
-                            <td className="py-1.5 pl-2 text-right font-semibold tabular-nums">{p.total}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                          ))}
+                          <td className="py-1.5 pl-2 text-right font-semibold tabular-nums">{p.total}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
-              </>
-            )}
-          </div>
-        )}
-      </DialogContent>
-    </Dialog>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </>
   );
 }

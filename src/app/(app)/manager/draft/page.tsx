@@ -19,7 +19,7 @@ export default async function DraftPage() {
   return (
     <div className="w-full max-w-6xl mx-auto p-6 flex flex-col gap-10">
       <div className="flex flex-col gap-1">
-        <Link href="/manager" className="text-sm text-muted-foreground hover:text-foreground">← Back</Link>
+        <Link href="/manager/applications?project=all" className="text-sm text-muted-foreground hover:text-foreground">← Back</Link>
         <h1 className="text-2xl font-bold">Draft</h1>
         <p className="text-sm text-muted-foreground">
           Set up draft rounds: the order projects pick in and how many applicants each may take, per round.

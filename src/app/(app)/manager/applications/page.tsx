@@ -42,6 +42,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ApplicationListSkeleton } from "@/components/skeletons";
 import { ApplicationPeriodsDialog, type ApplicationPeriod } from "@/components/application-periods-dialog";
 import { EmailBlastDialog } from "@/components/email-blast-dialog";
@@ -51,10 +52,9 @@ import {
   type ReviewStatus,
 } from "@/components/application-review-modal";
 import { ApplicationStats, type Stats } from "@/components/application-stats";
-import { ApplicationAnalyticsModal } from "@/components/application-analytics-modal";
+import { AnalyticsModal } from "@/components/analytics-modal";
 import { ApplicationSheetModal } from "@/components/application-sheet-modal";
 import { AllProjectsBoard } from "@/components/all-projects-board";
-import { ProjectAnalyticsModal } from "@/components/project-analytics-modal";
 import { enrichAppRows } from "@/lib/applicant-rows";
 import { rankLabel } from "@/lib/application-rank";
 import { compareReviewPriority } from "@/lib/utils";
@@ -216,7 +216,6 @@ export default function ManagerApplicationsPage() {
   const [periodsDialogOpen, setPeriodsDialogOpen] = useState(false);
   const [emailBlastOpen, setEmailBlastOpen] = useState(false);
   const [analyticsOpen, setAnalyticsOpen] = useState(false);
-  const [projAnalyticsOpen, setProjAnalyticsOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetReloadToken, setSheetReloadToken] = useState(0);
   // Coffee / infosession badges on applicant cards — off by default for denser drafting.
@@ -787,52 +786,83 @@ export default function ManagerApplicationsPage() {
         </p>
       </div>
 
-      {/* Period bar */}
+      {/* Period bar: the period picker (which also holds "Manage periods") on
+          the left, the exec-only tools as icons on the right. */}
       <div className="flex flex-wrap items-center gap-3">
         {periods === null ? (
           <div className="h-9 w-48 rounded-md bg-muted animate-pulse" />
-        ) : periods.length === 0 ? (
-          <span className="text-sm text-muted-foreground">No application periods yet.</span>
         ) : (
+          // Rendered even with no periods yet, since "Manage periods" -- the only
+          // way to create the first one -- lives inside it.
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button className="flex items-center gap-2 border rounded-md px-3 py-2 text-sm bg-background hover:bg-accent transition-colors">
-                <span className="font-medium">{selectedPeriod?.name ?? "Select period"}</span>
+                <span className="font-medium">
+                  {selectedPeriod?.name ?? (periods.length === 0 ? "No periods yet" : "Select period")}
+                </span>
                 {selectedPeriod && <PeriodStatusText period={selectedPeriod} />}
                 <ChevronDown size={14} className="text-muted-foreground" />
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start">
+              {periods.length === 0 && !isExec && (
+                <DropdownMenuItem disabled>No application periods yet</DropdownMenuItem>
+              )}
               {periods.map((p) => (
                 <DropdownMenuItem key={p.id} onSelect={() => setSelectedPeriodId(p.id)} className="flex items-center gap-2">
                   <span className="font-medium">{p.name}</span>
                   <PeriodStatusText period={p} />
                 </DropdownMenuItem>
               ))}
+              {isExec && (
+                <>
+                  {periods.length > 0 && <DropdownMenuSeparator />}
+                  <DropdownMenuItem
+                    onSelect={() => setPeriodsDialogOpen(true)}
+                    className="flex items-center gap-2"
+                  >
+                    <SlidersHorizontal size={14} className="text-muted-foreground" />
+                    Manage periods
+                  </DropdownMenuItem>
+                </>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         )}
 
-        {isExec && (
-          <Button variant="outline" size="sm" onClick={() => setPeriodsDialogOpen(true)}>
-            <SlidersHorizontal size={14} className="mr-1.5" />
-            Manage periods
-          </Button>
-        )}
+        <div className="ml-auto flex items-center gap-2">
+          {canEmailBlast && selectedPeriod && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  aria-label="Email blast"
+                  onClick={() => setEmailBlastOpen(true)}
+                >
+                  <Mail size={16} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Email blast</TooltipContent>
+            </Tooltip>
+          )}
 
-        {canEmailBlast && selectedPeriod && (
-          <Button variant="outline" size="sm" onClick={() => setEmailBlastOpen(true)}>
-            <Mail size={14} className="mr-1.5" />
-            Email blast
-          </Button>
-        )}
-
-        {isExec && selectedPeriodId && (
-          <Button variant="outline" size="sm" onClick={() => setAnalyticsOpen(true)}>
-            <BarChart3 size={14} className="mr-1.5" />
-            View analytics
-          </Button>
-        )}
+          {isExec && selectedPeriodId && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  aria-label="View analytics"
+                  onClick={() => setAnalyticsOpen(true)}
+                >
+                  <BarChart3 size={16} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">View analytics</TooltipContent>
+            </Tooltip>
+          )}
+        </div>
       </div>
 
       {/* Exec-only period funnel stats */}
@@ -874,28 +904,12 @@ export default function ManagerApplicationsPage() {
               </DropdownMenuContent>
             </DropdownMenu>
           )}
-
-          {isExec && selectedPeriodId && (
-            <Button variant="outline" size="sm" onClick={() => setProjAnalyticsOpen(true)}>
-              <BarChart3 size={14} className="mr-1.5" />
-              Project analytics
-            </Button>
-          )}
         </div>
       )}
       {reviewableProjects === null && <div className="h-9 w-48 rounded-md bg-muted animate-pulse" />}
 
       {isExec && (
-        <ProjectAnalyticsModal
-          open={projAnalyticsOpen}
-          onOpenChange={setProjAnalyticsOpen}
-          periodId={selectedPeriodId}
-          periodName={selectedPeriod?.name}
-        />
-      )}
-
-      {isExec && (
-        <ApplicationAnalyticsModal
+        <AnalyticsModal
           open={analyticsOpen}
           onOpenChange={setAnalyticsOpen}
           periods={periods ?? []}

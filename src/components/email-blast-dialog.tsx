@@ -1,24 +1,37 @@
 "use client";
 
 import { createClient } from "@/lib/supabase/client";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { ChevronDown } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
+import { selectInChunks } from "@/lib/postgrest-chunk";
 
-type DraftState = "empty" | "unfinished";
+// One recipient, whichever cohort they came from. `email` may be null — those
+// rows are counted in the intro line but never make it into the copyable list.
+type Recipient = { user_id: string; email: string | null };
 
-type DraftApplicant = {
-  user_id: string;
-  preferred_firstname: string | null;
-  lastname: string | null;
-  email: string | null;
-  draft_state: DraftState;
-};
+type Tab = "members" | "unfinished" | "acceptances";
+const TABS: { key: Tab; label: string }[] = [
+  { key: "members", label: "Active members" },
+  { key: "unfinished", label: "Unfinished apps" },
+  { key: "acceptances", label: "Acceptances" },
+];
 
-function applicantName(a: DraftApplicant): string {
-  return [a.preferred_firstname, a.lastname].filter(Boolean).join(" ") || "Applicant";
-}
+// Sentinel for "every accepted applicant, regardless of project" in the
+// acceptances tab's project picker — same idiom as the applications page.
+const ALL_PROJECTS = "__all__";
+
+// An accepted applicant plus the project they were placed on.
+type Acceptance = Recipient & { project_id: string | null };
+type ProjectOption = { id: string; name: string };
 
 // Human-readable due date/time for the email script, in the reviewer's local time.
 function formatDue(iso: string): string {
@@ -31,7 +44,20 @@ function formatDue(iso: string): string {
   });
 }
 
-function buildEmailScript(periodName: string, dueIso: string): string {
+// Active-member blasts vary too much for a canned body, so this is a skeleton
+// the sender fills in rather than a finished email.
+function buildGenericScript(): string {
+  return `Subject: [subject]
+
+Hi all,
+
+[your message here]
+
+Best,
+The Open Portal Team`;
+}
+
+function buildReminderScript(periodName: string, dueIso: string): string {
   const due = formatDue(dueIso);
   return `Subject: Reminder: your ${periodName} application is due ${due}
 
@@ -42,6 +68,26 @@ This is a friendly reminder that we don't have a completed application from you 
 If you're still interested, please log back in to the portal and finish submitting it before then — we'd hate for you to miss out because of an unfinished form.
 
 If you've decided not to apply this cycle, no action is needed. If you have any questions, just reply to this email.
+
+Best,
+The Open Portal Team`;
+}
+
+// Acceptance email. Naming the project only works when the list is a single
+// project's — the "All projects" list mixes placements, so it drops the name.
+function buildAcceptanceScript(periodName: string, projectName: string | null): string {
+  const placement = projectName
+    ? `You've been accepted onto ${projectName}.`
+    : `You've been accepted onto a project.`;
+  return `Subject: You're in! ${periodName} results
+
+Hi there,
+
+Congratulations — ${placement} Thanks for putting the time into your application; we had a strong pool this cycle and we're excited to have you on the team.
+
+Your project manager will be in touch shortly with kickoff details. In the meantime, log back in to the portal to see your project page.
+
+If you have any questions, just reply to this email.
 
 Best,
 The Open Portal Team`;
@@ -65,9 +111,100 @@ function CopyButton({ text, label }: { text: string; label: string }) {
   );
 }
 
-// VP Tech/President-only dialog listing everyone with an empty/unfinished draft
-// application for a period (PMs and board/exec excluded), plus a ready-to-copy
-// reminder email so the manager can send the blast themselves — never sends email.
+// The two blocks every tab is made of: the comma-joined address list, and the
+// script to paste into the mail client. Both are read-only and select-on-focus,
+// since the whole dialog is a copy surface.
+function RecipientsBlock({ emails }: { emails: string[] }) {
+  const list = emails.join(", ");
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Recipients ({emails.length})
+        </span>
+        <CopyButton text={list} label="Copy emails" />
+      </div>
+      <textarea
+        readOnly
+        value={list}
+        rows={4}
+        className="w-full border rounded-md px-3 py-2 text-xs font-mono bg-muted resize-none focus:outline-none"
+        onFocus={(e) => e.currentTarget.select()}
+      />
+    </div>
+  );
+}
+
+function ScriptBlock({ script }: { script: string }) {
+  return (
+    <div className="flex flex-col gap-3 border-t pt-4">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Email script
+        </span>
+        <CopyButton text={script} label="Copy script" />
+      </div>
+      <textarea
+        readOnly
+        value={script}
+        rows={10}
+        className="w-full border rounded-md px-3 py-2 text-sm bg-muted resize-none focus:outline-none"
+        onFocus={(e) => e.currentTarget.select()}
+      />
+    </div>
+  );
+}
+
+// Shared shell for one tab: intro line, then loading/empty/loaded states.
+// `rows === null` means "not fetched yet" (each tab loads lazily, on first view).
+function TabBody({
+  rows,
+  error,
+  intro,
+  emptyLabel,
+  script,
+  children,
+}: {
+  rows: Recipient[] | null;
+  error: string | null;
+  intro: string;
+  emptyLabel: string;
+  script: string;
+  children?: React.ReactNode;
+}) {
+  const emails = (rows ?? []).flatMap((r) => (r.email ? [r.email] : []));
+  return (
+    <div className="flex flex-col gap-4">
+      {children}
+
+      {error && <p className="text-sm text-red-500">{error}</p>}
+
+      {rows === null ? (
+        <div className="flex flex-col gap-2">
+          <div className="h-20 rounded-xl bg-muted animate-pulse" />
+          <div className="h-40 rounded-xl bg-muted animate-pulse" />
+        </div>
+      ) : rows.length === 0 ? (
+        <div className="px-4 py-8 text-center text-sm text-muted-foreground border rounded-xl">
+          {emptyLabel}
+        </div>
+      ) : (
+        <>
+          <p className="text-sm text-muted-foreground">
+            {intro} {emails.length} of {rows.length} have an email on file.
+          </p>
+          <RecipientsBlock emails={emails} />
+          <ScriptBlock script={script} />
+        </>
+      )}
+    </div>
+  );
+}
+
+// VP Tech/President-only dialog that assembles a copyable recipient list plus a
+// matching script for one of three cohorts — every active member, everyone with
+// an empty/unfinished application this period, and this period's acceptances
+// (per project, or all of them). It never sends anything.
 export function EmailBlastDialog({
   open,
   onOpenChange,
@@ -77,26 +214,103 @@ export function EmailBlastDialog({
   onOpenChange: (open: boolean) => void;
   period: { id: string; name: string; ends_at: string };
 }) {
-  const [rows, setRows] = useState<DraftApplicant[] | null>(null);
+  const [tab, setTab] = useState<Tab>("members");
+
+  // One cache per cohort; null = not loaded yet, so each tab only queries the
+  // first time it's opened. All three reset when the dialog opens or the period
+  // changes.
+  const [members, setMembers] = useState<Recipient[] | null>(null);
+  const [drafts, setDrafts] = useState<Recipient[] | null>(null);
+  const [acceptances, setAcceptances] = useState<Acceptance[] | null>(null);
+  const [projects, setProjects] = useState<ProjectOption[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState<string>(ALL_PROJECTS);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
-    setRows(null);
+    setTab("members");
+    setMembers(null);
+    setDrafts(null);
+    setAcceptances(null);
+    setProjects([]);
+    setSelectedProjectId(ALL_PROJECTS);
     setError(null);
-    (async () => {
-      const supabase = createClient();
-      const { data, error: err } = await supabase.rpc("application_period_draft_applicants", {
-        p_period_id: period.id,
-      });
-      if (err) { setError(err.message); return; }
-      setRows((data ?? []) as DraftApplicant[]);
-    })();
   }, [open, period.id]);
 
-  const withEmail = (rows ?? []).filter((r) => r.email);
-  const emailList = withEmail.map((r) => r.email).join(", ");
-  const script = buildEmailScript(period.name, period.ends_at);
+  // Every active member. `members` is readable by any authenticated user, and
+  // this dialog is already VP Tech/President-gated by the caller.
+  const loadMembers = useCallback(async () => {
+    const supabase = createClient();
+    const { data, error: err } = await supabase
+      .from("members")
+      .select("user_id, email")
+      .eq("status", "active");
+    if (err) { setError(err.message); setMembers([]); return; }
+    setMembers((data ?? []) as Recipient[]);
+  }, []);
+
+  // Empty/unfinished applications for this period (board/exec and PMs excluded
+  // by the RPC itself).
+  const loadDrafts = useCallback(async () => {
+    const supabase = createClient();
+    const { data, error: err } = await supabase.rpc("application_period_draft_applicants", {
+      p_period_id: period.id,
+    });
+    if (err) { setError(err.message); setDrafts([]); return; }
+    setDrafts((data ?? []) as Recipient[]);
+  }, [period.id]);
+
+  // This period's acceptances. `accepted_project_id` is the authoritative
+  // placement (written by accept_application, whether from the review modal or
+  // complete_draft) -- project_members would also include earlier cycles.
+  const loadAcceptances = useCallback(async () => {
+    const supabase = createClient();
+    const { data, error: err } = await supabase
+      .from("applications")
+      .select("applicant_id, accepted_project_id")
+      .eq("period_id", period.id)
+      .eq("status", "accepted");
+    if (err) { setError(err.message); setAcceptances([]); return; }
+    const rows = (data ?? []) as { applicant_id: string; accepted_project_id: string | null }[];
+    const ids = [...new Set(rows.map((r) => r.applicant_id))];
+
+    const [emailRows, projectRows] = await Promise.all([
+      selectInChunks<{ user_id: string; email: string | null }>(ids, (chunk) =>
+        supabase.from("members").select("user_id, email").in("user_id", chunk),
+      ),
+      supabase.from("projects").select("id, name").order("name"),
+    ]);
+    const emailById = new Map(emailRows.map((m) => [m.user_id, m.email]));
+
+    setAcceptances(
+      rows.map((r) => ({
+        user_id: r.applicant_id,
+        email: emailById.get(r.applicant_id) ?? null,
+        project_id: r.accepted_project_id,
+      })),
+    );
+    // Only offer projects that actually took someone this period.
+    const placed = new Set(rows.map((r) => r.accepted_project_id).filter(Boolean));
+    setProjects(
+      ((projectRows.data ?? []) as ProjectOption[]).filter((p) => placed.has(p.id)),
+    );
+  }, [period.id]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (tab === "members" && members === null) loadMembers();
+    if (tab === "unfinished" && drafts === null) loadDrafts();
+    if (tab === "acceptances" && acceptances === null) loadAcceptances();
+  }, [open, tab, members, drafts, acceptances, loadMembers, loadDrafts, loadAcceptances]);
+
+  const allProjects = selectedProjectId === ALL_PROJECTS;
+  const selectedProjectName = projects.find((p) => p.id === selectedProjectId)?.name ?? null;
+  const acceptanceRows =
+    acceptances === null
+      ? null
+      : allProjects
+        ? acceptances
+        : acceptances.filter((a) => a.project_id === selectedProjectId);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -107,69 +321,84 @@ export function EmailBlastDialog({
 
         <div className="flex flex-col gap-4">
           <p className="text-sm text-muted-foreground">
-            Applicants with an empty or unfinished application for this period. Board/exec and
-            PMs are excluded. This doesn&apos;t send anything — copy the recipients and script
-            below and send it yourself.
+            This doesn&apos;t send anything — pick a group, then copy the recipients and the
+            script and send it yourself.
           </p>
 
-          {error && <p className="text-sm text-red-500">{error}</p>}
+          <div className="flex gap-1 border-b">
+            {TABS.map((t) => (
+              <button
+                key={t.key}
+                onClick={() => setTab(t.key)}
+                className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                  tab === t.key
+                    ? "border-foreground text-foreground"
+                    : "border-transparent text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
 
-          {rows === null ? (
-            <div className="flex flex-col gap-2">
-              {[0, 1, 2].map((i) => (
-                <div key={i} className="h-12 rounded-xl bg-muted animate-pulse" />
-              ))}
-            </div>
-          ) : rows.length === 0 ? (
-            <div className="px-4 py-8 text-center text-sm text-muted-foreground border rounded-xl">
-              No empty or unfinished applications for this period.
-            </div>
-          ) : (
-            <div className="flex flex-col gap-2">
-              {rows.map((r) => (
-                <div key={r.user_id} className="flex items-center gap-3 border rounded-xl px-4 py-2.5">
-                  <div className="flex flex-col min-w-0 flex-1">
-                    <span className="text-sm font-medium truncate">{applicantName(r)}</span>
-                    <span className="text-xs text-muted-foreground truncate">{r.email ?? "No email on file"}</span>
-                  </div>
-                  <Badge variant={r.draft_state === "empty" ? "secondary" : "outline"}>
-                    {r.draft_state === "empty" ? "Empty" : "Unfinished"}
-                  </Badge>
-                </div>
-              ))}
-            </div>
+          {tab === "members" && (
+            <TabBody
+              rows={members}
+              error={error}
+              intro="Every member with an active status."
+              emptyLabel="No active members."
+              script={buildGenericScript()}
+            />
           )}
 
-          {rows !== null && withEmail.length > 0 && (
-            <div className="flex flex-col gap-3 border-t pt-4">
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Recipients ({withEmail.length})
-                </span>
-                <CopyButton text={emailList} label="Copy emails" />
-              </div>
-              <textarea
-                readOnly
-                value={emailList}
-                rows={2}
-                className="w-full border rounded-md px-3 py-2 text-xs font-mono bg-muted resize-none focus:outline-none"
-                onFocus={(e) => e.currentTarget.select()}
-              />
+          {tab === "unfinished" && (
+            <TabBody
+              rows={drafts}
+              error={error}
+              intro="Applicants with an empty or unfinished application for this period; board/exec and PMs are excluded."
+              emptyLabel="No empty or unfinished applications for this period."
+              script={buildReminderScript(period.name, period.ends_at)}
+            />
+          )}
 
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Reminder email
-                </span>
-                <CopyButton text={script} label="Copy script" />
-              </div>
-              <textarea
-                readOnly
-                value={script}
-                rows={10}
-                className="w-full border rounded-md px-3 py-2 text-sm bg-muted resize-none focus:outline-none"
-                onFocus={(e) => e.currentTarget.select()}
-              />
-            </div>
+          {tab === "acceptances" && (
+            <TabBody
+              rows={acceptanceRows}
+              error={error}
+              intro={
+                allProjects
+                  ? "Everyone accepted onto a project this period."
+                  : `Everyone accepted onto ${selectedProjectName ?? "this project"}.`
+              }
+              emptyLabel={
+                allProjects
+                  ? "Nobody has been accepted for this period yet."
+                  : "Nobody has been accepted onto this project yet."
+              }
+              script={buildAcceptanceScript(period.name, allProjects ? null : selectedProjectName)}
+            >
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button className="flex items-center justify-between gap-2 self-start rounded-md border bg-background px-3 py-2 text-sm hover:bg-accent transition-colors min-w-[14rem]">
+                    <span className="font-medium">
+                      {allProjects ? "All projects" : selectedProjectName ?? "Select project"}
+                    </span>
+                    <ChevronDown size={14} className="text-muted-foreground" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  <DropdownMenuItem onSelect={() => setSelectedProjectId(ALL_PROJECTS)}>
+                    All projects
+                  </DropdownMenuItem>
+                  {projects.length > 0 && <DropdownMenuSeparator />}
+                  {projects.map((p) => (
+                    <DropdownMenuItem key={p.id} onSelect={() => setSelectedProjectId(p.id)}>
+                      {p.name}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </TabBody>
           )}
         </div>
       </DialogContent>

@@ -2,14 +2,8 @@
 
 import { createClient } from "@/lib/supabase/client";
 import { useEffect, useState } from "react";
-import { ArrowRight, ChevronDown } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { pct, DonutChart, Legend, type Segment } from "@/components/donut-chart";
 import { PersonName } from "@/components/person-profile-provider";
@@ -37,8 +31,6 @@ type Row = {
   // Optional so the modal still renders against a pre-0063 database.
   both_valid?: number;
 };
-
-type Period = { id: string; name: string };
 
 // Long-format demographics row from application_demographics() (0062).
 type DemoRow = { dimension: string; bucket: string; cnt: number };
@@ -143,32 +135,25 @@ function invalidIssues(r: InvalidRow): string[] {
 
 // Exec analytics for recruiting funnels: per-period pie breakdowns of coffee-chat
 // and info-session status plus a historical "valid %" table across all periods.
-export function ApplicationAnalyticsModal({
-  open,
-  onOpenChange,
-  periods,
-  initialPeriodId,
+// The period is chosen by the tabbed shell (AnalyticsModal) and passed in, so
+// both analytics tabs always describe the same period; clicking a row of the
+// history table below reports the new period back up through onPeriodChange.
+// Mounted only while its tab is open, so every fetch runs on mount.
+export function RecruitingAnalyticsBody({
+  periodId,
+  onPeriodChange,
 }: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  periods: Period[];
-  initialPeriodId: string | null;
+  periodId: string | null;
+  onPeriodChange: (periodId: string) => void;
 }) {
   const [rows, setRows] = useState<Row[] | null>(null);
   const [demo, setDemo] = useState<DemoRow[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [selectedPeriodId, setSelectedPeriodId] = useState<string | null>(initialPeriodId);
   const [invalidOpen, setInvalidOpen] = useState(false);
   const [invalidRows, setInvalidRows] = useState<InvalidRow[] | null>(null);
   const [invalidError, setInvalidError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (open) setSelectedPeriodId(initialPeriodId);
-    else setInvalidOpen(false);
-  }, [open, initialPeriodId]);
-
-  useEffect(() => {
-    if (!open) return;
     setRows(null);
     setError(null);
     const supabase = createClient();
@@ -181,24 +166,24 @@ export function ApplicationAnalyticsModal({
       }
       setRows((data as Row[]) ?? []);
     })();
-  }, [open]);
+  }, []);
 
   // Demographics (grad year / returning) for the selected period.
   useEffect(() => {
-    if (!open || !selectedPeriodId) {
+    if (!periodId) {
       setDemo([]);
       return;
     }
     const supabase = createClient();
     (async () => {
-      const { data } = await supabase.rpc("application_demographics", { p_period_id: selectedPeriodId });
+      const { data } = await supabase.rpc("application_demographics", { p_period_id: periodId });
       setDemo((data as DemoRow[]) ?? []);
     })();
-  }, [open, selectedPeriodId]);
+  }, [periodId]);
 
   // Invalid-people list for the selected period; fetched only while that modal is open.
   useEffect(() => {
-    if (!invalidOpen || !selectedPeriodId) {
+    if (!invalidOpen || !periodId) {
       if (!invalidOpen) {
         setInvalidRows(null);
         setInvalidError(null);
@@ -210,7 +195,7 @@ export function ApplicationAnalyticsModal({
     const supabase = createClient();
     (async () => {
       const { data, error: err } = await supabase.rpc("application_analytics_invalid", {
-        p_period_id: selectedPeriodId,
+        p_period_id: periodId,
       });
       if (err) {
         setInvalidError(err.message);
@@ -219,12 +204,9 @@ export function ApplicationAnalyticsModal({
       }
       setInvalidRows((data as InvalidRow[]) ?? []);
     })();
-  }, [invalidOpen, selectedPeriodId]);
+  }, [invalidOpen, periodId]);
 
-  const selected =
-    rows?.find((r) => r.period_id === selectedPeriodId) ?? rows?.[0] ?? null;
-  const selectedName =
-    periods.find((p) => p.id === selectedPeriodId)?.name ?? selected?.period_name ?? "Select period";
+  const selected = rows?.find((r) => r.period_id === periodId) ?? rows?.[0] ?? null;
   const { gradYear, returning } = buildDemographics(demo);
   const gradYearSegments = toSegments(gradYear, (_, i) => GRAD_COLORS[i % GRAD_COLORS.length]);
   const returningSegments = toSegments(returning, (label) => RETURNING_COLORS[label] ?? INDIGO);
@@ -234,173 +216,143 @@ export function ApplicationAnalyticsModal({
   // in the list title at the same time.
   const invalidListCount = invalidRows?.length ?? null;
 
-  const handleOpenChange = (next: boolean) => {
-    if (!next) setInvalidOpen(false);
-    onOpenChange(next);
-  };
-
   return (
     <>
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Recruiting analytics</DialogTitle>
-        </DialogHeader>
+    {rows === null ? (
+      <div className="flex flex-col gap-4">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="h-56 rounded-xl border bg-muted animate-pulse" />
+          <div className="h-56 rounded-xl border bg-muted animate-pulse" />
+        </div>
+        <div className="h-40 rounded-xl border bg-muted animate-pulse" />
+      </div>
+    ) : (
+      <div className="flex flex-col gap-5">
+        {error && <p className="text-sm text-red-500">{error}</p>}
 
-        {rows === null ? (
-          <div className="flex flex-col gap-4">
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div className="h-56 rounded-xl border bg-muted animate-pulse" />
-              <div className="h-56 rounded-xl border bg-muted animate-pulse" />
+        {selected ? (
+          <>
+            {/* Funnel recap */}
+            <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
+              {[
+                ["Empty", selected.empty_drafts],
+                ["Unfinished", selected.unfinished_drafts],
+                ["Submitted", selected.submitted],
+                ["Accepted", selected.accepted],
+                ["Rejected", selected.rejected],
+              ].map(([label, value]) => (
+                <div key={label as string} className="rounded-lg border bg-background px-3 py-2">
+                  <div className="text-lg font-bold tabular-nums">{value}</div>
+                  <div className="text-[0.7rem] text-muted-foreground">{label}</div>
+                </div>
+              ))}
             </div>
-            <div className="h-40 rounded-xl border bg-muted animate-pulse" />
-          </div>
-        ) : (
-          <div className="flex flex-col gap-5">
-            {/* Period selector */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button className="flex items-center justify-between gap-2 self-start rounded-md border bg-background px-3 py-2 text-sm hover:bg-accent transition-colors min-w-[12rem]">
-                  <span className="font-medium">{selectedName}</span>
-                  <ChevronDown size={14} className="text-muted-foreground" />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start">
-                {periods.map((p) => (
-                  <DropdownMenuItem key={p.id} onSelect={() => setSelectedPeriodId(p.id)}>
-                    {p.name}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
 
-            {error && <p className="text-sm text-red-500">{error}</p>}
-
-            {selected ? (
-              <>
-                {/* Funnel recap */}
-                <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
-                  {[
-                    ["Empty", selected.empty_drafts],
-                    ["Unfinished", selected.unfinished_drafts],
-                    ["Submitted", selected.submitted],
-                    ["Accepted", selected.accepted],
-                    ["Rejected", selected.rejected],
-                  ].map(([label, value]) => (
-                    <div key={label as string} className="rounded-lg border bg-background px-3 py-2">
-                      <div className="text-lg font-bold tabular-nums">{value}</div>
-                      <div className="text-[0.7rem] text-muted-foreground">{label}</div>
-                    </div>
-                  ))}
+            {/* Combined valid: cleared both requirements */}
+            <div className="flex flex-col gap-2 rounded-xl border bg-background p-4">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Valid</h3>
+                {invalidCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setInvalidOpen(true)}
+                    className="inline-flex items-center gap-1 rounded-sm text-xs font-medium text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    View invalid
+                    <ArrowRight size={12} />
+                  </button>
+                )}
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="text-2xl font-bold tabular-nums">
+                  {pct(bothValid(selected), consideredTotal(selected))}%
+                </span>
+                <span className="text-sm text-muted-foreground tabular-nums">
+                  {bothValid(selected)}/{consideredTotal(selected)}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <Bar pct={pct(bothValid(selected), consideredTotal(selected))} color={INDIGO} />
                 </div>
+              </div>
+              <p className="text-[0.7rem] text-muted-foreground">
+                Cleared recruiting requirements: coffee chat done and info session attended.
+                A booked-but-incomplete chat doesn&apos;t count; board/exec and returning
+                members are exempt. Rejected applications are excluded.
+              </p>
+            </div>
 
-                {/* Combined valid: cleared both requirements */}
-                <div className="flex flex-col gap-2 rounded-xl border bg-background p-4">
-                  <div className="flex items-center justify-between gap-2">
-                    <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Valid</h3>
-                    {invalidCount > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => setInvalidOpen(true)}
-                        className="inline-flex items-center gap-1 rounded-sm text-xs font-medium text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      >
-                        View invalid
-                        <ArrowRight size={12} />
-                      </button>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className="text-2xl font-bold tabular-nums">
-                      {pct(bothValid(selected), consideredTotal(selected))}%
-                    </span>
-                    <span className="text-sm text-muted-foreground tabular-nums">
-                      {bothValid(selected)}/{consideredTotal(selected)}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <Bar pct={pct(bothValid(selected), consideredTotal(selected))} color={INDIGO} />
-                    </div>
-                  </div>
-                  <p className="text-[0.7rem] text-muted-foreground">
-                    Cleared recruiting requirements: coffee chat done and info session attended.
-                    A booked-but-incomplete chat doesn&apos;t count; board/exec and returning
-                    members are exempt. Rejected applications are excluded.
-                  </p>
-                </div>
+            {/* Applicant demographics */}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <PieCard
+                title="By grad year"
+                segments={gradYearSegments}
+                total={gradYear.reduce((s, it) => s + it.count, 0)}
+                centerSub="applicants"
+              />
+              <PieCard
+                title="Returning vs first-time"
+                segments={returningSegments}
+                total={returning.reduce((s, it) => s + it.count, 0)}
+                centerSub="applicants"
+              />
+            </div>
 
-                {/* Applicant demographics */}
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <PieCard
-                    title="By grad year"
-                    segments={gradYearSegments}
-                    total={gradYear.reduce((s, it) => s + it.count, 0)}
-                    centerSub="applicants"
-                  />
-                  <PieCard
-                    title="Returning vs first-time"
-                    segments={returningSegments}
-                    total={returning.reduce((s, it) => s + it.count, 0)}
-                    centerSub="applicants"
-                  />
-                </div>
-
-                {/* History */}
-                <div className="flex flex-col gap-2">
-                  <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    By period
-                  </h3>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="text-left text-xs text-muted-foreground">
-                          <th className="py-1 pr-3 font-medium">Period</th>
-                          <th className="py-1 pr-3 font-medium tabular-nums">Submitted</th>
-                          <th className="py-1 pr-3 font-medium">Coffee valid</th>
-                          <th className="py-1 pr-3 font-medium">Info valid</th>
-                          <th className="py-1 font-medium">Valid</th>
+            {/* History */}
+            <div className="flex flex-col gap-2">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                By period
+              </h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-xs text-muted-foreground">
+                      <th className="py-1 pr-3 font-medium">Period</th>
+                      <th className="py-1 pr-3 font-medium tabular-nums">Submitted</th>
+                      <th className="py-1 pr-3 font-medium">Coffee valid</th>
+                      <th className="py-1 pr-3 font-medium">Info valid</th>
+                      <th className="py-1 font-medium">Valid</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((r) => {
+                      const sub = submittedTotal(r);
+                      const considered = consideredTotal(r);
+                      const cv = pct(coffeeValid(r), sub);
+                      const iv = pct(infoValid(r), sub);
+                      const isSel = r.period_id === selected.period_id;
+                      return (
+                        <tr
+                          key={r.period_id}
+                          onClick={() => onPeriodChange(r.period_id)}
+                          className={cn(
+                            "cursor-pointer border-t hover:bg-accent/50 transition-colors",
+                            isSel && "bg-accent/40",
+                          )}
+                        >
+                          <td className="py-1.5 pr-3">{r.period_name}</td>
+                          <td className="py-1.5 pr-3 tabular-nums">{sub}</td>
+                          <td className="py-1.5 pr-3">
+                            <Bar pct={cv} color={GREEN} />
+                          </td>
+                          <td className="py-1.5 pr-3">
+                            <Bar pct={iv} color={SKY} />
+                          </td>
+                          <td className="py-1.5">
+                            <Bar pct={pct(bothValid(r), considered)} color={INDIGO} />
+                          </td>
                         </tr>
-                      </thead>
-                      <tbody>
-                        {rows.map((r) => {
-                          const sub = submittedTotal(r);
-                          const considered = consideredTotal(r);
-                          const cv = pct(coffeeValid(r), sub);
-                          const iv = pct(infoValid(r), sub);
-                          const isSel = r.period_id === selected.period_id;
-                          return (
-                            <tr
-                              key={r.period_id}
-                              onClick={() => setSelectedPeriodId(r.period_id)}
-                              className={cn(
-                                "cursor-pointer border-t hover:bg-accent/50 transition-colors",
-                                isSel && "bg-accent/40",
-                              )}
-                            >
-                              <td className="py-1.5 pr-3">{r.period_name}</td>
-                              <td className="py-1.5 pr-3 tabular-nums">{sub}</td>
-                              <td className="py-1.5 pr-3">
-                                <Bar pct={cv} color={GREEN} />
-                              </td>
-                              <td className="py-1.5 pr-3">
-                                <Bar pct={iv} color={SKY} />
-                              </td>
-                              <td className="py-1.5">
-                                <Bar pct={pct(bothValid(r), considered)} color={INDIGO} />
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </>
-            ) : (
-              <p className="text-sm text-muted-foreground">No application periods yet.</p>
-            )}
-          </div>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
+        ) : (
+          <p className="text-sm text-muted-foreground">No application periods yet.</p>
         )}
-      </DialogContent>
-    </Dialog>
+      </div>
+    )}
 
     <Dialog open={invalidOpen} onOpenChange={setInvalidOpen}>
       <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
