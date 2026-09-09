@@ -232,6 +232,10 @@ export function ApplicationAnalyticsModal({
   const gradYearSegments = toSegments(gradYear, (_, i) => GRAD_COLORS[i % GRAD_COLORS.length]);
   const returningSegments = toSegments(returning, (label) => RETURNING_COLORS[label] ?? INDIGO);
   const invalidCount = selected ? consideredTotal(selected) - bothValid(selected) : 0;
+  // Dialog header uses the loaded list length (not invalidCount) so a drifted
+  // both_valid vs invalid-RPC pair can't show "15" in the card math and "8 people"
+  // in the list title at the same time.
+  const invalidListCount = invalidRows?.length ?? null;
 
   const handleOpenChange = (next: boolean) => {
     if (!next) setInvalidOpen(false);
@@ -406,9 +410,9 @@ export function ApplicationAnalyticsModal({
         <DialogHeader>
           <DialogTitle>
             Invalid
-            {invalidRows ? (
+            {invalidListCount != null ? (
               <span className="ml-2 text-sm font-normal text-muted-foreground tabular-nums">
-                {invalidRows.length} {invalidRows.length === 1 ? "person" : "people"}
+                {invalidListCount} {invalidListCount === 1 ? "person" : "people"}
               </span>
             ) : null}
           </DialogTitle>
