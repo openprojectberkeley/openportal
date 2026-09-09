@@ -29,6 +29,35 @@ export function daysLate(submittedAt?: string | null, endsAt?: string | null): n
   return Math.ceil(ms / 86_400_000);
 }
 
+// 3+ days past ends_at (ceil). Board/exec and returning stay exempt from this
+// as a validity rule — see isRecruitingValid.
+export function isSeverelyLate(submittedAt?: string | null, endsAt?: string | null): boolean {
+  return daysLate(submittedAt, endsAt) >= 3;
+}
+
+export type RecruitingValidFields = {
+  boardExec?: boolean;
+  returning?: boolean;
+  coffeeDone?: boolean;
+  infosession?: boolean;
+  submittedAt?: string | null;
+  endsAt?: string | null;
+};
+
+// Recruiting-valid: board/exec or returning, or coffee done + info attended and
+// not 3+ days late. Matches application_analytics both_valid / invalid list.
+export function isRecruitingValid({
+  boardExec = false,
+  returning = false,
+  coffeeDone = false,
+  infosession = false,
+  submittedAt,
+  endsAt,
+}: RecruitingValidFields): boolean {
+  if (boardExec || returning) return true;
+  return coffeeDone && infosession && !isSeverelyLate(submittedAt, endsAt);
+}
+
 export type ReviewPriorityFields = {
   returning: boolean;
   submittedAt?: string | null;

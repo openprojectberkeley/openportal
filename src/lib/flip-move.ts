@@ -3,7 +3,7 @@ import { flushSync } from "react-dom";
 const EASING = "cubic-bezier(0.16, 1, 0.3, 1)";
 const DURATION_MS = 320;
 
-function prefersReducedMotion(): boolean {
+export function prefersReducedMotion(): boolean {
   if (typeof window === "undefined" || !window.matchMedia) return false;
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }

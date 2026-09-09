@@ -9,6 +9,8 @@ import { Badge } from "@/components/ui/badge";
 import type { ReviewStatus } from "@/components/application-review-modal";
 import { CoffeeChatIndicator, InfosessionIndicator, LateBadge, type CoffeeState } from "@/components/applicant-indicators";
 import { rankLabel } from "@/lib/application-rank";
+import { accentStyle } from "@/lib/portal-color";
+import { isSeverelyLate } from "@/lib/utils";
 
 export type Applicant = { user_id: string; preferred_firstname: string | null; lastname: string | null };
 
@@ -26,7 +28,7 @@ export type AppRow = {
   rank: number;
   // Applicant checked in to at least one info session.
   infosession: boolean;
-  // Board/exec or returning, or coffee done and attended an info session.
+  // Board/exec or returning, or coffee done + info attended and not 3+ days late.
   valid: boolean;
 };
 
@@ -35,11 +37,12 @@ export function applicantName(a: AppRow): string {
 }
 
 // Why an applicant fails recruiting validity — same wording as analytics invalidIssues.
-function invalidReasons(app: AppRow): string[] {
+function invalidReasons(app: AppRow, periodEndsAt?: string | null): string[] {
   if (app.returning) return [];
   const issues: string[] = [];
   if (app.coffee !== "done") issues.push(app.coffee === "booked" ? "Coffee booked (incomplete)" : "No coffee chat");
   if (!app.infosession) issues.push("No info session");
+  if (isSeverelyLate(app.submitted_at, periodEndsAt)) issues.push("Submitted 3+ days late");
   return issues;
 }
 
@@ -50,7 +53,7 @@ function StatusBadge({ status }: { status: ReviewStatus }) {
 }
 
 // Small badge marking an applicant who was a member in a previous semester.
-function ReturningIndicator({ returning }: { returning: boolean }) {
+export function ReturningIndicator({ returning }: { returning: boolean }) {
   if (!returning) return null;
   return (
     <Badge className="gap-1 bg-indigo-600 text-white hover:bg-indigo-600" title="Returning member">
@@ -129,6 +132,20 @@ export type ApplicantCardActions = {
   addToDraftDisabled?: boolean;
   // Remove from the draft window (X). Not used on wishlist cards.
   onRemove?: (id: string) => void;
+  // Draft state, painted so a card in the Applicants column matches the panel
+  // its applicant is sitting in. `accent` is the project's colour for a
+  // confirmed pick (a runtime hex, so it lands as an inline style); `staged`
+  // is the draft window's white, which is a theme token and so stays classes.
+  // Both take precedence over the invalid-applicant red tint -- the warning
+  // triangle is driven separately off app.valid, so it survives the override.
+  accent?: string | null;
+  staged?: boolean;
+  // One-shot sweep across the card, played as an applicant's accent lands (see
+  // the shimmer keyframe in tailwind.config.ts).
+  shimmer?: boolean;
+  // Pairs this card with the row it morphs into elsewhere in the tree during a
+  // view transition. Must be unique per document while the transition runs.
+  viewTransitionName?: string;
 };
 
 // Small helper so a button living on a draggable card doesn't start a drag,
@@ -178,6 +195,7 @@ function ApplicantCardInner({
   isWishlisted,
   showRank,
   showRecruitingStatus,
+  shimmer,
   onAddToWishlist,
   onWishlistToggle,
   showAddToDraft,
@@ -187,7 +205,7 @@ function ApplicantCardInner({
   draggable,
 }: ApplicantCardActions & { draggable?: boolean }) {
   const invalid = !app.valid;
-  const reasons = invalid ? invalidReasons(app) : [];
+  const reasons = invalid ? invalidReasons(app, periodEndsAt) : [];
   const hasOverlay = !!(onAddToWishlist || onWishlistToggle || (showAddToDraft && onAddToDraft) || onRemove);
   return (
     <>
@@ -221,6 +239,17 @@ function ApplicantCardInner({
       {isWishlisted && onWishlistToggle && (
         <span className="flex h-7 w-7 shrink-0 items-center justify-center text-amber-500 transition-opacity group-hover:opacity-0" aria-hidden>
           <Star size={14} className="fill-amber-500" />
+        </span>
+      )}
+
+      {/* Its own clipping wrapper rather than overflow-hidden on the card root,
+          which would also clip the invalid-applicant tooltip above the card. */}
+      {shimmer && (
+        <span
+          className="pointer-events-none absolute inset-0 overflow-hidden rounded-lg motion-reduce:hidden"
+          aria-hidden
+        >
+          <span className="absolute inset-y-0 -left-1/3 w-1/3 animate-shimmer bg-gradient-to-r from-transparent via-foreground/15 to-transparent" />
         </span>
       )}
 
@@ -269,16 +298,40 @@ function ApplicantCardInner({
   );
 }
 
-function cardClassName(app: AppRow, opts?: { grab?: boolean; dragClass?: string }): string {
+function cardClassName(
+  app: AppRow,
+  opts?: { grab?: boolean; dragClass?: string; tint?: "accent" | "staged"; shimmer?: boolean },
+): string {
   const invalid = !app.valid;
   return [
     "group relative flex items-center gap-2 border rounded-lg px-3 py-2 select-none transition-colors cursor-pointer",
-    invalid
+    // A tinted card drops both the normal and the invalid-red background rather
+    // than fighting them: "accent" is painted by an inline style, "staged"
+    // by the card token below. --card is only a shade off --background in light
+    // mode and identical in dark, so the outline is what actually carries the
+    // signal -- it has to stay visible in both themes.
+    opts?.tint === "accent"
+      ? ""
+      : opts?.tint === "staged"
+      ? "bg-card border-foreground/30"
+      : invalid
       ? "border-red-200 bg-red-50/60 dark:border-red-900/50 dark:bg-red-950/20"
       : "bg-background",
+    // Only while the sweep plays -- a longer transition-colors on every card
+    // would make ordinary hover feedback sluggish.
+    opts?.shimmer ? "duration-500" : "",
     opts?.grab ? "active:cursor-grabbing touch-none" : "",
     opts?.dragClass ?? "",
   ].join(" ");
+}
+
+// A confirmed pick's accent wins over the draft window's white if an applicant
+// somehow reads as both (they shouldn't -- confirming takes them out of the
+// window).
+function cardTint(actions: ApplicantCardActions): "accent" | "staged" | undefined {
+  if (actions.accent) return "accent";
+  if (actions.staged) return "staged";
+  return undefined;
 }
 
 // The one sortable card, shared by the wishlist and the choice groups so the two
@@ -296,7 +349,13 @@ export const SortableApplicantCard = memo(function SortableApplicantCard(actions
   // move, isDragging stays true once it re-mounts in the other list -- so the
   // card-sized gap it leaves there IS the insertion preview; there's no separate
   // placeholder element. Matches the ranking page.
-  const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0 : 1 } as React.CSSProperties;
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0 : 1,
+    viewTransitionName: actions.viewTransitionName,
+    ...accentStyle(actions.accent),
+  } as React.CSSProperties;
   return (
     <div
       ref={setNodeRef}
@@ -305,7 +364,7 @@ export const SortableApplicantCard = memo(function SortableApplicantCard(actions
       {...attributes}
       {...listeners}
       onClick={() => actions.onReview(actions.app)}
-      className={cardClassName(actions.app, { grab: true })}
+      className={cardClassName(actions.app, { grab: true, tint: cardTint(actions), shimmer: actions.shimmer })}
     >
       <ApplicantCardInner {...actions} draggable />
     </div>
@@ -321,8 +380,9 @@ export const StaticApplicantCard = memo(function StaticApplicantCard({
   return (
     <div
       data-app-id={actions.app.id}
+      style={{ viewTransitionName: actions.viewTransitionName, ...accentStyle(actions.accent) }}
       onClick={() => actions.onReview(actions.app)}
-      className={cardClassName(actions.app)}
+      className={cardClassName(actions.app, { tint: cardTint(actions), shimmer: actions.shimmer })}
     >
       <ApplicantCardInner {...actions} draggable={draggable} />
     </div>

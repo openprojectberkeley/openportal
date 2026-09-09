@@ -59,9 +59,16 @@ export default {
           "0%, 100%": { opacity: "1" },
           "50%": { opacity: "0.35" },
         },
+        // One-shot highlight sweep across a card, for the moment a draft pick
+        // is confirmed and takes on its project's accent.
+        shimmer: {
+          from: { transform: "translateX(-100%)" },
+          to: { transform: "translateX(200%)" },
+        },
       },
       animation: {
         "slow-flash": "slow-flash 1.8s ease-in-out infinite",
+        shimmer: "shimmer 1.1s cubic-bezier(0.16, 1, 0.3, 1) 1",
       },
     },
   },

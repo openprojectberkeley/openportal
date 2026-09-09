@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/overlay-scrollbar";
 import { PersonName } from "@/components/person-profile-provider";
@@ -38,7 +39,7 @@ import {
 } from "@/lib/application-profile";
 import { csvSlug, downloadCsv } from "@/lib/csv";
 import { isReturningMember, type MemberStatus } from "@/lib/member-status";
-import { cn, compareReviewPriority, isLate } from "@/lib/utils";
+import { cn, compareReviewPriority, isLate, isRecruitingValid } from "@/lib/utils";
 
 type PageProject = { id: string; name: string; type: string; essay_prompt: string | null };
 
@@ -71,8 +72,8 @@ type SheetRow = {
   infosession: boolean;
   // Applicant currently holds a board/exec role (auto-valid).
   boardExec: boolean;
-  // Cleared both recruiting requirements: completed a coffee chat (or exempt as
-  // a returning member) and attended an info session. Mirrors both_valid (0063).
+  // Board/exec or returning, or coffee done + info attended and not 3+ days late.
+  // Mirrors application_analytics both_valid.
   valid: boolean;
   techClasses: string[];
   techClassesOther: string | null;
@@ -88,8 +89,18 @@ type SheetRow = {
   search: string;
 };
 
-function sheetValid(r: Pick<SheetRow, "boardExec" | "returning" | "coffee" | "infosession">): boolean {
-  return r.boardExec || r.returning || (r.coffee === "done" && r.infosession);
+function sheetValid(
+  r: Pick<SheetRow, "boardExec" | "returning" | "coffee" | "infosession" | "submittedAt">,
+  endsAt?: string | null,
+): boolean {
+  return isRecruitingValid({
+    boardExec: r.boardExec,
+    returning: r.returning,
+    coffeeDone: r.coffee === "done",
+    infosession: r.infosession,
+    submittedAt: r.submittedAt,
+    endsAt,
+  });
 }
 
 // Same priority as coffeeWithByApplicant: completed hosts when any chat is done,
@@ -509,6 +520,9 @@ export function ApplicationSheetModal({
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const menu: MenuControl = { openId: openMenu, setOpenId: setOpenMenu };
   const [page, setPage] = useState(0);
+  // Pending "Drop" target in the all-projects sheet (admin reject, non-destructive).
+  const [dropTarget, setDropTarget] = useState<SheetRow | null>(null);
+  const [dropError, setDropError] = useState<string | null>(null);
 
   // All-projects mode leads with the overview, then one page per project. A
   // reviewer scoped to a single project just gets that project's page.
@@ -696,7 +710,7 @@ export function ApplicationSheetModal({
         // Board/exec members and returning members are auto-valid; everyone
         // else must clear both the coffee-chat and info-session requirements.
         const boardExec = boardExecIds.has(aid);
-        const valid = sheetValid({ boardExec, returning, coffee, infosession });
+        const valid = sheetValid({ boardExec, returning, coffee, infosession, submittedAt: r.submitted_at }, periodEndsAt);
         const met = !!project && project.type === "studio" && [...projectPms].some((pm) => completedWith[aid]?.has(pm));
 
         const ranking = r.application_rankings[0];
@@ -772,7 +786,7 @@ export function ApplicationSheetModal({
 
       setRows(next);
     })();
-  }, [open, periodId, activePage, reloadToken]);
+  }, [open, periodId, activePage, reloadToken, periodEndsAt]);
 
   const yearOptions = useMemo(() => {
     if (!rows) return [];
@@ -1096,11 +1110,28 @@ export function ApplicationSheetModal({
         ? prev.map((r) => {
             if (r.applicantId !== applicantId) return r;
             const next = patch(r);
-            return { ...next, valid: sheetValid(next) };
+            return { ...next, valid: sheetValid(next, periodEndsAt) };
           })
         : prev,
     );
     onRecruitingChanged?.();
+  };
+
+  // Admin-only drop from the global (all-projects) sheet. Flips status to
+  // rejected via reject_application — keeps answers/data; not gated by the
+  // review-modal DECISIONS_ENABLED flag.
+  const handleDrop = async () => {
+    if (!dropTarget) return;
+    setDropError(null);
+    const supabase = createClient();
+    const { error: err } = await supabase.rpc("reject_application", {
+      p_application_id: dropTarget.id,
+    });
+    if (err) {
+      setDropError(err.message);
+      return false;
+    }
+    patchRow(dropTarget.applicantId, (r) => ({ ...r, status: "rejected" as ReviewStatus }));
   };
 
   const onCoffeeSaved = (applicantId: string, next: CoffeeEditResult) => {
@@ -1127,6 +1158,7 @@ export function ApplicationSheetModal({
   };
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex h-[90vh] max-w-[95vw] flex-col gap-3 overflow-hidden p-4 sm:p-5">
         <DialogHeader>
@@ -1465,7 +1497,8 @@ export function ApplicationSheetModal({
                       />
                     </HeaderMenu>
                   </th>
-                  <th className={cn(th, "border-r-0")}> </th>
+                  <th className={cn(th, !allProjects && "border-r-0")}> </th>
+                  {allProjects && <th className={cn(th, "border-r-0")}> </th>}
                 </tr>
               </thead>
               <tbody>
@@ -1693,7 +1726,7 @@ export function ApplicationSheetModal({
                           <span className="text-muted-foreground">—</span>
                         )}
                       </td>
-                      <td className={cn(td, "border-r-0")}>
+                      <td className={cn(td, !allProjects && "border-r-0")}>
                         <Button
                           size="sm"
                           variant="outline"
@@ -1703,6 +1736,20 @@ export function ApplicationSheetModal({
                           Review
                         </Button>
                       </td>
+                      {allProjects && (
+                        <td className={cn(td, "border-r-0")}>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            className="h-6 px-2 text-[0.7rem]"
+                            disabled={r.status === "rejected"}
+                            title={r.status === "rejected" ? "Already dropped" : undefined}
+                            onClick={() => setDropTarget(r)}
+                          >
+                            Drop
+                          </Button>
+                        </td>
+                      )}
                     </tr>
                   );
                 })}
@@ -1743,5 +1790,27 @@ export function ApplicationSheetModal({
         )}
       </DialogContent>
     </Dialog>
+
+    <ConfirmDialog
+      open={!!dropTarget}
+      onOpenChange={(o) => {
+        if (!o) {
+          setDropTarget(null);
+          setDropError(null);
+        }
+      }}
+      title={`Drop ${dropTarget?.name ?? "this applicant"}'s application?`}
+      description={
+        <>
+          This marks the application as rejected and clears any project placement.
+          Their submitted answers and data are kept — nothing is deleted.
+          {dropError && <span className="mt-2 block text-red-500">{dropError}</span>}
+        </>
+      }
+      confirmLabel="Drop application"
+      destructive
+      onConfirm={handleDrop}
+    />
+    </>
   );
 }

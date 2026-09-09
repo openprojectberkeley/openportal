@@ -107,16 +107,19 @@ function PieCard({ title, segments, total, centerSub }: { title: string; segment
 }
 
 const submittedTotal = (r: Row) => r.submitted + r.accepted + r.rejected;
-// Valid = cleared the requirement. A booked-but-incomplete chat doesn't count;
-// returning members are exempt from both the coffee chat and the info session,
-// and board/exec members are auto-valid regardless of either (0067/0077). bothValid
-// is computed server-side; because of the board/exec and returning exemptions it's
-// no longer strictly the intersection of the coffee and info funnels.
+// Denominator for valid % / count: still-in-consideration applicants only
+// (excludes rejected/dropped). Matches both_valid + invalid list after 0080.
+const consideredTotal = (r: Row) => r.submitted + r.accepted;
+// Valid = board/exec or returning, or coffee done + info attended and not 3+
+// days late (0081). A booked-but-incomplete chat doesn't count. bothValid is
+// computed server-side; because of exemptions it's not strictly the
+// intersection of the coffee and info funnels. Rejected applicants are
+// excluded (0080).
 const coffeeValid = (r: Row) => r.coffee_completed + r.coffee_returning;
 const infoValid = (r: Row) => r.info_attended + r.info_returning;
 const bothValid = (r: Row) => r.both_valid ?? 0;
 
-// One invalid applicant from application_analytics_invalid() (0064).
+// One invalid applicant from application_analytics_invalid() (0064+).
 type InvalidRow = {
   applicant_id: string;
   preferred_firstname: string | null;
@@ -125,6 +128,7 @@ type InvalidRow = {
   did_complete: boolean;
   has_chat: boolean;
   did_att: boolean;
+  is_severely_late?: boolean;
 };
 
 function invalidName(r: InvalidRow): string {
@@ -136,6 +140,7 @@ function invalidIssues(r: InvalidRow): string[] {
   const issues: string[] = [];
   if (!r.did_complete) issues.push(r.has_chat ? "Coffee booked (incomplete)" : "No coffee chat");
   if (!r.did_att) issues.push("No info session");
+  if (r.is_severely_late) issues.push("Submitted 3+ days late");
   return issues;
 }
 
@@ -226,7 +231,7 @@ export function ApplicationAnalyticsModal({
   const { gradYear, returning } = buildDemographics(demo);
   const gradYearSegments = toSegments(gradYear, (_, i) => GRAD_COLORS[i % GRAD_COLORS.length]);
   const returningSegments = toSegments(returning, (label) => RETURNING_COLORS[label] ?? INDIGO);
-  const invalidCount = selected ? submittedTotal(selected) - bothValid(selected) : 0;
+  const invalidCount = selected ? consideredTotal(selected) - bothValid(selected) : 0;
 
   const handleOpenChange = (next: boolean) => {
     if (!next) setInvalidOpen(false);
@@ -305,18 +310,19 @@ export function ApplicationAnalyticsModal({
                   </div>
                   <div className="flex items-center gap-3">
                     <span className="text-2xl font-bold tabular-nums">
-                      {pct(bothValid(selected), submittedTotal(selected))}%
+                      {pct(bothValid(selected), consideredTotal(selected))}%
                     </span>
                     <span className="text-sm text-muted-foreground tabular-nums">
-                      {bothValid(selected)}/{submittedTotal(selected)}
+                      {bothValid(selected)}/{consideredTotal(selected)}
                     </span>
                     <div className="min-w-0 flex-1">
-                      <Bar pct={pct(bothValid(selected), submittedTotal(selected))} color={INDIGO} />
+                      <Bar pct={pct(bothValid(selected), consideredTotal(selected))} color={INDIGO} />
                     </div>
                   </div>
                   <p className="text-[0.7rem] text-muted-foreground">
                     Cleared both requirements: coffee chat valid and info session valid. A booked-but-incomplete
                     chat doesn&apos;t count, and returning members are exempt from both requirements.
+                    Rejected applications are excluded.
                   </p>
                 </div>
 
@@ -355,6 +361,7 @@ export function ApplicationAnalyticsModal({
                       <tbody>
                         {rows.map((r) => {
                           const sub = submittedTotal(r);
+                          const considered = consideredTotal(r);
                           const cv = pct(coffeeValid(r), sub);
                           const iv = pct(infoValid(r), sub);
                           const isSel = r.period_id === selected.period_id;
@@ -376,7 +383,7 @@ export function ApplicationAnalyticsModal({
                                 <Bar pct={iv} color={SKY} />
                               </td>
                               <td className="py-1.5">
-                                <Bar pct={pct(bothValid(r), sub)} color={INDIGO} />
+                                <Bar pct={pct(bothValid(r), considered)} color={INDIGO} />
                               </td>
                             </tr>
                           );

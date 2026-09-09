@@ -1,3 +1,5 @@
+import type { CSSProperties } from "react";
+
 // Fallback accent for portals/projects with no color set: a soft, faintly cool
 // light gray so a colorless card still reads as intentional rather than a flat
 // mid gray. Light in both themes, so `readableTextColor` picks dark text over it.
@@ -10,6 +12,12 @@ export const DEFAULT_ACCENT = "#c2c5cf";
 export function accentTint(color: string | null | undefined, pct = 14): string | undefined {
   if (!color) return undefined;
   return `color-mix(in srgb, ${color} ${pct}%, hsl(var(--background)))`;
+}
+
+// Border + background for a card painted with a project's accent. Inline rather
+// than a Tailwind class because the color is per-project data, not a theme token.
+export function accentStyle(accent: string | null | undefined): CSSProperties | undefined {
+  return accent ? { borderColor: accent, backgroundColor: accentTint(accent) } : undefined;
 }
 
 // Black or white — whichever has the higher contrast against `color` — so text

@@ -17,7 +17,7 @@ export default async function DraftPage() {
   if (!canReviewAllProjects(roleNames.map((role_name) => ({ role_name })))) redirect("/manager");
 
   return (
-    <div className="w-full max-w-3xl mx-auto p-6 flex flex-col gap-10">
+    <div className="w-full max-w-6xl mx-auto p-6 flex flex-col gap-10">
       <div className="flex flex-col gap-1">
         <Link href="/manager" className="text-sm text-muted-foreground hover:text-foreground">← Back</Link>
         <h1 className="text-2xl font-bold">Draft</h1>

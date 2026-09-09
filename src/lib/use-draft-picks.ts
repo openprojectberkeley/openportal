@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/client";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useDraftRealtime } from "@/lib/use-draft-realtime";
+import { withViewTransition } from "@/lib/view-transition";
 
 export type RoundProjectInfo = { id: string; round_number: number; pick_count: number; submitted_at: string | null };
 export type PickRow = { id: string; round_project_id: string; application_id: string };
@@ -45,9 +46,18 @@ export function useDraftPicks(projectId: string | null, periodId: string | null)
   const [picks, setPicks] = useState<PickRow[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  const loadAll = useCallback(async () => {
+  // `wrap` lets a caller commit every setState below inside one wrapper --
+  // submit() passes withViewTransition so the confirmed pick morphs up out of
+  // the draft window. That's why the state is gathered into locals and applied
+  // in a single block at the end rather than set as it's computed: a view
+  // transition can only capture one synchronous DOM update, and the fetch below
+  // has an await in the middle of it.
+  const loadAll = useCallback(async (wrap: (update: () => void) => void = (u) => u()) => {
     if (!projectId || !periodId) {
-      setRoundProjects([]); setPicks([]); setSequence([]); setCurrentPickId(null); setCompletedAt(null); return;
+      wrap(() => {
+        setRoundProjects([]); setPicks([]); setSequence([]); setCurrentPickId(null); setCompletedAt(null);
+      });
+      return;
     }
     // Note: we deliberately do NOT reset roundProjects to null here. loadAll is
     // also the realtime refetch, and nulling it mid-refresh briefly makes
@@ -65,10 +75,17 @@ export function useDraftPicks(projectId: string | null, periodId: string | null)
         .select("id, project_id, pick_order, pick_count, submitted_at, draft_rounds!inner(round_number, period_id), projects(name)")
         .eq("draft_rounds.period_id", periodId),
     ]);
-    setCurrentPickId(stateRow?.current_pick_id ?? null);
-    setCompletedAt(stateRow?.completed_at ?? null);
+    const nextPickId = stateRow?.current_pick_id ?? null;
+    const nextCompletedAt = stateRow?.completed_at ?? null;
 
-    if (rpError) { setError("Couldn't load this project's draft rounds."); setRoundProjects([]); setPicks([]); setSequence([]); return; }
+    if (rpError) {
+      wrap(() => {
+        setCurrentPickId(nextPickId); setCompletedAt(nextCompletedAt);
+        setError("Couldn't load this project's draft rounds.");
+        setRoundProjects([]); setPicks([]); setSequence([]);
+      });
+      return;
+    }
 
     const allRows = ((rpRows ?? []) as unknown as SeqRow[]).map((r) => ({
       id: r.id,
@@ -87,19 +104,25 @@ export function useDraftPicks(projectId: string | null, periodId: string | null)
       .filter((r) => r.pickCount > 0)
       .sort((a, b) => (a.roundNumber - b.roundNumber) || (a.pickOrder - b.pickOrder))
       .map((r) => ({ id: r.id, projectId: r.projectId, projectName: r.projectName, roundNumber: r.roundNumber, pickOrder: r.pickOrder, submittedAt: r.submittedAt }));
-    setSequence(seq);
 
     // This project's own rounds (the shape the rest of the hook already uses).
     const rpList = allRows
       .filter((r) => r.projectId === projectId)
       .map((r) => ({ id: r.id, pick_count: r.pickCount, submitted_at: r.submittedAt, round_number: r.roundNumber }))
       .sort((a, b) => a.round_number - b.round_number);
-    setRoundProjects(rpList);
 
     const ids = rpList.map((r) => r.id);
-    if (!ids.length) { setPicks([]); return; }
-    const { data: pickRows } = await supabase.from("draft_picks").select("id, round_project_id, application_id").in("round_project_id", ids);
-    setPicks((pickRows ?? []) as PickRow[]);
+    const { data: pickRows } = ids.length
+      ? await supabase.from("draft_picks").select("id, round_project_id, application_id").in("round_project_id", ids)
+      : { data: [] as PickRow[] };
+
+    wrap(() => {
+      setCurrentPickId(nextPickId);
+      setCompletedAt(nextCompletedAt);
+      setSequence(seq);
+      setRoundProjects(rpList);
+      setPicks((pickRows ?? []) as PickRow[]);
+    });
   }, [projectId, periodId]);
 
   // Clean slate on a project/period switch (so stale data from the previous
@@ -175,7 +198,10 @@ export function useDraftPicks(projectId: string | null, periodId: string | null)
     const supabase = createClient();
     const { error: rpcError } = await supabase.rpc("submit_draft_picks", { p_round_project_id: nextRound.id });
     if (rpcError) { setError(rpcError.message || "Couldn't submit picks."); return false; }
-    await loadAll();
+    // The pick keeps its draft_picks row id as it moves from the draft window to
+    // Confirmed, so the two elements share a view-transition-name and the
+    // browser morphs one into the other.
+    await loadAll(withViewTransition);
     return true;
   }, [nextRound, loadAll]);
 

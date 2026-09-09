@@ -55,12 +55,13 @@ import { ApplicationAnalyticsModal } from "@/components/application-analytics-mo
 import { ApplicationSheetModal } from "@/components/application-sheet-modal";
 import { ProjectAnalyticsModal } from "@/components/project-analytics-modal";
 import { rankLabel } from "@/lib/application-rank";
-import { compareReviewPriority } from "@/lib/utils";
+import { compareReviewPriority, isRecruitingValid } from "@/lib/utils";
+import { DEFAULT_ACCENT } from "@/lib/portal-color";
 import { coffeeWithByApplicant, type CoffeeState } from "@/lib/coffee-chat-indicator";
 
 // The project currently under review: which project the reviewer is
 // assigned to (or, for a full-access reviewer, has picked from all of them).
-type ReviewableProject = { id: string; name: string };
+type ReviewableProject = { id: string; name: string; color: string | null };
 
 // Sentinel for the cross-project mode in the project picker. A plain null still
 // means "this reviewer has no projects", so it can't double as the sentinel.
@@ -116,6 +117,7 @@ function WishlistDropzone({
   periodEndsAt,
   draftActive,
   addToDraftDisabled,
+  cardDraftState,
   onReview,
   onWishlistToggle,
   onAddToDraft,
@@ -125,6 +127,9 @@ function WishlistDropzone({
   periodEndsAt: string | undefined;
   draftActive: boolean;
   addToDraftDisabled: (id: string) => boolean;
+  // How this applicant's draft state paints their card -- same per-id-callback
+  // shape as addToDraftDisabled above.
+  cardDraftState: (id: string) => { accent?: string; staged?: boolean };
   onReview: (app: AppRow) => void;
   onWishlistToggle: (id: string) => void;
   onAddToDraft: (id: string) => void;
@@ -145,6 +150,7 @@ function WishlistDropzone({
             <SortableApplicantCard
               key={a.id}
               app={a}
+              {...cardDraftState(a.id)}
               periodEndsAt={periodEndsAt}
               isWishlisted
               showRank
@@ -235,6 +241,9 @@ export default function ManagerApplicationsPage() {
   // PM's chosen order (persisted via application_wishlist.position). null = loading.
   const [wishlist, setWishlist] = useState<string[] | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  // Drives the one-shot accent sweep on a newly confirmed pick (see below).
+  const [justConfirmed, setJustConfirmed] = useState<Set<string>>(new Set());
+  const prevConfirmedRef = useRef<Set<string> | null>(null);
 
   // Live drag state: the id of the card being dragged (namespaced), and a
   // working copy of `wishlist` mutated on hover so the list reflows under the
@@ -280,16 +289,20 @@ export default function ManagerApplicationsPage() {
       setFullAccessReview(fullAccess);
 
       if (fullAccess) {
-        const { data } = await supabase.from("projects").select("id, name").order("name");
+        const { data } = await supabase.from("projects").select("id, name, color").order("name");
         setReviewableProjects((data ?? []) as ReviewableProject[]);
       } else {
         const { data } = await supabase
           .from("project_members")
-          .select("project_id, projects(name)")
+          .select("project_id, projects(name, color)")
           .eq("user_id", user.id)
           .eq("is_pm", true);
-        const list = ((data ?? []) as unknown as { project_id: string; projects: { name: string } | null }[])
-          .map((r) => ({ id: r.project_id, name: r.projects?.name ?? "Untitled project" }))
+        const list = ((data ?? []) as unknown as { project_id: string; projects: { name: string; color: string | null } | null }[])
+          .map((r) => ({
+            id: r.project_id,
+            name: r.projects?.name ?? "Untitled project",
+            color: r.projects?.color ?? null,
+          }))
           .sort((a, b) => a.name.localeCompare(b.name));
         setReviewableProjects(list);
       }
@@ -625,6 +638,8 @@ export default function ManagerApplicationsPage() {
     // `application_rankings!inner(...)` + the two `.eq` filters below turn the
     // embed into an inner join, so only applicants who ranked the selected
     // project come back, each carrying their rank for that project.
+    const periodEndsAt =
+      periods?.find((p) => p.id === selectedPeriodId)?.ends_at ?? null;
     (async () => {
       const { data } = await supabase
         .from("applications")
@@ -715,12 +730,19 @@ export default function ManagerApplicationsPage() {
             coffeeWith: (applicant_id && coffeeWithById[applicant_id]) || [],
             returning,
             infosession,
-            valid: boardExec || returning || (coffee === "done" && infosession),
+            valid: isRecruitingValid({
+              boardExec,
+              returning,
+              coffeeDone: coffee === "done",
+              infosession,
+              submittedAt: r.submitted_at,
+              endsAt: periodEndsAt,
+            }),
           };
         }),
       );
     })();
-  }, [selectedPeriodId, selectedProjectId, reviewableProjects, appsReloadToken]);
+  }, [selectedPeriodId, selectedProjectId, reviewableProjects, appsReloadToken, periods]);
 
   // Period funnel stats track the period alone, so they survive the project
   // picker switching to "All projects".
@@ -742,6 +764,36 @@ export default function ManagerApplicationsPage() {
     ...draftPicks.draftWindowPicks.map((p) => p.application_id),
     ...draftPicks.confirmedPicks.map((p) => p.application_id),
   ]);
+
+  // The two halves of draftedIds, kept apart because they paint differently: a
+  // card in the Applicants column takes on the colour of the panel its
+  // applicant is sitting in -- the project accent once confirmed, the draft
+  // window's white while merely staged. Spread onto the card, which resolves
+  // the precedence.
+  const confirmedIds = new Set(draftPicks.confirmedPicks.map((p) => p.application_id));
+  const stagedIds = new Set(draftPicks.draftWindowPicks.map((p) => p.application_id));
+  const projectAccent = selectedProject?.color || DEFAULT_ACCENT;
+  const cardDraftState = (id: string): { accent?: string; staged?: boolean; shimmer?: boolean } =>
+    confirmedIds.has(id) ? { accent: projectAccent, shimmer: justConfirmed.has(id) }
+    : stagedIds.has(id) ? { staged: true }
+    : {};
+
+  // Applicants whose pick was confirmed a moment ago, so their card can sweep
+  // as the accent lands. Keyed off a sorted string rather than the Set itself,
+  // which is rebuilt every render. The ref is seeded on the first pass so picks
+  // that were already confirmed at page load don't all shimmer on mount.
+  const confirmedKey = [...confirmedIds].sort().join(",");
+  useEffect(() => {
+    const prev = prevConfirmedRef.current;
+    const current = new Set(confirmedKey ? confirmedKey.split(",") : []);
+    prevConfirmedRef.current = current;
+    if (!prev) return;
+    const fresh = [...current].filter((id) => !prev.has(id));
+    if (!fresh.length) return;
+    setJustConfirmed(new Set(fresh));
+    const t = setTimeout(() => setJustConfirmed(new Set()), 1200);
+    return () => clearTimeout(t);
+  }, [confirmedKey]);
 
   // While a drag is live, both lists render from the working copy so they
   // reflow: the wishlist shows the insertion preview, and groupedApps (which
@@ -1008,6 +1060,7 @@ export default function ManagerApplicationsPage() {
                 onSubmit={handleSubmitDraftPicks}
                 onRemove={draftPicks.removeFromDraftWindow}
                 showRecruitingStatus={showRecruitingStatus}
+                accent={projectAccent}
               />
             </div>
 
@@ -1053,6 +1106,7 @@ export default function ManagerApplicationsPage() {
                   periodEndsAt={selectedPeriod?.ends_at}
                   draftActive={draftActive}
                   addToDraftDisabled={(id) => draftedIds.has(id)}
+                  cardDraftState={cardDraftState}
                   onReview={onReviewApp}
                   onWishlistToggle={removeFromWishlist}
                   onAddToDraft={stageInDraft}
@@ -1081,6 +1135,7 @@ export default function ManagerApplicationsPage() {
                         <SortableApplicantCard
                           key={a.id}
                           app={a}
+                          {...cardDraftState(a.id)}
                           periodEndsAt={selectedPeriod?.ends_at}
                           showRecruitingStatus={showRecruitingStatus}
                           onAddToWishlist={addToWishlist}
@@ -1102,6 +1157,7 @@ export default function ManagerApplicationsPage() {
             {activeApp ? (
               <StaticApplicantCard
                 app={activeApp}
+                {...cardDraftState(activeApp.id)}
                 periodEndsAt={selectedPeriod?.ends_at}
                 showRecruitingStatus={showRecruitingStatus}
                 onReview={onReviewApp}

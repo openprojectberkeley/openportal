@@ -78,6 +78,7 @@ export function ApplicationReviewModal({
   open,
   onOpenChange,
   onReviewed,
+  readOnly = false,
 }: {
   applicationId: string;
   applicantName: string;
@@ -92,6 +93,10 @@ export function ApplicationReviewModal({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onReviewed: (status: ReviewStatus) => void;
+  // View-only: hide the Place-on / Reject / Accept footer (e.g. the exec draft
+  // board, which just surfaces application info -- placement happens via the
+  // draft flow, not manual accept/reject).
+  readOnly?: boolean;
 }) {
   const [loading, setLoading] = useState(true);
   const [rankings, setRankings] = useState<RankingRow[]>([]);
@@ -344,6 +349,7 @@ export function ApplicationReviewModal({
 
             {error && <p className="text-sm text-red-500">{error}</p>}
 
+            {!readOnly && (
             <div className="flex flex-wrap items-center justify-end gap-2 border-t pt-4">
               <span className="mr-auto text-xs text-muted-foreground">Place on</span>
               <DropdownMenu>
@@ -382,6 +388,7 @@ export function ApplicationReviewModal({
                 {working ? "Working…" : "Accept"}
               </Button>
             </div>
+            )}
           </div>
         )}
 

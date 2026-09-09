@@ -1,8 +1,8 @@
 "use client";
 
 import { createClient } from "@/lib/supabase/client";
-import { useCallback, useEffect, useState } from "react";
-import { Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, GripVertical, Play, Plus, RotateCcw, Trash2, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, GripVertical, Play, Plus, RotateCcw, Trash2, Undo2, X } from "lucide-react";
 import {
   DndContext,
   PointerSensor,
@@ -16,6 +16,8 @@ import { CSS } from "@dnd-kit/utilities";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ReturningIndicator } from "@/components/applicant-meta";
+import { LateBadge, InvalidIndicator } from "@/components/applicant-indicators";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -23,15 +25,39 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ProjectIcon } from "@/components/project-icon";
+import { ApplicationReviewModal, type ReviewStatus } from "@/components/application-review-modal";
 import { useDraftRealtime } from "@/lib/use-draft-realtime";
+import { isRecruitingValid } from "@/lib/utils";
 
 type Period = { id: string; name: string; status: "draft" | "open" | "closed"; starts_at: string; ends_at: string };
-type Project = { id: string; name: string };
+
+// Project detail carried alongside each round-project so tiles can render an
+// icon/accent and the info dialog can show est. team size etc.
+type ProjectMeta = {
+  icon: string | null;
+  icon_url: string | null;
+  color: string | null;
+  type: string | null;
+  client: string | null;
+  description: string | null;
+  difficulty: string | null;
+  estimated_members: number | null;
+  num_subteams: number | null;
+};
+type Project = { id: string; name: string } & ProjectMeta;
+
+const PROJECT_COLS = "id, name, icon, icon_url, color, type, client, description, difficulty, estimated_members, num_subteams";
 
 // A project's participation in one round: its draft position and how many
 // applicants it may take that round. `id` is the draft_round_projects row id.
-type RoundProject = { id: string; project_id: string; name: string; pick_order: number; pick_count: number };
+type RoundProject = { id: string; project_id: string; name: string; pick_order: number; pick_count: number } & ProjectMeta;
 type Round = { id: string; round_number: number; projects: RoundProject[] };
+
+// Recruiting indicators shown on the exec draft board's picks, matching the PM
+// applications view: returning member, late submission, and recruiting-invalid.
+type PickIndicators = { returning: boolean; invalid: boolean; submittedAt: string | null };
 
 // One stop in the flattened draft sequence: a project's turn within a round.
 // Rounds with pick_count = 0 sit out, so they're excluded from the sequence.
@@ -42,7 +68,8 @@ type ConfirmTarget =
   | { kind: "round"; roundId: string; label: string }
   | { kind: "project"; roundId: string; rowId: string; label: string }
   | { kind: "reset" }
-  | { kind: "complete" };
+  | { kind: "complete" }
+  | { kind: "unsubmit"; roundProjectId: string; label: string };
 
 function isOpenNow(p: Period): boolean {
   const now = Date.now();
@@ -55,6 +82,22 @@ function pickDefault(list: Period[]): string | null {
 
 function sortProjects(list: RoundProject[]): RoundProject[] {
   return [...list].sort((a, b) => a.pick_order - b.pick_order);
+}
+
+// Pulls the display/detail fields off a Project so they can ride along on the
+// round-project rows (tiles + info dialog). Falls back to nulls if unknown.
+function projectMeta(p: Project | undefined): ProjectMeta {
+  return {
+    icon: p?.icon ?? null,
+    icon_url: p?.icon_url ?? null,
+    color: p?.color ?? null,
+    type: p?.type ?? null,
+    client: p?.client ?? null,
+    description: p?.description ?? null,
+    difficulty: p?.difficulty ?? null,
+    estimated_members: p?.estimated_members ?? null,
+    num_subteams: p?.num_subteams ?? null,
+  };
 }
 
 export function DraftRoundsManager() {
@@ -74,6 +117,21 @@ export function DraftRoundsManager() {
   // submitted (confirmed), plus a name lookup for the picked applicants.
   const [boardRows, setBoardRows] = useState<Record<string, { submittedAt: string | null; appIds: string[] }>>({});
   const [nameByAppId, setNameByAppId] = useState<Record<string, string>>({});
+  const [statusByAppId, setStatusByAppId] = useState<Record<string, ReviewStatus>>({});
+  // Recruiting indicators (returning / late / invalid) per picked application,
+  // mirroring the PM applications view.
+  const [indByAppId, setIndByAppId] = useState<Record<string, PickIndicators>>({});
+  // A project tile / applicant name was clicked -> open its info modal.
+  const [infoProject, setInfoProject] = useState<RoundProject | null>(null);
+  const [reviewFor, setReviewFor] = useState<{ id: string; name: string; status: ReviewStatus } | null>(null);
+  // Which round's pick order / picks the two columns are showing -- an index
+  // into `rounds`, independent of whose turn it actually is.
+  const [roundPage, setRoundPage] = useState(0);
+  // The exec is manually staging someone onto a project outside the normal
+  // turn-based flow.
+  const [addTarget, setAddTarget] = useState<{ roundProjectId: string; projectId: string; projectName: string } | null>(null);
+  const [periodApplicants, setPeriodApplicants] = useState<{ id: string; name: string }[] | null>(null);
+  const [addFilter, setAddFilter] = useState("");
 
   useEffect(() => {
     (async () => {
@@ -83,7 +141,7 @@ export function DraftRoundsManager() {
           .from("application_periods")
           .select("id, name, starts_at, ends_at, status")
           .order("created_at", { ascending: false }),
-        supabase.from("projects").select("id, name").order("name"),
+        supabase.from("projects").select(PROJECT_COLS).order("name"),
       ]);
       const list = (periodRows ?? []) as Period[];
       setPeriods(list);
@@ -97,15 +155,18 @@ export function DraftRoundsManager() {
     const supabase = createClient();
     const { data, error: loadError } = await supabase
       .from("draft_rounds")
-      .select("id, round_number, draft_round_projects(id, project_id, pick_order, pick_count, projects(name))")
+      .select(
+        "id, round_number, draft_round_projects(id, project_id, pick_order, pick_count, projects(name, icon, icon_url, color, type, client, description, difficulty, estimated_members, num_subteams))",
+      )
       .eq("period_id", periodId)
       .order("round_number");
     if (loadError) { setError("Couldn't load draft rounds."); setRounds([]); return; }
 
+    type ProjRow = { name: string } & ProjectMeta;
     type RoundRow = {
       id: string;
       round_number: number;
-      draft_round_projects: { id: string; project_id: string; pick_order: number; pick_count: number; projects: { name: string } | null }[];
+      draft_round_projects: { id: string; project_id: string; pick_order: number; pick_count: number; projects: ProjRow | null }[];
     };
     const list = ((data ?? []) as unknown as RoundRow[]).map((r) => ({
       id: r.id,
@@ -117,6 +178,15 @@ export function DraftRoundsManager() {
           name: rp.projects?.name ?? "Untitled project",
           pick_order: rp.pick_order,
           pick_count: rp.pick_count,
+          icon: rp.projects?.icon ?? null,
+          icon_url: rp.projects?.icon_url ?? null,
+          color: rp.projects?.color ?? null,
+          type: rp.projects?.type ?? null,
+          client: rp.projects?.client ?? null,
+          description: rp.projects?.description ?? null,
+          difficulty: rp.projects?.difficulty ?? null,
+          estimated_members: rp.projects?.estimated_members ?? null,
+          num_subteams: rp.projects?.num_subteams ?? null,
         })),
       ),
     }));
@@ -136,11 +206,15 @@ export function DraftRoundsManager() {
   // applications.applicant_id points at auth.users, not members (no FK to join).
   const loadBoard = useCallback(async (periodId: string) => {
     const supabase = createClient();
-    const { data: rpRows } = await supabase
-      .from("draft_round_projects")
-      .select("id, submitted_at, draft_picks(id, application_id), draft_rounds!inner(period_id)")
-      .eq("draft_rounds.period_id", periodId);
+    const [{ data: rpRows }, { data: periodRow }] = await Promise.all([
+      supabase
+        .from("draft_round_projects")
+        .select("id, submitted_at, draft_picks(id, application_id), draft_rounds!inner(period_id)")
+        .eq("draft_rounds.period_id", periodId),
+      supabase.from("application_periods").select("ends_at").eq("id", periodId).maybeSingle(),
+    ]);
     const rows = (rpRows ?? []) as unknown as { id: string; submitted_at: string | null; draft_picks: { id: string; application_id: string }[] }[];
+    const periodEndsAt = (periodRow as { ends_at: string } | null)?.ends_at ?? null;
 
     const nextBoard: Record<string, { submittedAt: string | null; appIds: string[] }> = {};
     const appIdSet = new Set<string>();
@@ -150,27 +224,74 @@ export function DraftRoundsManager() {
     }
     setBoardRows(nextBoard);
 
-    if (appIdSet.size === 0) { setNameByAppId({}); return; }
+    if (appIdSet.size === 0) { setNameByAppId({}); setStatusByAppId({}); setIndByAppId({}); return; }
     const appIds = [...appIdSet];
-    const { data: apps } = await supabase.from("applications").select("id, applicant_id").in("id", appIds);
+    const { data: apps } = await supabase.from("applications").select("id, applicant_id, status, submitted_at").in("id", appIds);
     const appToUser: Record<string, string> = {};
+    const submittedByApp: Record<string, string | null> = {};
+    const nextStatus: Record<string, ReviewStatus> = {};
     const userIds: string[] = [];
-    for (const a of (apps ?? []) as { id: string; applicant_id: string | null }[]) {
+    for (const a of (apps ?? []) as { id: string; applicant_id: string | null; status: ReviewStatus; submitted_at: string | null }[]) {
+      nextStatus[a.id] = a.status;
+      submittedByApp[a.id] = a.submitted_at;
       if (a.applicant_id) { appToUser[a.id] = a.applicant_id; userIds.push(a.applicant_id); }
     }
-    const { data: mems } = userIds.length
-      ? await supabase.from("members").select("user_id, preferred_firstname, lastname").in("user_id", userIds)
-      : { data: [] };
+    setStatusByAppId(nextStatus);
+
+    // Recruiting data for the returning/late/invalid indicators (same sources
+    // and formula as the PM applications page). Keyed by the applicant's auth id.
+    const returningUsers = new Set<string>();
+    const coffeeDoneUsers = new Set<string>();
+    const infoUsers = new Set<string>();
+    const boardExecUsers = new Set<string>();
     const userName: Record<string, string> = {};
-    for (const m of (mems ?? []) as { user_id: string; preferred_firstname: string | null; lastname: string | null }[]) {
-      userName[m.user_id] = [m.preferred_firstname, m.lastname].filter(Boolean).join(" ") || "Applicant";
+    if (userIds.length) {
+      const [{ data: mems }, { data: chats }, { data: info }, { data: roleRows }] = await Promise.all([
+        supabase.from("members").select("user_id, preferred_firstname, lastname, status").in("user_id", userIds),
+        supabase.from("coffee_chats").select("applicant_id, complete").in("applicant_id", userIds),
+        supabase.from("infosesh_attendance").select("applicant_id, member_id").or(`applicant_id.in.(${userIds.join(",")}),member_id.in.(${userIds.join(",")})`),
+        supabase.from("members_roles").select("user_id, roles!inner(access_level)").in("user_id", userIds).in("roles.access_level", ["board", "exec"]),
+      ]);
+      for (const m of (mems ?? []) as { user_id: string; preferred_firstname: string | null; lastname: string | null; status: string | null }[]) {
+        userName[m.user_id] = [m.preferred_firstname, m.lastname].filter(Boolean).join(" ") || "Applicant";
+        if (m.status === "active" || m.status === "inactive") returningUsers.add(m.user_id);
+      }
+      for (const c of (chats ?? []) as { applicant_id: string | null; complete: boolean }[]) {
+        if (c.complete && c.applicant_id) coffeeDoneUsers.add(c.applicant_id);
+      }
+      const idSet = new Set(userIds);
+      for (const r of (info ?? []) as { applicant_id: string | null; member_id: string | null }[]) {
+        if (r.applicant_id && idSet.has(r.applicant_id)) infoUsers.add(r.applicant_id);
+        if (r.member_id && idSet.has(r.member_id)) infoUsers.add(r.member_id);
+      }
+      for (const r of (roleRows ?? []) as { user_id: string | null }[]) {
+        if (r.user_id) boardExecUsers.add(r.user_id);
+      }
     }
+
     const nameByApp: Record<string, string> = {};
-    for (const appId of appIds) nameByApp[appId] = userName[appToUser[appId]] ?? "Applicant";
+    const nextInd: Record<string, PickIndicators> = {};
+    for (const appId of appIds) {
+      const uid = appToUser[appId];
+      nameByApp[appId] = userName[uid] ?? "Applicant";
+      const returning = !!uid && returningUsers.has(uid);
+      const valid = isRecruitingValid({
+        boardExec: !!uid && boardExecUsers.has(uid),
+        returning,
+        coffeeDone: !!uid && coffeeDoneUsers.has(uid),
+        infosession: !!uid && infoUsers.has(uid),
+        submittedAt: submittedByApp[appId] ?? null,
+        endsAt: periodEndsAt,
+      });
+      nextInd[appId] = { returning, invalid: !valid, submittedAt: submittedByApp[appId] ?? null };
+    }
     setNameByAppId(nameByApp);
+    setIndByAppId(nextInd);
   }, []);
 
   useEffect(() => {
+    setPeriodApplicants(null);
+    setRoundPage(0);
     if (selectedPeriodId) {
       loadRounds(selectedPeriodId);
       loadDraftState(selectedPeriodId);
@@ -181,6 +302,8 @@ export function DraftRoundsManager() {
       setCompletedAt(null);
       setBoardRows({});
       setNameByAppId({});
+      setStatusByAppId({});
+      setIndByAppId({});
     }
   }, [selectedPeriodId, loadRounds, loadDraftState, loadBoard]);
 
@@ -205,6 +328,25 @@ export function DraftRoundsManager() {
   );
   const currentIndex = currentPickId ? sequence.findIndex((s) => s.id === currentPickId) : -1;
   const currentStop = currentIndex >= 0 ? sequence[currentIndex] : null;
+
+  // Keep the round pager pointed at whichever round is actually on the clock
+  // -- but only when the turn moves into a *different* round, so browsing
+  // elsewhere while it's still that round's turn isn't fought on every render.
+  const lastTurnRoundId = useRef<string | null>(null);
+  useEffect(() => {
+    const roundId = currentStop?.round_id ?? null;
+    if (roundId && roundId !== lastTurnRoundId.current) {
+      const idx = (rounds ?? []).findIndex((r) => r.id === roundId);
+      if (idx >= 0) setRoundPage(idx);
+    }
+    lastTurnRoundId.current = roundId;
+  }, [currentStop?.round_id, rounds]);
+
+  // Keep the page in range as rounds are added/removed.
+  useEffect(() => {
+    if (!rounds) return;
+    setRoundPage((p) => Math.min(Math.max(p, 0), Math.max(rounds.length - 1, 0)));
+  }, [rounds]);
 
   const setPick = async (periodId: string, pickId: string | null) => {
     const supabase = createClient();
@@ -260,6 +402,63 @@ export function DraftRoundsManager() {
     }
   };
 
+  // Flips one project's round between confirmed/staged directly, regardless
+  // of whose turn it is -- an admin correction tool, distinct from the
+  // turn-gated submit_draft_picks PMs use. Only touches that one
+  // draft_round_projects row: no picks are deleted and current_pick_id is
+  // left alone.
+  const setRoundSubmitted = async (roundProjectId: string, submitted: boolean) => {
+    if (!selectedPeriodId) return;
+    const supabase = createClient();
+    const { error: rpcError } = await supabase.rpc("set_round_submitted", {
+      p_round_project_id: roundProjectId,
+      p_submitted: submitted,
+    });
+    if (rpcError) { setError(rpcError.message || "Couldn't update that round."); return; }
+    loadBoard(selectedPeriodId);
+  };
+
+  // Loaded lazily the first time the "add manually" picker opens for a
+  // period, then reused -- every project's round shares the same roster.
+  const loadPeriodApplicants = async () => {
+    if (!selectedPeriodId) return;
+    const supabase = createClient();
+    const { data: apps } = await supabase
+      .from("applications")
+      .select("id, applicant_id")
+      .eq("period_id", selectedPeriodId)
+      .in("status", ["submitted", "accepted", "rejected"]);
+    const rows = (apps ?? []) as { id: string; applicant_id: string | null }[];
+    const userIds = [...new Set(rows.map((r) => r.applicant_id).filter((id): id is string => !!id))];
+    const { data: mems } = userIds.length
+      ? await supabase.from("members").select("user_id, preferred_firstname, lastname").in("user_id", userIds)
+      : { data: [] as { user_id: string; preferred_firstname: string | null; lastname: string | null }[] };
+    const nameByUser: Record<string, string> = {};
+    for (const m of (mems ?? []) as { user_id: string; preferred_firstname: string | null; lastname: string | null }[]) {
+      nameByUser[m.user_id] = [m.preferred_firstname, m.lastname].filter(Boolean).join(" ") || "Applicant";
+    }
+    setPeriodApplicants(
+      rows.map((r) => ({ id: r.id, name: (r.applicant_id && nameByUser[r.applicant_id]) || "Applicant" })).sort((a, b) => a.name.localeCompare(b.name)),
+    );
+  };
+
+  const openAddManually = (roundProjectId: string, projectId: string, projectName: string) => {
+    setAddFilter("");
+    setAddTarget({ roundProjectId, projectId, projectName });
+    if (!periodApplicants) loadPeriodApplicants();
+  };
+
+  const addApplicantManually = async (applicationId: string) => {
+    if (!addTarget || !selectedPeriodId) return;
+    const supabase = createClient();
+    const { error: insertError } = await supabase
+      .from("draft_picks")
+      .insert({ round_project_id: addTarget.roundProjectId, application_id: applicationId });
+    if (insertError) { setError(insertError.message || "Couldn't add that applicant."); return; }
+    setAddTarget(null);
+    loadBoard(selectedPeriodId);
+  };
+
   // A new round starts seeded with every current project, in alphabetical
   // order, one pick each -- the common case is every project drafts every
   // round and only the order/count per round changes, so this saves adding
@@ -284,13 +483,17 @@ export function DraftRoundsManager() {
         .select("id, project_id, pick_order, pick_count");
       if (seedError) { setError("Round was created, but seeding projects failed."); }
       else {
-        seededRows = (rpRows ?? []).map((rp) => ({
-          id: rp.id,
-          project_id: rp.project_id,
-          name: seed.find((p) => p.id === rp.project_id)?.name ?? "Untitled project",
-          pick_order: rp.pick_order,
-          pick_count: rp.pick_count,
-        }));
+        seededRows = (rpRows ?? []).map((rp) => {
+          const p = seed.find((sp) => sp.id === rp.project_id);
+          return {
+            id: rp.id,
+            project_id: rp.project_id,
+            name: p?.name ?? "Untitled project",
+            pick_order: rp.pick_order,
+            pick_count: rp.pick_count,
+            ...projectMeta(p),
+          };
+        });
       }
     }
 
@@ -325,7 +528,7 @@ export function DraftRoundsManager() {
               ...r,
               projects: sortProjects([
                 ...r.projects,
-                { id: data.id, project_id: project.id, name: project.name, pick_order: data.pick_order, pick_count: data.pick_count },
+                { id: data.id, project_id: project.id, name: project.name, pick_order: data.pick_order, pick_count: data.pick_count, ...projectMeta(project) },
               ]),
             }
           : r,
@@ -476,46 +679,103 @@ export function DraftRoundsManager() {
         </div>
       )}
 
-      {selectedPeriodId && (currentPickId !== null || completedAt) && sequence.length > 0 && (
-        <DraftBoard
-          sequence={sequence}
-          currentPickId={currentPickId}
-          boardRows={boardRows}
-          nameByAppId={nameByAppId}
-        />
-      )}
-
       {selectedPeriodId && (
         <div className="flex flex-col gap-4">
-          {rounds === null ? (
-            <div className="h-24 rounded-xl bg-muted animate-pulse" />
-          ) : rounds.length === 0 ? (
-            <div className="px-4 py-10 text-center text-sm text-muted-foreground border rounded-xl">
-              No rounds yet. Add one to start setting up the draft.
+          {rounds !== null && rounds.length > 0 && (
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-7 w-7"
+                  disabled={roundPage <= 0}
+                  onClick={() => setRoundPage((p) => p - 1)}
+                >
+                  <ChevronLeft size={14} />
+                </Button>
+                <span className="text-base font-bold text-foreground">
+                  Round {roundPage + 1} of {rounds.length}
+                </span>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-7 w-7"
+                  disabled={roundPage >= rounds.length - 1}
+                  onClick={() => setRoundPage((p) => p + 1)}
+                >
+                  <ChevronRight size={14} />
+                </Button>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={async () => {
+                  const nextPage = rounds.length;
+                  await addRound();
+                  setRoundPage(nextPage);
+                }}
+              >
+                <Plus size={14} className="mr-1.5" />
+                Add round
+              </Button>
             </div>
-          ) : (
-            rounds.map((round) => (
-              <RoundCard
-                key={round.id}
-                round={round}
-                currentPickId={currentPickId}
-                addableProjects={(allProjects ?? []).filter((p) => !round.projects.some((rp) => rp.project_id === p.id))}
-                onDeleteRound={() => setConfirmTarget({ kind: "round", roundId: round.id, label: `Round ${round.round_number}` })}
-                onAddProject={(project) => addProjectToRound(round.id, project)}
-                onRemoveProject={(rp) =>
-                  setConfirmTarget({ kind: "project", roundId: round.id, rowId: rp.id, label: rp.name })
-                }
-                onReorder={(event) => reorderRound(round.id, event)}
-                onPickCountChange={(rowId, value) => updatePickCount(round.id, rowId, value)}
-                onPickCountCommit={commitPickCount}
-              />
-            ))
           )}
 
-          <Button variant="outline" size="sm" className="self-start" onClick={addRound}>
-            <Plus size={14} className="mr-1.5" />
-            Add round
-          </Button>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+            {/* LEFT: the single, editable pick-order box for the active round */}
+            {rounds === null ? (
+              <div className="h-24 rounded-xl bg-muted animate-pulse" />
+            ) : rounds.length === 0 ? (
+              <div className="px-4 py-10 text-center text-sm text-muted-foreground border rounded-xl flex flex-col gap-3 items-center">
+                No rounds yet. Add one to start setting up the draft.
+                <Button variant="outline" size="sm" onClick={addRound}>
+                  <Plus size={14} className="mr-1.5" />
+                  Add round
+                </Button>
+              </div>
+            ) : (
+              (() => {
+                const round = rounds[roundPage];
+                if (!round) return null;
+                return (
+                  <RoundCard
+                    round={round}
+                    currentPickId={currentPickId}
+                    boardRows={boardRows}
+                    addableProjects={(allProjects ?? []).filter((p) => !round.projects.some((rp) => rp.project_id === p.id))}
+                    onDeleteRound={() => setConfirmTarget({ kind: "round", roundId: round.id, label: `Round ${round.round_number}` })}
+                    onAddProject={(project) => addProjectToRound(round.id, project)}
+                    onRemoveProject={(rp) =>
+                      setConfirmTarget({ kind: "project", roundId: round.id, rowId: rp.id, label: rp.name })
+                    }
+                    onReorder={(event) => reorderRound(round.id, event)}
+                    onPickCountChange={(rowId, value) => updatePickCount(round.id, rowId, value)}
+                    onPickCountCommit={commitPickCount}
+                    onOpenInfo={setInfoProject}
+                  />
+                );
+              })()
+            )}
+
+            {/* RIGHT: who's picked what, for the same active round */}
+            {rounds !== null && rounds.length > 0 && rounds[roundPage] && (
+              <PicksThisRound
+                round={rounds[roundPage]}
+                boardRows={boardRows}
+                nameByAppId={nameByAppId}
+                indByAppId={indByAppId}
+                periodEndsAt={selectedPeriod?.ends_at}
+                currentPickId={currentPickId}
+                started={currentPickId !== null || !!completedAt}
+                onOpenApplicant={(appId) =>
+                  setReviewFor({ id: appId, name: nameByAppId[appId] ?? "Applicant", status: statusByAppId[appId] ?? "submitted" })
+                }
+                onRequestUnsubmit={(roundProjectId, label) => setConfirmTarget({ kind: "unsubmit", roundProjectId, label })}
+                onSetSubmitted={setRoundSubmitted}
+                onAddManually={openAddManually}
+              />
+            )}
+          </div>
         </div>
       )}
 
@@ -526,6 +786,7 @@ export function DraftRoundsManager() {
           confirmTarget?.kind === "round" ? `Delete ${confirmTarget.label}?`
           : confirmTarget?.kind === "project" ? `Remove ${confirmTarget.label}?`
           : confirmTarget?.kind === "reset" ? "Reset the draft?"
+          : confirmTarget?.kind === "unsubmit" ? `Send ${confirmTarget.label}'s picks back to staged?`
           : "Complete the draft?"
         }
         description={
@@ -533,12 +794,15 @@ export function DraftRoundsManager() {
           : confirmTarget?.kind === "project" ? "This project will no longer draft in this round."
           : confirmTarget?.kind === "reset"
             ? "Every staged and confirmed pick this draft is cleared and every round un-submitted. Applicants go back to being plain applicants — nothing has been placed on a project yet, so there's nothing to undo there. Round order and pick counts are unaffected."
+          : confirmTarget?.kind === "unsubmit"
+            ? "This project's confirmed picks for this round go back to staged. Nothing is deleted — round order, pick counts, and every other project are unaffected."
             : "Places every confirmed pick onto its project for real (same as accepting them manually) and locks the draft. This can't be undone from here."
         }
         confirmLabel={
           confirmTarget?.kind === "round" ? "Delete round"
           : confirmTarget?.kind === "project" ? "Remove"
           : confirmTarget?.kind === "reset" ? "Reset draft"
+          : confirmTarget?.kind === "unsubmit" ? "Send back to staged"
           : "Complete draft"
         }
         destructive={confirmTarget?.kind !== "complete"}
@@ -547,116 +811,297 @@ export function DraftRoundsManager() {
           if (confirmTarget.kind === "round") return deleteRound(confirmTarget.roundId);
           if (confirmTarget.kind === "project") return removeProjectFromRound(confirmTarget.roundId, confirmTarget.rowId);
           if (confirmTarget.kind === "reset") return resetDraft();
+          if (confirmTarget.kind === "unsubmit") return setRoundSubmitted(confirmTarget.roundProjectId, false);
           return completeDraft();
         }}
       />
+
+      {addTarget && (
+        <AddApplicantModal
+          target={addTarget}
+          applicants={periodApplicants}
+          alreadyPicked={boardRows[addTarget.roundProjectId]?.appIds ?? []}
+          filter={addFilter}
+          onFilterChange={setAddFilter}
+          onPick={addApplicantManually}
+          onClose={() => setAddTarget(null)}
+        />
+      )}
+
+      <ProjectInfoModal project={infoProject} onClose={() => setInfoProject(null)} />
+
+      {reviewFor && (
+        <ApplicationReviewModal
+          applicationId={reviewFor.id}
+          applicantName={reviewFor.name}
+          status={reviewFor.status}
+          contextProjectId={null}
+          readOnly
+          open={!!reviewFor}
+          onOpenChange={(o) => { if (!o) setReviewFor(null); }}
+          onReviewed={() => {}}
+        />
+      )}
     </div>
   );
 }
 
-// Live two-column draft board (shown once the draft has started): LEFT the
-// pick order with the current turn highlighted + a check on submitted stops;
-// RIGHT the picks each project has made so far, staged vs confirmed.
-function DraftBoard({
-  sequence,
-  currentPickId,
+// A small square icon button, matching the overlay-button styling used for
+// per-card actions elsewhere (applicant-meta.tsx's OverlayButton) -- inlined
+// here since this panel's cards are plain, non-draggable divs rather than the
+// sortable applicant cards that version is built for.
+function IconButton({
+  onClick,
+  disabled,
+  label,
+  className,
+  children,
+}: {
+  onClick: () => void;
+  disabled?: boolean;
+  label: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      title={label}
+      aria-label={label}
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
+      className={`flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent disabled:opacity-40 disabled:hover:bg-transparent ${className ?? ""}`}
+    >
+      {children}
+    </button>
+  );
+}
+
+// The "picks this round" column: every project in the active round (even
+// ones with nothing picked yet), staged vs confirmed, with clickable
+// applicant names (open the global, view-only application card) and, per
+// project, admin controls to send confirmed picks back to staged, flip a
+// pick's badge directly, or manually stage an applicant.
+function PicksThisRound({
+  round,
   boardRows,
   nameByAppId,
+  indByAppId,
+  periodEndsAt,
+  currentPickId,
+  started,
+  onOpenApplicant,
+  onRequestUnsubmit,
+  onSetSubmitted,
+  onAddManually,
 }: {
-  sequence: PickStop[];
-  currentPickId: string | null;
+  round: Round;
   boardRows: Record<string, { submittedAt: string | null; appIds: string[] }>;
   nameByAppId: Record<string, string>;
+  indByAppId: Record<string, PickIndicators>;
+  periodEndsAt: string | undefined;
+  currentPickId: string | null;
+  started: boolean;
+  onOpenApplicant: (appId: string) => void;
+  onRequestUnsubmit: (roundProjectId: string, label: string) => void;
+  onSetSubmitted: (roundProjectId: string, submitted: boolean) => void;
+  onAddManually: (roundProjectId: string, projectId: string, projectName: string) => void;
 }) {
-  const currentIndex = currentPickId ? sequence.findIndex((s) => s.id === currentPickId) : -1;
-
-  // Picks grouped by project, in first-appearance (pick) order.
-  const byProject: { projectId: string; name: string; picks: { appId: string; confirmed: boolean }[] }[] = [];
-  const indexByProject = new Map<string, number>();
-  for (const stop of sequence) {
-    const row = boardRows[stop.id];
-    if (!row || row.appIds.length === 0) continue;
-    let idx = indexByProject.get(stop.project_id);
-    if (idx === undefined) {
-      idx = byProject.length;
-      indexByProject.set(stop.project_id, idx);
-      byProject.push({ projectId: stop.project_id, name: stop.name, picks: [] });
-    }
-    const confirmed = !!row.submittedAt;
-    for (const appId of row.appIds) byProject[idx].picks.push({ appId, confirmed });
-  }
-
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-      {/* LEFT: pick order */}
-      <div className="border rounded-xl p-4 flex flex-col gap-3">
-        <h3 className="text-sm font-semibold">
-          Pick order
-          {currentIndex >= 0 && (
-            <span className="ml-2 font-normal text-muted-foreground">
-              Pick {currentIndex + 1} of {sequence.length}
-            </span>
-          )}
-        </h3>
-        <div className="flex flex-col gap-1.5">
-          {sequence.map((stop, i) => {
-            const submitted = !!boardRows[stop.id]?.submittedAt;
-            const isCurrent = stop.id === currentPickId;
+    <div className="border rounded-xl p-4 flex flex-col gap-3">
+      {!started ? (
+        <p className="text-xs text-muted-foreground py-2">The draft hasn&apos;t started yet — picks appear here as they&apos;re staged.</p>
+      ) : round.projects.length === 0 ? (
+        <p className="text-xs text-muted-foreground py-2">No projects in this round.</p>
+      ) : (
+        <div className="flex flex-col gap-3">
+          {round.projects.map((rp) => {
+            const row = boardRows[rp.id] ?? { submittedAt: null, appIds: [] };
+            const confirmed = !!row.submittedAt;
+            const isFull = row.appIds.length >= rp.pick_count;
             return (
               <div
-                key={stop.id}
-                className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${
-                  isCurrent ? "border-primary ring-1 ring-primary bg-primary/5" : "bg-background"
+                key={rp.id}
+                className={`flex flex-col gap-1.5 rounded-lg border p-2 ${
+                  rp.id === currentPickId ? "border-primary ring-1 ring-primary" : "border-transparent"
                 }`}
               >
-                <span className="w-5 shrink-0 text-xs font-medium text-muted-foreground">{i + 1}.</span>
-                <span className="flex-1 min-w-0 truncate font-medium">{stop.name}</span>
-                <span className="shrink-0 text-xs text-muted-foreground">
-                  R{stop.round_number} · {stop.pick_count} pick{stop.pick_count === 1 ? "" : "s"}
-                </span>
-                {submitted ? (
-                  <Check size={14} className="shrink-0 text-green-600" aria-label="Submitted" />
-                ) : isCurrent ? (
-                  <span className="shrink-0 text-xs font-medium text-primary">On the clock</span>
-                ) : null}
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <ProjectIcon project={rp} className="h-5 w-5" />
+                    <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground truncate">{rp.name}</span>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1">
+                    {confirmed && (
+                      <IconButton label="Send back to staged" onClick={() => onRequestUnsubmit(rp.id, rp.name)}>
+                        <Undo2 size={14} />
+                      </IconButton>
+                    )}
+                    <IconButton
+                      label={confirmed ? "Unsubmit this round to add more" : isFull ? "This round is full" : "Add applicant manually"}
+                      disabled={confirmed || isFull}
+                      onClick={() => onAddManually(rp.id, rp.project_id, rp.name)}
+                    >
+                      <Plus size={14} />
+                    </IconButton>
+                  </div>
+                </div>
+                {row.appIds.length === 0 ? (
+                  <p className="px-1 py-1 text-xs text-muted-foreground">No picks yet.</p>
+                ) : (
+                  row.appIds.map((appId, i) => {
+                    const ind = indByAppId[appId];
+                    return (
+                      <div key={`${appId}-${i}`} className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm bg-background">
+                        <button
+                          type="button"
+                          onClick={() => onOpenApplicant(appId)}
+                          className="min-w-0 truncate text-left font-medium hover:underline"
+                        >
+                          {nameByAppId[appId] ?? "Applicant"}
+                        </button>
+                        {ind && <InvalidIndicator valid={!ind.invalid} />}
+                        {ind && <ReturningIndicator returning={ind.returning} />}
+                        <LateBadge submittedAt={ind?.submittedAt} endsAt={periodEndsAt} />
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            {confirmed ? (
+                              <Badge className="ml-auto inline-flex items-center gap-1 bg-green-600 hover:bg-green-600 shrink-0 cursor-pointer">
+                                <ChevronDown size={12} className="opacity-80" />
+                                Confirmed
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="ml-auto inline-flex items-center gap-1 shrink-0 cursor-pointer">
+                                <ChevronDown size={12} className="opacity-60" />
+                                Staged
+                              </Badge>
+                            )}
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onSelect={() => onSetSubmitted(rp.id, true)}>
+                              {confirmed && <Check size={14} className="mr-2" />} Confirmed
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onSelect={() => onSetSubmitted(rp.id, false)}>
+                              {!confirmed && <Check size={14} className="mr-2" />} Staged
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
+                    );
+                  })
+                )}
               </div>
             );
           })}
         </div>
-      </div>
+      )}
+    </div>
+  );
+}
 
-      {/* RIGHT: who's picked what */}
-      <div className="border rounded-xl p-4 flex flex-col gap-3">
-        <h3 className="text-sm font-semibold">Picks so far</h3>
-        {byProject.length === 0 ? (
-          <p className="text-xs text-muted-foreground py-2">No picks staged yet.</p>
-        ) : (
+// The exec's manual-staging picker: any applicant this period, minus whoever
+// is already picked for this round-project. Bypasses the normal turn-based
+// flow entirely, same as the admin unsubmit/confirm controls above.
+function AddApplicantModal({
+  target,
+  applicants,
+  alreadyPicked,
+  filter,
+  onFilterChange,
+  onPick,
+  onClose,
+}: {
+  target: { roundProjectId: string; projectId: string; projectName: string };
+  applicants: { id: string; name: string }[] | null;
+  alreadyPicked: string[];
+  filter: string;
+  onFilterChange: (value: string) => void;
+  onPick: (applicationId: string) => void;
+  onClose: () => void;
+}) {
+  const pickedSet = new Set(alreadyPicked);
+  const options = (applicants ?? []).filter(
+    (a) => !pickedSet.has(a.id) && a.name.toLowerCase().includes(filter.trim().toLowerCase()),
+  );
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Add to {target.projectName}</DialogTitle>
+        </DialogHeader>
+        <div className="flex flex-col gap-3">
+          <Input
+            autoFocus
+            placeholder="Search applicants…"
+            value={filter}
+            onChange={(e) => onFilterChange(e.target.value)}
+          />
+          <div className="flex max-h-72 flex-col gap-1 overflow-y-auto">
+            {applicants === null ? (
+              <p className="text-sm text-muted-foreground py-4 text-center">Loading applicants…</p>
+            ) : options.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-4 text-center">No matching applicants.</p>
+            ) : (
+              options.map((a) => (
+                <button
+                  key={a.id}
+                  type="button"
+                  onClick={() => onPick(a.id)}
+                  className="rounded-md px-3 py-2 text-left text-sm hover:bg-accent"
+                >
+                  {a.name}
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// A read-only project detail popup opened from a pick-order tile.
+function ProjectInfoModal({ project, onClose }: { project: RoundProject | null; onClose: () => void }) {
+  const facts: [string, string][] = project
+    ? [
+        ["Type", project.type === "studio" ? "OP Studio" : project.type === "launch" ? "OP Launch" : "—"],
+        ["Client", project.client || "—"],
+        ["Difficulty", project.difficulty ? project.difficulty[0].toUpperCase() + project.difficulty.slice(1) : "—"],
+        ["Est. team size", project.estimated_members != null ? String(project.estimated_members) : "—"],
+        ["Subteams", project.num_subteams != null ? String(project.num_subteams) : "—"],
+      ]
+    : [];
+  return (
+    <Dialog open={!!project} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            {project && <ProjectIcon project={project} className="h-7 w-7" />}
+            <span className="truncate">{project?.name}</span>
+          </DialogTitle>
+        </DialogHeader>
+        {project && (
           <div className="flex flex-col gap-3">
-            {byProject.map((proj) => (
-              <div key={proj.projectId} className="flex flex-col gap-1.5">
-                <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{proj.name}</span>
-                {proj.picks.map((pick, i) => (
-                  <div key={`${pick.appId}-${i}`} className="flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm bg-background">
-                    <span className="flex-1 min-w-0 truncate">{nameByAppId[pick.appId] ?? "Applicant"}</span>
-                    {pick.confirmed ? (
-                      <Badge className="bg-green-600 hover:bg-green-600 shrink-0">Confirmed</Badge>
-                    ) : (
-                      <Badge variant="outline" className="shrink-0">Staged</Badge>
-                    )}
-                  </div>
-                ))}
-              </div>
-            ))}
+            <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+              {facts.map(([label, value]) => (
+                <div key={label} className="flex flex-col">
+                  <span className="text-xs text-muted-foreground">{label}</span>
+                  <span className="font-medium">{value}</span>
+                </div>
+              ))}
+            </div>
+            {project.description && <p className="text-sm text-muted-foreground whitespace-pre-wrap">{project.description}</p>}
           </div>
         )}
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
 function RoundCard({
   round,
   currentPickId,
+  boardRows,
   addableProjects,
   onDeleteRound,
   onAddProject,
@@ -664,9 +1109,11 @@ function RoundCard({
   onReorder,
   onPickCountChange,
   onPickCountCommit,
+  onOpenInfo,
 }: {
   round: Round;
   currentPickId: string | null;
+  boardRows: Record<string, { submittedAt: string | null; appIds: string[] }>;
   addableProjects: Project[];
   onDeleteRound: () => void;
   onAddProject: (project: Project) => void;
@@ -674,13 +1121,13 @@ function RoundCard({
   onReorder: (event: DragEndEvent) => void;
   onPickCountChange: (rowId: string, value: number) => void;
   onPickCountCommit: (rowId: string, value: number) => void;
+  onOpenInfo: (rp: RoundProject) => void;
 }) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
   return (
     <div className="border rounded-xl p-4 flex flex-col gap-3">
-      <div className="flex items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold">Round {round.round_number}</h3>
+      <div className="flex items-center justify-end gap-2">
         <div className="flex items-center gap-2">
           {addableProjects.length > 0 && (
             <DropdownMenu>
@@ -714,11 +1161,13 @@ function RoundCard({
           <SortableContext items={round.projects.map((p) => p.id)} strategy={verticalListSortingStrategy}>
             <div className="flex flex-col gap-2">
               {round.projects.map((rp, i) => (
-                <SortableRow
+                <ProjectTile
                   key={rp.id}
                   rp={rp}
                   position={i + 1}
                   isCurrent={rp.id === currentPickId}
+                  board={boardRows[rp.id]}
+                  onOpenInfo={() => onOpenInfo(rp)}
                   onRemove={() => onRemoveProject(rp)}
                   onPickCountChange={(value) => onPickCountChange(rp.id, value)}
                   onPickCountCommit={(value) => onPickCountCommit(rp.id, value)}
@@ -732,10 +1181,15 @@ function RoundCard({
   );
 }
 
-function SortableRow({
+// One project's tile within a round's grid: icon + name (click → info),
+// accent color, an editable pick count, a remove ×, and a grip handle that owns
+// the drag (so clicking the tile body opens info instead of starting a drag).
+function ProjectTile({
   rp,
   position,
   isCurrent,
+  board,
+  onOpenInfo,
   onRemove,
   onPickCountChange,
   onPickCountCommit,
@@ -743,30 +1197,56 @@ function SortableRow({
   rp: RoundProject;
   position: number;
   isCurrent: boolean;
+  board: { submittedAt: string | null; appIds: string[] } | undefined;
+  onOpenInfo: () => void;
   onRemove: () => void;
   onPickCountChange: (value: number) => void;
   onPickCountCommit: (value: number) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: rp.id });
-  const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1 };
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    borderLeftColor: rp.color || undefined,
+  };
+  const stagedCount = board?.appIds.length ?? 0;
+  const confirmed = !!board?.submittedAt;
 
   return (
     <div
       ref={setNodeRef}
       style={style}
-      className={`flex items-center gap-2 rounded-lg border px-3 py-2 bg-background ${isCurrent ? "border-primary ring-1 ring-primary" : ""}`}
+      className={`flex items-center gap-2 rounded-lg border border-l-4 px-2.5 py-2 bg-background ${
+        isCurrent ? "border-primary ring-1 ring-primary" : ""
+      }`}
     >
       <button
         {...attributes}
         {...listeners}
-        className="text-muted-foreground/50 hover:text-muted-foreground cursor-grab touch-none"
+        className="text-muted-foreground/50 hover:text-muted-foreground cursor-grab touch-none shrink-0"
         aria-label="Drag to reorder"
       >
         <GripVertical size={16} />
       </button>
-      <span className="w-5 shrink-0 text-xs font-medium text-muted-foreground">{position}.</span>
-      <span className="flex-1 min-w-0 truncate text-sm font-medium">{rp.name}</span>
-      <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+      <span className="w-4 shrink-0 text-xs font-medium text-muted-foreground">{position}.</span>
+      <button
+        type="button"
+        onClick={onOpenInfo}
+        className="flex min-w-0 flex-1 items-center gap-2 text-left hover:opacity-80"
+        title={`${rp.name} — details`}
+      >
+        <ProjectIcon project={rp} className="h-6 w-6" />
+        <span className="truncate text-sm font-medium">{rp.name}</span>
+      </button>
+      {confirmed ? (
+        <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-green-600">
+          <Check size={13} /> Confirmed
+        </span>
+      ) : stagedCount > 0 ? (
+        <span className="shrink-0 text-xs text-muted-foreground">{stagedCount} staged</span>
+      ) : null}
+      <label className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
         Picks
         <Input
           type="number"
@@ -774,12 +1254,12 @@ function SortableRow({
           value={rp.pick_count}
           onChange={(e) => onPickCountChange(Number(e.target.value))}
           onBlur={(e) => onPickCountCommit(Number(e.target.value))}
-          className="h-7 w-16 px-2 text-xs"
+          className="h-7 w-14 px-2 text-xs"
         />
       </label>
       <button
         onClick={onRemove}
-        className="text-muted-foreground/50 hover:text-destructive"
+        className="text-muted-foreground/50 hover:text-destructive shrink-0"
         aria-label={`Remove ${rp.name} from this round`}
       >
         <X size={15} />

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useDroppable } from "@dnd-kit/core";
 import { Lock } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { accentStyle } from "@/lib/portal-color";
 import { Button } from "@/components/ui/button";
 import { StaticApplicantCard, applicantName, type AppRow } from "@/components/applicant-meta";
 import type { PickRow, DraftPhase, CurrentTurn, MyPosition } from "@/lib/use-draft-picks";
@@ -91,6 +92,7 @@ export function DraftWindowPanel({
   onSubmit,
   onRemove,
   showRecruitingStatus,
+  accent,
 }: {
   appById: Map<string, AppRow>;
   periodEndsAt: string | undefined;
@@ -114,6 +116,9 @@ export function DraftWindowPanel({
   // must stay visible and removable rather than silently vanishing while
   // still taking up a slot.
   onRemove: (applicationId: string) => void;
+  // The project's accent colour. Paints the Confirmed rows below, matching the
+  // cards those same applicants show as over in the Applicants column.
+  accent: string;
   showRecruitingStatus?: boolean;
 }) {
   const [submitting, setSubmitting] = useState(false);
@@ -165,7 +170,13 @@ export function DraftWindowPanel({
             {confirmedPicks.map((p) => {
               const app = appById.get(p.application_id);
               return (
-                <div key={p.id} className="flex items-center gap-2 border rounded-lg px-3 py-2">
+                // Shares its view-transition-name with the staged card above,
+                // so confirming glides the card up into this row (globals.css).
+                <div
+                  key={p.id}
+                  style={{ viewTransitionName: `pick-${p.id}`, ...accentStyle(accent) }}
+                  className="flex items-center gap-2 border rounded-lg px-3 py-2"
+                >
                   <span className="flex-1 min-w-0 truncate text-sm font-medium">{app ? applicantName(app) : "Applicant"}</span>
                   <Badge variant="outline">Round {p.round.round_number}</Badge>
                 </div>
@@ -194,10 +205,15 @@ export function DraftWindowPanel({
         </div>
         <div
           ref={setNodeRef}
-          className={`flex flex-col gap-2 rounded-xl border-2 border-dashed p-3 min-h-[76px] transition-colors ${
+          // White is the draft window's own colour -- the staging area, as
+          // opposed to the project accent that marks a confirmed pick. An
+          // applicant staged here gets the same white on their card over in the
+          // Applicants column, so the two read as one section. Cards inside sit
+          // on the plain background, a shade below the panel.
+          className={`flex flex-col gap-2 rounded-xl border-2 border-dashed p-3 transition-colors ${
             !canStage ? "border-muted-foreground/20 bg-muted/20"
-            : isOver ? "border-primary bg-primary/5"
-            : "border-muted-foreground/25"
+            : isOver ? "border-foreground/50 bg-accent"
+            : "border-foreground/25 bg-card"
           }`}
         >
           {!canStage ? (
@@ -234,6 +250,7 @@ export function DraftWindowPanel({
                 <StaticApplicantCard
                   key={p.id}
                   app={app}
+                  viewTransitionName={`pick-${p.id}`}
                   periodEndsAt={periodEndsAt}
                   showRecruitingStatus={showRecruitingStatus}
                   onReview={onReview}

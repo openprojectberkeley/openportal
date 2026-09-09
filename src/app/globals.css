@@ -116,3 +116,18 @@
     user-select: text;
   }
 }
+
+/* View transitions (lib/view-transition.ts). Only elements carrying a
+   `view-transition-name` should move -- killing the root animation stops the
+   whole page cross-fading behind them. Duration and easing match
+   lib/flip-move.ts so a confirmed pick and a wishlist move feel like one
+   system. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+}
+
+::view-transition-group(*) {
+  animation-duration: 320ms;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}

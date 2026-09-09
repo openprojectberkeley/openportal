@@ -1,6 +1,6 @@
 "use client";
 
-import { Coffee, Check, Clock, Presentation, FileCheck } from "lucide-react";
+import { Coffee, Check, Clock, Presentation, FileCheck, AlertTriangle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn, isLate, daysLate } from "@/lib/utils";
@@ -78,6 +78,23 @@ export function LateBadge({
       <Clock size={11} />
       Late - {days} {days === 1 ? "day" : "days"}
     </Badge>
+  );
+}
+
+// Red warning triangle when an applicant hasn't met recruiting requirements
+// (valid === false). Renders nothing when valid or when validity is unknown,
+// so callers can drop it into a badge cluster unconditionally.
+export function InvalidIndicator({ valid }: { valid?: boolean | null }) {
+  if (valid !== false) return null;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex items-center text-red-600 dark:text-red-400" aria-label="Missing recruiting requirements">
+          <AlertTriangle size={14} />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="top">Missing recruiting requirements. Can still be drafted.</TooltipContent>
+    </Tooltip>
   );
 }
 

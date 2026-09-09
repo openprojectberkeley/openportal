@@ -24,7 +24,7 @@ import { ApplicationPageSkeleton } from "@/components/skeletons";
 import { ProjectApplicationModal } from "@/components/project-application-modal";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { type Difficulty, DIFFICULTY_LABELS } from "@/lib/projects";
-import { readableTextColor } from "@/lib/portal-color";
+import { ProjectIcon } from "@/components/project-icon";
 import { uploadResume, deleteResume, resumeSignedUrl } from "@/lib/resume-upload";
 import { TECH_AREAS, TECH_CLASSES, TECH_CLASS_NA } from "@/lib/application-profile";
 
@@ -1239,24 +1239,6 @@ function CardContent({
       </div>
     </>
   );
-}
-
-function ProjectIcon({ project }: { project: Project }) {
-  if (project.icon_url) {
-    // eslint-disable-next-line @next/next/no-img-element
-    return <img src={project.icon_url} alt="" className="h-8 w-8 flex-shrink-0 rounded-lg object-cover" />;
-  }
-  if (project.icon) {
-    return (
-      <span
-        className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-lg bg-foreground/5"
-        style={{ backgroundColor: project.color || undefined, color: project.color ? readableTextColor(project.color) : undefined }}
-      >
-        {project.icon}
-      </span>
-    );
-  }
-  return null;
 }
 
 // A 1–5 segmented rating for a single technical area: buttons fill up to the
