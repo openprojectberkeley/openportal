@@ -30,6 +30,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { ProjectIcon } from "@/components/project-icon";
 import { ApplicationReviewModal, type ReviewStatus } from "@/components/application-review-modal";
 import { useDraftRealtime } from "@/lib/use-draft-realtime";
+import { rankLabel } from "@/lib/application-rank";
 import { isRecruitingValid } from "@/lib/utils";
 
 type Period = { id: string; name: string; status: "draft" | "open" | "closed"; starts_at: string; ends_at: string };
@@ -122,6 +123,8 @@ export function DraftRoundsManager() {
   // Recruiting indicators (returning / late / invalid) per picked application,
   // mirroring the PM applications view.
   const [indByAppId, setIndByAppId] = useState<Record<string, PickIndicators>>({});
+  // Applicant preference for the project that picked them: key `${appId}:${projectId}`.
+  const [rankByAppProject, setRankByAppProject] = useState<Record<string, number>>({});
   // A project tile / applicant name was clicked -> open its info modal.
   const [infoProject, setInfoProject] = useState<RoundProject | null>(null);
   const [reviewFor, setReviewFor] = useState<{ id: string; name: string; status: ReviewStatus } | null>(null);
@@ -221,9 +224,27 @@ export function DraftRoundsManager() {
     }
     setBoardRows(nextBoard);
 
-    if (appIdSet.size === 0) { setNameByAppId({}); setStatusByAppId({}); setIndByAppId({}); return; }
+    if (appIdSet.size === 0) {
+      setNameByAppId({});
+      setStatusByAppId({});
+      setIndByAppId({});
+      setRankByAppProject({});
+      return;
+    }
     const appIds = [...appIdSet];
-    const { data: apps } = await supabase.from("applications").select("id, applicant_id, status, submitted_at").in("id", appIds);
+    const [{ data: apps }, { data: rankings }] = await Promise.all([
+      supabase.from("applications").select("id, applicant_id, status, submitted_at").in("id", appIds),
+      supabase
+        .from("application_rankings")
+        .select("application_id, project_id, rank")
+        .in("application_id", appIds)
+        .eq("ranked", true),
+    ]);
+    const nextRank: Record<string, number> = {};
+    for (const r of (rankings ?? []) as { application_id: string; project_id: string; rank: number }[]) {
+      nextRank[`${r.application_id}:${r.project_id}`] = r.rank;
+    }
+    setRankByAppProject(nextRank);
     const appToUser: Record<string, string> = {};
     const submittedByApp: Record<string, string | null> = {};
     const nextStatus: Record<string, ReviewStatus> = {};
@@ -299,6 +320,7 @@ export function DraftRoundsManager() {
       setNameByAppId({});
       setStatusByAppId({});
       setIndByAppId({});
+      setRankByAppProject({});
     }
   }, [selectedPeriodId, loadRounds, loadDraftState, loadBoard]);
 
@@ -783,6 +805,7 @@ export function DraftRoundsManager() {
                 boardRows={boardRows}
                 nameByAppId={nameByAppId}
                 indByAppId={indByAppId}
+                rankByAppProject={rankByAppProject}
                 periodEndsAt={selectedPeriod?.ends_at}
                 currentPickId={currentPickId}
                 started={currentPickId !== null || !!completedAt}
@@ -906,6 +929,7 @@ function PicksThisRound({
   boardRows,
   nameByAppId,
   indByAppId,
+  rankByAppProject,
   periodEndsAt,
   currentPickId,
   started,
@@ -918,6 +942,7 @@ function PicksThisRound({
   boardRows: Record<string, { submittedAt: string | null; appIds: string[] }>;
   nameByAppId: Record<string, string>;
   indByAppId: Record<string, PickIndicators>;
+  rankByAppProject: Record<string, number>;
   periodEndsAt: string | undefined;
   currentPickId: string | null;
   started: boolean;
@@ -970,6 +995,7 @@ function PicksThisRound({
                 ) : (
                   row.appIds.map((appId, i) => {
                     const ind = indByAppId[appId];
+                    const rank = rankByAppProject[`${appId}:${rp.project_id}`] ?? 0;
                     return (
                       <div key={`${appId}-${i}`} className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm bg-background">
                         <button
@@ -979,6 +1005,14 @@ function PicksThisRound({
                         >
                           {nameByAppId[appId] ?? "Applicant"}
                         </button>
+                        {rank > 0 && (
+                          <span
+                            className="shrink-0 text-[11px] tabular-nums text-muted-foreground/70"
+                            title={rankLabel(rank)}
+                          >
+                            {rankLabel(rank).split(" ")[0]}
+                          </span>
+                        )}
                         {ind && <InvalidIndicator valid={!ind.invalid} />}
                         {ind && <ReturningIndicator returning={ind.returning} />}
                         <LateBadge submittedAt={ind?.submittedAt} endsAt={periodEndsAt} />
