@@ -648,7 +648,7 @@ export default function ManagerApplicationsPage() {
            application_rankings!inner(rank)`,
         )
         .eq("period_id", selectedPeriodId)
-        .in("status", ["submitted", "accepted", "rejected"])
+        .in("status", ["submitted", "accepted"])
         .eq("application_rankings.project_id", selectedProjectId)
         .eq("application_rankings.ranked", true)
         .order("submitted_at", { ascending: true });
@@ -1055,9 +1055,11 @@ export default function ManagerApplicationsPage() {
                 canStage={draftActive}
                 nextRound={draftPicks.nextRound}
                 isMyTurn={draftPicks.isMyTurn}
+                canUnsubmitCurrent={draftPicks.canUnsubmitCurrent}
                 draftWindowPicks={draftPicks.draftWindowPicks}
                 confirmedPicks={draftPicks.confirmedPicks}
                 onSubmit={handleSubmitDraftPicks}
+                onUnsubmit={draftPicks.unsubmit}
                 onRemove={draftPicks.removeFromDraftWindow}
                 showRecruitingStatus={showRecruitingStatus}
                 accent={projectAccent}

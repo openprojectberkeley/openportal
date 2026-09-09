@@ -140,6 +140,19 @@ export function useDraftPicks(projectId: string | null, periodId: string | null)
     .sort((a, b) => a.round_number - b.round_number)[0] ?? null;
   const isMyTurn = !!nextRound && nextRound.id === currentPickId;
 
+  // The round current_pick_id actually points at, if it's one of this
+  // project's own rounds. Distinct from `nextRound` (the earliest
+  // *unsubmitted* one): once a round is submitted, `nextRound` moves on to
+  // whatever's next, but current_pick_id can still be sitting on the
+  // just-submitted round until the exec clicks Next -- that's the window
+  // canUnsubmitCurrent below is keyed on.
+  const currentRoundProject = roundProjectById.get(currentPickId ?? "") ?? null;
+  // Still this project's turn and already submitted -- the PM can send it
+  // back to staged to keep adding/removing/editing picks, right up until the
+  // exec advances to the next pick (unsubmit_draft_picks, 0082, enforces the
+  // same turn check server-side).
+  const canUnsubmitCurrent = phase === "in_progress" && !!currentRoundProject && currentRoundProject.submitted_at !== null;
+
   // Who is on the clock, and how far off this project's next pick is.
   const currentTurn: CurrentTurn = useMemo(() => {
     const stop = sequence.find((s) => s.id === currentPickId);
@@ -205,6 +218,19 @@ export function useDraftPicks(projectId: string | null, periodId: string | null)
     return true;
   }, [nextRound, loadAll]);
 
+  // Sends a still-on-the-clock, already-submitted round back to staged so its
+  // picks land back in draftWindowPicks for further editing. Server-side
+  // (unsubmit_draft_picks, 0082) re-checks it's still this round's turn --
+  // canUnsubmitCurrent is just the client-side mirror for the UI gate.
+  const unsubmit = useCallback(async () => {
+    if (!currentRoundProject) return false;
+    const supabase = createClient();
+    const { error: rpcError } = await supabase.rpc("unsubmit_draft_picks", { p_round_project_id: currentRoundProject.id });
+    if (rpcError) { setError(rpcError.message || "Couldn't send that back to staged."); return false; }
+    await loadAll(withViewTransition);
+    return true;
+  }, [currentRoundProject, loadAll]);
+
   return {
     draftStarted,
     phase,
@@ -213,6 +239,8 @@ export function useDraftPicks(projectId: string | null, periodId: string | null)
     myPosition,
     nextRound,
     isMyTurn,
+    currentRoundProject,
+    canUnsubmitCurrent,
     draftWindowPicks,
     confirmedPicks,
     error,
@@ -220,6 +248,7 @@ export function useDraftPicks(projectId: string | null, periodId: string | null)
     addToDraftWindow,
     removeFromDraftWindow,
     submit,
+    unsubmit,
     reload: loadAll,
   };
 }

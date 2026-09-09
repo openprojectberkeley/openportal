@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ProjectIcon } from "@/components/project-icon";
 import { ApplicationReviewModal, type ReviewStatus } from "@/components/application-review-modal";
 import { useDraftRealtime } from "@/lib/use-draft-realtime";
@@ -507,7 +508,12 @@ export function DraftRoundsManager() {
     const supabase = createClient();
     const { error: deleteError } = await supabase.from("draft_rounds").delete().eq("id", roundId);
     if (deleteError) { setError("Couldn't delete the round."); return; }
-    setRounds((prev) => prev?.filter((r) => r.id !== roundId) ?? null);
+    setRounds((prev) => {
+      const next = prev?.filter((r) => r.id !== roundId) ?? null;
+      if (next && next.length > 0) setRoundPage((p) => Math.min(p, next.length - 1));
+      else setRoundPage(0);
+      return next;
+    });
   };
 
   const addProjectToRound = async (roundId: string, project: Project) => {
@@ -705,6 +711,26 @@ export function DraftRoundsManager() {
                 >
                   <ChevronRight size={14} />
                 </Button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                      aria-label="Delete this round"
+                      onClick={() => {
+                        const round = rounds[roundPage];
+                        if (!round) return;
+                        setConfirmTarget({ kind: "round", roundId: round.id, label: `Round ${round.round_number}` });
+                      }}
+                    >
+                      <Trash2 size={14} />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top">
+                    Delete this round and its pick order
+                  </TooltipContent>
+                </Tooltip>
               </div>
               <Button
                 variant="outline"
@@ -743,7 +769,6 @@ export function DraftRoundsManager() {
                     currentPickId={currentPickId}
                     boardRows={boardRows}
                     addableProjects={(allProjects ?? []).filter((p) => !round.projects.some((rp) => rp.project_id === p.id))}
-                    onDeleteRound={() => setConfirmTarget({ kind: "round", roundId: round.id, label: `Round ${round.round_number}` })}
                     onAddProject={(project) => addProjectToRound(round.id, project)}
                     onRemoveProject={(rp) =>
                       setConfirmTarget({ kind: "project", roundId: round.id, rowId: rp.id, label: rp.name })
@@ -1103,7 +1128,6 @@ function RoundCard({
   currentPickId,
   boardRows,
   addableProjects,
-  onDeleteRound,
   onAddProject,
   onRemoveProject,
   onReorder,
@@ -1115,7 +1139,6 @@ function RoundCard({
   currentPickId: string | null;
   boardRows: Record<string, { submittedAt: string | null; appIds: string[] }>;
   addableProjects: Project[];
-  onDeleteRound: () => void;
   onAddProject: (project: Project) => void;
   onRemoveProject: (rp: RoundProject) => void;
   onReorder: (event: DragEndEvent) => void;
@@ -1127,30 +1150,25 @@ function RoundCard({
 
   return (
     <div className="border rounded-xl p-4 flex flex-col gap-3">
-      <div className="flex items-center justify-end gap-2">
-        <div className="flex items-center gap-2">
-          {addableProjects.length > 0 && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs">
-                  <Plus size={13} className="mr-1.5" />
-                  Add project
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                {addableProjects.map((p) => (
-                  <DropdownMenuItem key={p.id} onSelect={() => onAddProject(p)}>
-                    {p.name}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
-          <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive" onClick={onDeleteRound}>
-            <Trash2 size={14} />
-          </Button>
+      {addableProjects.length > 0 && (
+        <div className="flex items-center justify-end">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs">
+                <Plus size={13} className="mr-1.5" />
+                Add project
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {addableProjects.map((p) => (
+                <DropdownMenuItem key={p.id} onSelect={() => onAddProject(p)}>
+                  {p.name}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
-      </div>
+      )}
 
       {round.projects.length === 0 ? (
         <div className="px-4 py-6 text-center text-sm text-muted-foreground border rounded-lg">

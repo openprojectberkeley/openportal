@@ -320,9 +320,9 @@ export function ApplicationAnalyticsModal({
                     </div>
                   </div>
                   <p className="text-[0.7rem] text-muted-foreground">
-                    Cleared both requirements: coffee chat valid and info session valid. A booked-but-incomplete
-                    chat doesn&apos;t count, and returning members are exempt from both requirements.
-                    Rejected applications are excluded.
+                    Cleared recruiting requirements: coffee chat done and info session attended,
+                    and not submitted 3+ days late. A booked-but-incomplete chat doesn&apos;t count;
+                    board/exec and returning members are exempt. Rejected applications are excluded.
                   </p>
                 </div>
 

@@ -31,12 +31,14 @@ function DraftStatus({
   currentTurn,
   myPosition,
   nextRound,
+  canUnsubmitCurrent,
 }: {
   phase: DraftPhase;
   isMyTurn: boolean;
   currentTurn: CurrentTurn;
   myPosition: MyPosition;
   nextRound: { round_number: number; pick_count: number } | null;
+  canUnsubmitCurrent: boolean;
 }) {
   let dot = "bg-muted-foreground/40";
   let headline: string;
@@ -49,6 +51,12 @@ function DraftStatus({
     dot = "bg-sky-500";
     headline = "The draft is complete";
     sub = "Confirmed picks have been placed on their projects.";
+  } else if (canUnsubmitCurrent) {
+    // Submitted, but the exec hasn't advanced to the next pick yet -- still a
+    // window to revise before it's someone else's turn.
+    dot = "bg-green-500";
+    headline = "Submitted — still your turn";
+    sub = `You can send Round ${currentTurn?.roundNumber ?? ""} back to staged to keep editing until the exec moves on.`;
   } else if (isMyTurn && nextRound) {
     dot = "bg-green-500";
     headline = "It's your turn to pick";
@@ -87,9 +95,11 @@ export function DraftWindowPanel({
   canStage,
   nextRound,
   isMyTurn,
+  canUnsubmitCurrent,
   draftWindowPicks,
   confirmedPicks,
   onSubmit,
+  onUnsubmit,
   onRemove,
   showRecruitingStatus,
   accent,
@@ -105,9 +115,13 @@ export function DraftWindowPanel({
   canStage: boolean;
   nextRound: { id: string; round_number: number; pick_count: number } | null;
   isMyTurn: boolean;
+  // Already submitted, but current_pick_id is still this project's round --
+  // there's still time to send it back to staged and keep revising.
+  canUnsubmitCurrent: boolean;
   draftWindowPicks: PickRow[];
   confirmedPicks: (PickRow & { round: { round_number: number } })[];
   onSubmit: () => Promise<boolean>;
+  onUnsubmit: () => Promise<boolean>;
   // Un-stages a pick from the draft window (the applicant stays in the
   // Applicants list regardless). Also used for an orphaned pick -- one whose
   // applicant isn't in the current review
@@ -122,6 +136,7 @@ export function DraftWindowPanel({
   showRecruitingStatus?: boolean;
 }) {
   const [submitting, setSubmitting] = useState(false);
+  const [unsubmitting, setUnsubmitting] = useState(false);
   const { setNodeRef, isOver } = useDroppable({ id: DRAFT_WINDOW_DROPZONE_ID, disabled: !canStage });
 
   const submit = async () => {
@@ -130,6 +145,15 @@ export function DraftWindowPanel({
       await onSubmit();
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const unsubmit = async () => {
+    setUnsubmitting(true);
+    try {
+      await onUnsubmit();
+    } finally {
+      setUnsubmitting(false);
     }
   };
 
@@ -147,18 +171,32 @@ export function DraftWindowPanel({
         currentTurn={currentTurn}
         myPosition={myPosition}
         nextRound={nextRound}
+        canUnsubmitCurrent={canUnsubmitCurrent}
       />
 
       {/* Confirmed */}
       <div className="flex flex-col gap-2.5">
-        <div className="flex flex-col gap-0.5">
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Confirmed{confirmedPicks.length ? ` (${confirmedPicks.length})` : ""}
-          </h2>
-          {confirmedPicks.length > 0 && (
-            <p className="text-xs text-muted-foreground">
-              Locked in, but not yet team members — that happens once the draft is completed.
-            </p>
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex flex-col gap-0.5">
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Confirmed{confirmedPicks.length ? ` (${confirmedPicks.length})` : ""}
+            </h2>
+            {confirmedPicks.length > 0 && (
+              <p className="text-xs text-muted-foreground">
+                Locked in, but not yet team members — that happens once the draft is completed.
+              </p>
+            )}
+          </div>
+          {canUnsubmitCurrent && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 px-2.5 text-xs shrink-0"
+              onClick={unsubmit}
+              disabled={unsubmitting}
+            >
+              {unsubmitting ? "Sending back…" : `Unsubmit Round ${currentTurn?.roundNumber ?? ""}`}
+            </Button>
           )}
         </div>
         {confirmedPicks.length === 0 ? (

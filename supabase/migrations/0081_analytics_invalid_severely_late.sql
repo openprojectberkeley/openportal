@@ -221,3 +221,6 @@ $$;
 
 revoke all on function public.application_analytics_invalid(uuid) from public;
 grant execute on function public.application_analytics_invalid(uuid) to authenticated;
+
+-- Pick up the new return column on application_analytics_invalid.
+notify pgrst, 'reload schema';
