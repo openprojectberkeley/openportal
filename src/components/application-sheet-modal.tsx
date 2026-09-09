@@ -22,6 +22,7 @@ import { ScrollArea } from "@/components/overlay-scrollbar";
 import { PersonName } from "@/components/person-profile-provider";
 import { CoffeeChatIndicator, InfosessionIndicator, LateBadge, type CoffeeState } from "@/components/applicant-indicators";
 import { coffeeWithByApplicant } from "@/lib/coffee-chat-indicator";
+import { fetchInfoseshAttendedIds, selectInChunks } from "@/lib/postgrest-chunk";
 import {
   SheetCoffeeCell,
   SheetInfosessionCell,
@@ -381,35 +382,42 @@ async function loadApplicantContext(supabase: ReturnType<typeof createClient>, i
     return { memById, coffeeById, completedWith, coffeeWithById, coffeeHostIdsById, attendedInfo, boardExecIds };
   }
 
-  const idSet = new Set(ids);
-  const [{ data: mem }, { data: chats }, { data: info }, { data: roleRows }] = await Promise.all([
-    supabase.from("members").select("user_id, preferred_firstname, lastname, status, grad_year").in("user_id", ids),
-    supabase.from("coffee_chats").select("applicant_id, member_id, complete").in("applicant_id", ids),
-    // Attendance is recorded under member_id or applicant_id depending on
-    // whether they were a member at the time; both are auth user ids.
-    supabase
-      .from("infosesh_attendance")
-      .select("applicant_id, member_id")
-      .or(`applicant_id.in.(${ids.join(",")}),member_id.in.(${ids.join(",")})`),
+  // Chunk large `.in()` lists; infosesh uses dual `.in()` (not doubled OR).
+  const [mem, chats, infoAttended, roleRows] = await Promise.all([
+    selectInChunks(ids, (chunk) =>
+      supabase
+        .from("members")
+        .select("user_id, preferred_firstname, lastname, status, grad_year")
+        .in("user_id", chunk),
+    ),
+    selectInChunks(ids, (chunk) =>
+      supabase.from("coffee_chats").select("applicant_id, member_id, complete").in("applicant_id", chunk),
+    ),
+    // Attendance is under member_id or applicant_id; both are auth user ids.
+    fetchInfoseshAttendedIds(supabase, ids),
     // Board/exec = access_level in ('board','exec'), same grouping as the
     // is_board_or_exec() SQL helper. Inner join + filter returns only the rows
     // for applicants who hold such a role.
-    supabase
-      .from("members_roles")
-      .select("user_id, roles!inner(access_level)")
-      .in("user_id", ids)
-      .in("roles.access_level", ["board", "exec"]),
+    selectInChunks(ids, (chunk) =>
+      supabase
+        .from("members_roles")
+        .select("user_id, roles!inner(access_level)")
+        .in("user_id", chunk)
+        .in("roles.access_level", ["board", "exec"]),
+    ),
   ]);
 
-  for (const m of (mem ?? []) as (MemberInfo & { user_id: string })[]) {
+  for (const uid of infoAttended) attendedInfo.add(uid);
+
+  for (const m of mem as (MemberInfo & { user_id: string })[]) {
     memById[m.user_id] = m;
   }
 
-  for (const r of (roleRows ?? []) as { user_id: string | null }[]) {
+  for (const r of roleRows as { user_id: string | null }[]) {
     if (r.user_id) boardExecIds.add(r.user_id);
   }
 
-  const chatRows = (chats ?? []) as { applicant_id: string; member_id: string; complete: boolean }[];
+  const chatRows = chats as { applicant_id: string; member_id: string; complete: boolean }[];
   for (const ch of chatRows) {
     if (ch.complete) coffeeById[ch.applicant_id] = "done";
     else if (coffeeById[ch.applicant_id] !== "done") coffeeById[ch.applicant_id] = "booked";
@@ -419,22 +427,16 @@ async function loadApplicantContext(supabase: ReturnType<typeof createClient>, i
   const hostIds = [...new Set(chatRows.map((ch) => ch.member_id).filter(Boolean))];
   const hostNameById: Record<string, string> = {};
   if (hostIds.length) {
-    const { data: hosts } = await supabase
-      .from("members")
-      .select("user_id, preferred_firstname, lastname")
-      .in("user_id", hostIds);
-    for (const h of (hosts ?? []) as { user_id: string; preferred_firstname: string | null; lastname: string | null }[]) {
+    const hosts = await selectInChunks(hostIds, (chunk) =>
+      supabase.from("members").select("user_id, preferred_firstname, lastname").in("user_id", chunk),
+    );
+    for (const h of hosts as { user_id: string; preferred_firstname: string | null; lastname: string | null }[]) {
       const name = [h.preferred_firstname, h.lastname].filter(Boolean).join(" ");
       if (name) hostNameById[h.user_id] = name;
     }
   }
   coffeeWithById = coffeeWithByApplicant(chatRows, hostNameById);
   coffeeHostIdsById = coffeeHostIdsByApplicant(chatRows);
-
-  for (const r of (info ?? []) as { applicant_id: string | null; member_id: string | null }[]) {
-    if (r.applicant_id && idSet.has(r.applicant_id)) attendedInfo.add(r.applicant_id);
-    if (r.member_id && idSet.has(r.member_id)) attendedInfo.add(r.member_id);
-  }
 
   return { memById, coffeeById, completedWith, coffeeWithById, coffeeHostIdsById, attendedInfo, boardExecIds };
 }

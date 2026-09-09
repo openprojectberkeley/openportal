@@ -58,6 +58,7 @@ import { rankLabel } from "@/lib/application-rank";
 import { compareReviewPriority, isRecruitingValid } from "@/lib/utils";
 import { DEFAULT_ACCENT } from "@/lib/portal-color";
 import { coffeeWithByApplicant, type CoffeeState } from "@/lib/coffee-chat-indicator";
+import { fetchInfoseshAttendedIds, selectInChunks } from "@/lib/postgrest-chunk";
 import type { WishlistProject } from "@/components/applicant-indicators";
 
 // The project currently under review: which project the reviewer is
@@ -669,42 +670,47 @@ export default function ManagerApplicationsPage() {
       // Other projects' wishlists for these applicants (excludes the selected project).
       const wishlistedById: Record<string, WishlistProject[]> = {};
       if (ids.length) {
-        const idSet = new Set(ids);
-        const [{ data: mem }, { data: chats }, { data: info }, { data: roleRows }, { data: wishRows }] = await Promise.all([
-          supabase.from("members").select("user_id, preferred_firstname, lastname, status").in("user_id", ids),
+        // Chunk large `.in()` lists; infosesh uses dual `.in()` (not doubled OR).
+        const [mem, chats, infoAttended, roleRows, wishRows] = await Promise.all([
+          selectInChunks(ids, (chunk) =>
+            supabase.from("members").select("user_id, preferred_firstname, lastname, status").in("user_id", chunk),
+          ),
           // A booked chat has applicant_id set; `complete` marks it done. Open
           // (unbooked) slots have a null applicant_id and won't match.
-          supabase.from("coffee_chats").select("applicant_id, member_id, complete").in("applicant_id", ids),
-          // Attendance is recorded under member_id or applicant_id depending on
-          // whether they were a member at the time; both are auth user ids.
-          supabase
-            .from("infosesh_attendance")
-            .select("applicant_id, member_id")
-            .or(`applicant_id.in.(${ids.join(",")}),member_id.in.(${ids.join(",")})`),
+          selectInChunks(ids, (chunk) =>
+            supabase.from("coffee_chats").select("applicant_id, member_id, complete").in("applicant_id", chunk),
+          ),
+          // Attendance is under member_id or applicant_id; both are auth user ids.
+          fetchInfoseshAttendedIds(supabase, ids),
           // Board/exec = access_level in ('board','exec'), same as is_board_or_exec().
-          supabase
-            .from("members_roles")
-            .select("user_id, roles!inner(access_level)")
-            .in("user_id", ids)
-            .in("roles.access_level", ["board", "exec"]),
+          selectInChunks(ids, (chunk) =>
+            supabase
+              .from("members_roles")
+              .select("user_id, roles!inner(access_level)")
+              .in("user_id", chunk)
+              .in("roles.access_level", ["board", "exec"]),
+          ),
           // Cross-project shortlists (0086). Own project is filtered out below —
           // the card already lives in (or can be added to) this project's wishlist.
           appIds.length
-            ? supabase
-                .from("application_wishlist")
-                .select("application_id, project_id, projects(id, name, color)")
-                .in("application_id", appIds)
-            : Promise.resolve({ data: [] as never[] }),
+            ? selectInChunks(appIds, (chunk) =>
+                supabase
+                  .from("application_wishlist")
+                  .select("application_id, project_id, projects(id, name, color)")
+                  .in("application_id", chunk),
+              )
+            : Promise.resolve([] as never[]),
         ]);
-        for (const m of (mem ?? []) as (Applicant & { status: string | null })[]) {
+        for (const uid of infoAttended) attendedInfo.add(uid);
+        for (const m of mem as (Applicant & { status: string | null })[]) {
           byId[m.user_id] = m;
           // A past member (active or rolled-off) is "returning"; mirrors is_returning_member().
           returningById[m.user_id] = m.status === "active" || m.status === "inactive";
         }
-        for (const r of (roleRows ?? []) as { user_id: string | null }[]) {
+        for (const r of roleRows as { user_id: string | null }[]) {
           if (r.user_id) boardExecIds.add(r.user_id);
         }
-        const chatRows = (chats ?? []) as { applicant_id: string; member_id: string; complete: boolean }[];
+        const chatRows = chats as { applicant_id: string; member_id: string; complete: boolean }[];
         for (const ch of chatRows) {
           if (ch.complete) coffeeById[ch.applicant_id] = "done";
           else if (coffeeById[ch.applicant_id] !== "done") coffeeById[ch.applicant_id] = "booked";
@@ -712,21 +718,16 @@ export default function ManagerApplicationsPage() {
         const hostIds = [...new Set(chatRows.map((ch) => ch.member_id).filter(Boolean))];
         const hostNameById: Record<string, string> = {};
         if (hostIds.length) {
-          const { data: hosts } = await supabase
-            .from("members")
-            .select("user_id, preferred_firstname, lastname")
-            .in("user_id", hostIds);
-          for (const h of (hosts ?? []) as { user_id: string; preferred_firstname: string | null; lastname: string | null }[]) {
+          const hosts = await selectInChunks(hostIds, (chunk) =>
+            supabase.from("members").select("user_id, preferred_firstname, lastname").in("user_id", chunk),
+          );
+          for (const h of hosts as { user_id: string; preferred_firstname: string | null; lastname: string | null }[]) {
             const name = [h.preferred_firstname, h.lastname].filter(Boolean).join(" ");
             if (name) hostNameById[h.user_id] = name;
           }
         }
         coffeeWithById = coffeeWithByApplicant(chatRows, hostNameById);
-        for (const r of (info ?? []) as { applicant_id: string | null; member_id: string | null }[]) {
-          if (r.applicant_id && idSet.has(r.applicant_id)) attendedInfo.add(r.applicant_id);
-          if (r.member_id && idSet.has(r.member_id)) attendedInfo.add(r.member_id);
-        }
-        for (const w of (wishRows ?? []) as unknown as {
+        for (const w of wishRows as unknown as {
           application_id: string;
           project_id: string;
           projects: { id: string; name: string; color: string | null } | null;

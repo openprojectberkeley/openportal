@@ -32,19 +32,9 @@ import { ApplicationReviewModal, type ReviewStatus } from "@/components/applicat
 import { useDraftRealtime } from "@/lib/use-draft-realtime";
 import { rankLabel } from "@/lib/application-rank";
 import { isRecruitingValid } from "@/lib/utils";
+import { chunkIds } from "@/lib/postgrest-chunk";
 
 type Period = { id: string; name: string; status: "draft" | "open" | "closed"; starts_at: string; ends_at: string };
-
-// Keep PostgREST `.in()` URLs short (UUID lists explode fast; the old infosesh
-// `.or(applicant_id.in.(…),member_id.in.(…))` hit ~15KB with ~190 applicants).
-const IN_CHUNK = 80;
-
-function chunkIds<T>(ids: T[], size = IN_CHUNK): T[][] {
-  if (ids.length === 0) return [];
-  const out: T[][] = [];
-  for (let i = 0; i < ids.length; i += size) out.push(ids.slice(i, i + size));
-  return out;
-}
 
 type RecruitingFlags = {
   name: string;
