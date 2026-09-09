@@ -35,6 +35,25 @@ import { isRecruitingValid } from "@/lib/utils";
 
 type Period = { id: string; name: string; status: "draft" | "open" | "closed"; starts_at: string; ends_at: string };
 
+// Keep PostgREST `.in()` URLs short (UUID lists explode fast; the old infosesh
+// `.or(applicant_id.in.(…),member_id.in.(…))` hit ~15KB with ~190 applicants).
+const IN_CHUNK = 80;
+
+function chunkIds<T>(ids: T[], size = IN_CHUNK): T[][] {
+  if (ids.length === 0) return [];
+  const out: T[][] = [];
+  for (let i = 0; i < ids.length; i += size) out.push(ids.slice(i, i + size));
+  return out;
+}
+
+type RecruitingFlags = {
+  name: string;
+  returning: boolean;
+  coffeeDone: boolean;
+  infosession: boolean;
+  boardExec: boolean;
+};
+
 // Project detail carried alongside each round-project so tiles can render an
 // icon/accent and the info dialog can show est. team size etc.
 type ProjectMeta = {
@@ -136,6 +155,15 @@ export function DraftRoundsManager() {
   const [addTarget, setAddTarget] = useState<{ roundProjectId: string; projectId: string; projectName: string } | null>(null);
   const [periodApplicants, setPeriodApplicants] = useState<{ id: string; name: string }[] | null>(null);
   const [addFilter, setAddFilter] = useState("");
+  // Recruiting flags (infosesh / coffee / returning / board-exec) barely change
+  // during a live draft; cache per period so realtime refreshes don't re-hit
+  // the fat attendance/coffee queries on every tick.
+  const recruitingCacheRef = useRef<{ periodId: string | null; byUser: Map<string, RecruitingFlags> }>({
+    periodId: null,
+    byUser: new Map(),
+  });
+  // Bumped on each loadBoard start; stale overlapping responses are ignored.
+  const loadBoardGenRef = useRef(0);
 
   useEffect(() => {
     (async () => {
@@ -204,17 +232,104 @@ export function DraftRoundsManager() {
     setCompletedAt(data?.completed_at ?? null);
   }, []);
 
+  // Fetch recruiting flags only for user ids missing from the period cache.
+  // Uses chunked dual `.in()` for infosesh (no doubled OR filter in the URL).
+  const ensureRecruitingFlags = useCallback(async (periodId: string, userIds: string[]) => {
+    const cache = recruitingCacheRef.current;
+    if (cache.periodId !== periodId) {
+      cache.periodId = periodId;
+      cache.byUser = new Map();
+    }
+    const unique = [...new Set(userIds)];
+    const missing = unique.filter((id) => !cache.byUser.has(id));
+    if (missing.length === 0) return;
+
+    const supabase = createClient();
+    const returningUsers = new Set<string>();
+    const coffeeDoneUsers = new Set<string>();
+    const infoUsers = new Set<string>();
+    const boardExecUsers = new Set<string>();
+    const userName: Record<string, string> = {};
+
+    const memberChunks = chunkIds(missing);
+    const results = await Promise.all(
+      memberChunks.flatMap((chunk) => [
+        supabase.from("members").select("user_id, preferred_firstname, lastname, status").in("user_id", chunk),
+        supabase.from("coffee_chats").select("applicant_id, complete").in("applicant_id", chunk),
+        // Two queries instead of `.or(applicant_id.in.(…),member_id.in.(…))`
+        // so each UUID appears once per request and URLs stay short.
+        supabase.from("infosesh_attendance").select("applicant_id, member_id").in("applicant_id", chunk),
+        supabase.from("infosesh_attendance").select("applicant_id, member_id").in("member_id", chunk),
+        supabase
+          .from("members_roles")
+          .select("user_id, roles!inner(access_level)")
+          .in("user_id", chunk)
+          .in("roles.access_level", ["board", "exec"]),
+      ]),
+    );
+
+    const idSet = new Set(missing);
+    for (let i = 0; i < memberChunks.length; i++) {
+      const base = i * 5;
+      const mems = results[base]?.data;
+      const chats = results[base + 1]?.data;
+      const infoByApp = results[base + 2]?.data;
+      const infoByMem = results[base + 3]?.data;
+      const roleRows = results[base + 4]?.data;
+
+      for (const m of (mems ?? []) as {
+        user_id: string;
+        preferred_firstname: string | null;
+        lastname: string | null;
+        status: string | null;
+      }[]) {
+        userName[m.user_id] = [m.preferred_firstname, m.lastname].filter(Boolean).join(" ") || "Applicant";
+        if (m.status === "active" || m.status === "inactive") returningUsers.add(m.user_id);
+      }
+      for (const c of (chats ?? []) as { applicant_id: string | null; complete: boolean }[]) {
+        if (c.complete && c.applicant_id) coffeeDoneUsers.add(c.applicant_id);
+      }
+      for (const r of [...(infoByApp ?? []), ...(infoByMem ?? [])] as {
+        applicant_id: string | null;
+        member_id: string | null;
+      }[]) {
+        if (r.applicant_id && idSet.has(r.applicant_id)) infoUsers.add(r.applicant_id);
+        if (r.member_id && idSet.has(r.member_id)) infoUsers.add(r.member_id);
+      }
+      for (const r of (roleRows ?? []) as { user_id: string | null }[]) {
+        if (r.user_id) boardExecUsers.add(r.user_id);
+      }
+    }
+
+    for (const uid of missing) {
+      cache.byUser.set(uid, {
+        name: userName[uid] ?? "Applicant",
+        returning: returningUsers.has(uid),
+        coffeeDone: coffeeDoneUsers.has(uid),
+        infosession: infoUsers.has(uid),
+        boardExec: boardExecUsers.has(uid),
+      });
+    }
+  }, []);
+
   // Lightweight, flash-free load for the live board (picks + submitted state +
   // applicant names). Doesn't touch the editable `rounds`, so it's safe to run
-  // on every realtime event. Applicant names come in two follow-ups since
-  // applications.applicant_id points at auth.users, not members (no FK to join).
+  // on every realtime event. Recruiting indicators are cached — only newly
+  // seen applicant user ids hit members/coffee/infosesh/roles.
   const loadBoard = useCallback(async (periodId: string) => {
+    const gen = ++loadBoardGenRef.current;
     const supabase = createClient();
     const { data: rpRows } = await supabase
       .from("draft_round_projects")
       .select("id, submitted_at, draft_picks(id, application_id), draft_rounds!inner(period_id)")
       .eq("draft_rounds.period_id", periodId);
-    const rows = (rpRows ?? []) as unknown as { id: string; submitted_at: string | null; draft_picks: { id: string; application_id: string }[] }[];
+    if (gen !== loadBoardGenRef.current) return;
+
+    const rows = (rpRows ?? []) as unknown as {
+      id: string;
+      submitted_at: string | null;
+      draft_picks: { id: string; application_id: string }[];
+    }[];
 
     const nextBoard: Record<string, { submittedAt: string | null; appIds: string[] }> = {};
     const appIdSet = new Set<string>();
@@ -240,6 +355,8 @@ export function DraftRoundsManager() {
         .in("application_id", appIds)
         .eq("ranked", true),
     ]);
+    if (gen !== loadBoardGenRef.current) return;
+
     const nextRank: Record<string, number> = {};
     for (const r of (rankings ?? []) as { application_id: string; project_id: string; rank: number }[]) {
       nextRank[`${r.application_id}:${r.project_id}`] = r.rank;
@@ -249,65 +366,49 @@ export function DraftRoundsManager() {
     const submittedByApp: Record<string, string | null> = {};
     const nextStatus: Record<string, ReviewStatus> = {};
     const userIds: string[] = [];
-    for (const a of (apps ?? []) as { id: string; applicant_id: string | null; status: ReviewStatus; submitted_at: string | null }[]) {
+    for (const a of (apps ?? []) as {
+      id: string;
+      applicant_id: string | null;
+      status: ReviewStatus;
+      submitted_at: string | null;
+    }[]) {
       nextStatus[a.id] = a.status;
       submittedByApp[a.id] = a.submitted_at;
-      if (a.applicant_id) { appToUser[a.id] = a.applicant_id; userIds.push(a.applicant_id); }
+      if (a.applicant_id) {
+        appToUser[a.id] = a.applicant_id;
+        userIds.push(a.applicant_id);
+      }
     }
     setStatusByAppId(nextStatus);
 
-    // Recruiting data for the returning/late/invalid indicators (same sources
-    // and formula as the PM applications page). Keyed by the applicant's auth id.
-    const returningUsers = new Set<string>();
-    const coffeeDoneUsers = new Set<string>();
-    const infoUsers = new Set<string>();
-    const boardExecUsers = new Set<string>();
-    const userName: Record<string, string> = {};
-    if (userIds.length) {
-      const [{ data: mems }, { data: chats }, { data: info }, { data: roleRows }] = await Promise.all([
-        supabase.from("members").select("user_id, preferred_firstname, lastname, status").in("user_id", userIds),
-        supabase.from("coffee_chats").select("applicant_id, complete").in("applicant_id", userIds),
-        supabase.from("infosesh_attendance").select("applicant_id, member_id").or(`applicant_id.in.(${userIds.join(",")}),member_id.in.(${userIds.join(",")})`),
-        supabase.from("members_roles").select("user_id, roles!inner(access_level)").in("user_id", userIds).in("roles.access_level", ["board", "exec"]),
-      ]);
-      for (const m of (mems ?? []) as { user_id: string; preferred_firstname: string | null; lastname: string | null; status: string | null }[]) {
-        userName[m.user_id] = [m.preferred_firstname, m.lastname].filter(Boolean).join(" ") || "Applicant";
-        if (m.status === "active" || m.status === "inactive") returningUsers.add(m.user_id);
-      }
-      for (const c of (chats ?? []) as { applicant_id: string | null; complete: boolean }[]) {
-        if (c.complete && c.applicant_id) coffeeDoneUsers.add(c.applicant_id);
-      }
-      const idSet = new Set(userIds);
-      for (const r of (info ?? []) as { applicant_id: string | null; member_id: string | null }[]) {
-        if (r.applicant_id && idSet.has(r.applicant_id)) infoUsers.add(r.applicant_id);
-        if (r.member_id && idSet.has(r.member_id)) infoUsers.add(r.member_id);
-      }
-      for (const r of (roleRows ?? []) as { user_id: string | null }[]) {
-        if (r.user_id) boardExecUsers.add(r.user_id);
-      }
-    }
+    await ensureRecruitingFlags(periodId, userIds);
+    if (gen !== loadBoardGenRef.current) return;
 
+    const byUser = recruitingCacheRef.current.byUser;
     const nameByApp: Record<string, string> = {};
     const nextInd: Record<string, PickIndicators> = {};
     for (const appId of appIds) {
       const uid = appToUser[appId];
-      nameByApp[appId] = userName[uid] ?? "Applicant";
-      const returning = !!uid && returningUsers.has(uid);
+      const flags = uid ? byUser.get(uid) : undefined;
+      nameByApp[appId] = flags?.name ?? "Applicant";
+      const returning = !!flags?.returning;
       const valid = isRecruitingValid({
-        boardExec: !!uid && boardExecUsers.has(uid),
+        boardExec: !!flags?.boardExec,
         returning,
-        coffeeDone: !!uid && coffeeDoneUsers.has(uid),
-        infosession: !!uid && infoUsers.has(uid),
+        coffeeDone: !!flags?.coffeeDone,
+        infosession: !!flags?.infosession,
       });
       nextInd[appId] = { returning, invalid: !valid, submittedAt: submittedByApp[appId] ?? null };
     }
     setNameByAppId(nameByApp);
     setIndByAppId(nextInd);
-  }, []);
+  }, [ensureRecruitingFlags]);
 
   useEffect(() => {
     setPeriodApplicants(null);
     setRoundPage(0);
+    recruitingCacheRef.current = { periodId: null, byUser: new Map() };
+    loadBoardGenRef.current += 1;
     if (selectedPeriodId) {
       loadRounds(selectedPeriodId);
       loadDraftState(selectedPeriodId);
@@ -324,11 +425,13 @@ export function DraftRoundsManager() {
     }
   }, [selectedPeriodId, loadRounds, loadDraftState, loadBoard]);
 
+
   // Live-refresh the draft state (whose turn / completed / reset) and the board
   // (who's picked what) as they move -- when a PM stages/submits or another
-  // exec advances -- without a reload. Both are lightweight and flash-free; the
-  // full editable rounds structure is deliberately NOT reloaded here (it would
-  // flash a skeleton and could interrupt setup edits in progress).
+  // exec advances -- without a reload. Recruiting indicators stay cached so
+  // infosesh/coffee aren't re-fetched every tick. The full editable rounds
+  // structure is deliberately NOT reloaded here (it would flash a skeleton and
+  // could interrupt setup edits in progress).
   const refreshLive = useCallback(() => {
     if (!selectedPeriodId) return;
     loadDraftState(selectedPeriodId);
