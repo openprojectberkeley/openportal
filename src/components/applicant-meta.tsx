@@ -142,6 +142,10 @@ export type ApplicantCardActions = {
   // triangle is driven separately off app.valid, so it survives the override.
   accent?: string | null;
   staged?: boolean;
+  // Another project already confirmed this applicant (0088). Grays the card
+  // and shows "Claimed by …"; mutually exclusive with accent/staged for the
+  // viewer's project (own confirms use accent instead).
+  claimedBy?: string | null;
   // One-shot sweep across the card, played as an applicant's accent lands (see
   // the shimmer keyframe in tailwind.config.ts).
   shimmer?: boolean;
@@ -198,6 +202,7 @@ function ApplicantCardInner({
   showRank,
   showRecruitingStatus,
   shimmer,
+  claimedBy,
   onAddToWishlist,
   onWishlistToggle,
   showAddToDraft,
@@ -208,7 +213,14 @@ function ApplicantCardInner({
 }: ApplicantCardActions & { draggable?: boolean }) {
   const invalid = !app.valid;
   const reasons = invalid ? invalidReasons(app) : [];
-  const hasOverlay = !!(onAddToWishlist || onWishlistToggle || (showAddToDraft && onAddToDraft) || onRemove);
+  const claimed = !!claimedBy;
+  // Claimed applicants can't be drafted, but wishlist add/remove still works.
+  const hasOverlay = !!(
+    onAddToWishlist
+    || onWishlistToggle
+    || (!claimed && showAddToDraft && onAddToDraft)
+    || onRemove
+  );
   return (
     <>
       {invalid ? (
@@ -228,12 +240,20 @@ function ApplicantCardInner({
         <GripVertical size={14} className="shrink-0 text-muted-foreground/40" aria-hidden />
       ) : null}
 
-      <ApplicantMeta
-        app={app}
-        periodEndsAt={periodEndsAt}
-        rank={showRank}
-        showRecruitingStatus={showRecruitingStatus}
-      />
+      <div className={`min-w-0 flex-1 ${claimed ? "opacity-50" : ""}`}>
+        <ApplicantMeta
+          app={app}
+          periodEndsAt={periodEndsAt}
+          rank={showRank}
+          showRecruitingStatus={showRecruitingStatus}
+        />
+      </div>
+
+      {claimed && (
+        <span className={`shrink-0 text-[11px] italic text-muted-foreground ${hasOverlay ? "transition-opacity group-hover:opacity-0" : ""}`}>
+          Claimed by {claimedBy}
+        </span>
+      )}
 
       {/* Persistent wishlisted indicator; sits in the same 28px box (and card
           padding) as the overlay's star toggle so the two line up exactly, and
@@ -257,7 +277,7 @@ function ApplicantCardInner({
 
       {hasOverlay && (
         <div className="absolute inset-y-0 right-0 flex items-center gap-0.5 rounded-r-lg pl-10 pr-3 bg-gradient-to-l from-background via-background/95 to-transparent opacity-0 pointer-events-none transition-opacity group-hover:opacity-100 group-hover:pointer-events-auto">
-          {showAddToDraft && onAddToDraft && (
+          {!claimed && showAddToDraft && onAddToDraft && (
             <OverlayButton
               onClick={() => onAddToDraft(app.id)}
               disabled={addToDraftDisabled}
@@ -302,7 +322,7 @@ function ApplicantCardInner({
 
 function cardClassName(
   app: AppRow,
-  opts?: { grab?: boolean; dragClass?: string; tint?: "accent" | "staged"; shimmer?: boolean },
+  opts?: { grab?: boolean; dragClass?: string; tint?: "accent" | "staged" | "claimed"; shimmer?: boolean },
 ): string {
   const invalid = !app.valid;
   return [
@@ -316,6 +336,8 @@ function cardClassName(
       ? ""
       : opts?.tint === "staged"
       ? "bg-card border-foreground/30"
+      : opts?.tint === "claimed"
+      ? "bg-muted/40 border-muted-foreground/20"
       : invalid
       ? "border-red-200 bg-red-50/60 dark:border-red-900/50 dark:bg-red-950/20"
       : "bg-background",
@@ -329,10 +351,12 @@ function cardClassName(
 
 // A confirmed pick's accent wins over the draft window's white if an applicant
 // somehow reads as both (they shouldn't -- confirming takes them out of the
-// window).
-function cardTint(actions: ApplicantCardActions): "accent" | "staged" | undefined {
+// window). Claimed-by-other is only used when this project hasn't staged/
+// confirmed them.
+function cardTint(actions: ApplicantCardActions): "accent" | "staged" | "claimed" | undefined {
   if (actions.accent) return "accent";
   if (actions.staged) return "staged";
+  if (actions.claimedBy) return "claimed";
   return undefined;
 }
 

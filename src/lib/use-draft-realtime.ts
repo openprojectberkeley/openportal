@@ -12,9 +12,10 @@ import { useEffect, useRef } from "react";
 //
 // Realtime respects RLS, and /manager is board/exec-only, so a viewer only
 // receives events for rows they can read: draft_state / draft_round_projects
-// (board/exec, per 0072 + 0076) and draft_picks for projects they can review.
-// draft_state changes (turn / completed_at) are the shared signal everyone on
-// the page gets, which is enough to keep the whole panel in sync.
+// (board/exec, per 0072 + 0076), own-project draft_picks, and confirmed
+// (submitted) draft_picks across projects (0088). draft_state changes (turn /
+// completed_at) are the shared signal everyone on the page gets, which is
+// enough to keep the whole panel in sync.
 export function useDraftRealtime(periodId: string | null, onChange: () => void) {
   // Keep the latest callback in a ref so re-subscribing isn't tied to the
   // caller passing a stable function.

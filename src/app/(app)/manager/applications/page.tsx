@@ -130,7 +130,7 @@ function WishlistDropzone({
   addToDraftDisabled: (id: string) => boolean;
   // How this applicant's draft state paints their card -- same per-id-callback
   // shape as addToDraftDisabled above.
-  cardDraftState: (id: string) => { accent?: string; staged?: boolean };
+  cardDraftState: (id: string) => { accent?: string; staged?: boolean; shimmer?: boolean; claimedBy?: string };
   onReview: (app: AppRow) => void;
   onWishlistToggle: (id: string) => void;
   onAddToDraft: (id: string) => void;
@@ -487,7 +487,10 @@ export default function ManagerApplicationsPage() {
   // would defeat the card memo during a drag, so route through a ref.
   const draftPicksRef = useRef(draftPicks);
   draftPicksRef.current = draftPicks;
-  const stageInDraft = useCallback((id: string) => { draftPicksRef.current.addToDraftWindow(id); }, []);
+  const stageInDraft = useCallback((id: string) => {
+    if (draftPicksRef.current.claimedByOther[id]) return;
+    draftPicksRef.current.addToDraftWindow(id);
+  }, []);
   const onReviewApp = useCallback(
     (a: AppRow) => setReviewFor({ id: a.id, name: applicantName(a), status: a.status }),
     [],
@@ -570,9 +573,9 @@ export default function ManagerApplicationsPage() {
     setDragWishlistLive(null);
 
     // Draft window is a plain copy target -- the source keeps its card, and the
-    // wishlist is left as it was.
+    // wishlist is left as it was. Claimed-by-other applicants can't be staged.
     if (overId === DRAFT_WINDOW_DROPZONE_ID) {
-      draftPicks.addToDraftWindow(activeId);
+      if (!draftPicks.claimedByOther[activeId]) draftPicks.addToDraftWindow(activeId);
       return;
     }
 
@@ -798,10 +801,13 @@ export default function ManagerApplicationsPage() {
   const confirmedIds = new Set(draftPicks.confirmedPicks.map((p) => p.application_id));
   const stagedIds = new Set(draftPicks.draftWindowPicks.map((p) => p.application_id));
   const projectAccent = selectedProject?.color || DEFAULT_ACCENT;
-  const cardDraftState = (id: string): { accent?: string; staged?: boolean; shimmer?: boolean } =>
-    confirmedIds.has(id) ? { accent: projectAccent, shimmer: justConfirmed.has(id) }
-    : stagedIds.has(id) ? { staged: true }
-    : {};
+  const cardDraftState = (id: string): { accent?: string; staged?: boolean; shimmer?: boolean; claimedBy?: string } => {
+    const claimed = draftPicks.claimedByOther[id];
+    if (claimed) return { claimedBy: claimed.name };
+    return confirmedIds.has(id) ? { accent: projectAccent, shimmer: justConfirmed.has(id) }
+      : stagedIds.has(id) ? { staged: true }
+      : {};
+  };
 
   // Applicants whose pick was confirmed a moment ago, so their card can sweep
   // as the accent lands. Keyed off a sorted string rather than the Set itself,
@@ -1132,7 +1138,7 @@ export default function ManagerApplicationsPage() {
                   apps={wishlistApps}
                   periodEndsAt={selectedPeriod?.ends_at}
                   draftActive={draftActive}
-                  addToDraftDisabled={(id) => draftedIds.has(id)}
+                  addToDraftDisabled={(id) => draftedIds.has(id) || !!draftPicks.claimedByOther[id]}
                   cardDraftState={cardDraftState}
                   onReview={onReviewApp}
                   onWishlistToggle={removeFromWishlist}
@@ -1168,7 +1174,7 @@ export default function ManagerApplicationsPage() {
                           onAddToWishlist={addToWishlist}
                           showAddToDraft={draftActive}
                           onAddToDraft={stageInDraft}
-                          addToDraftDisabled={draftedIds.has(a.id)}
+                          addToDraftDisabled={draftedIds.has(a.id) || !!draftPicks.claimedByOther[a.id]}
                           onReview={onReviewApp}
                         />
                       ))}

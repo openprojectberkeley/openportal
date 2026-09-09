@@ -7,6 +7,8 @@ import { withViewTransition } from "@/lib/view-transition";
 
 export type RoundProjectInfo = { id: string; round_number: number; pick_count: number; submitted_at: string | null };
 export type PickRow = { id: string; round_project_id: string; application_id: string };
+// Project that has already confirmed (submitted) this applicant in the period.
+export type ClaimedByProject = { id: string; name: string };
 
 // Where the whole period's draft is: not started (no current pick), in
 // progress (a current pick, not yet completed), or complete.
@@ -44,6 +46,9 @@ export function useDraftPicks(projectId: string | null, periodId: string | null)
   const [roundProjects, setRoundProjects] = useState<RoundProjectInfo[] | null>(null);
   const [sequence, setSequence] = useState<Stop[]>([]);
   const [picks, setPicks] = useState<PickRow[]>([]);
+  // Applicants confirmed by another project this period (0088). Own-project
+  // confirms stay in confirmedPicks / card accent, not here.
+  const [claimedByOther, setClaimedByOther] = useState<Record<string, ClaimedByProject>>({});
   const [error, setError] = useState<string | null>(null);
 
   // `wrap` lets a caller commit every setState below inside one wrapper --
@@ -55,7 +60,8 @@ export function useDraftPicks(projectId: string | null, periodId: string | null)
   const loadAll = useCallback(async (wrap: (update: () => void) => void = (u) => u()) => {
     if (!projectId || !periodId) {
       wrap(() => {
-        setRoundProjects([]); setPicks([]); setSequence([]); setCurrentPickId(null); setCompletedAt(null);
+        setRoundProjects([]); setPicks([]); setSequence([]); setClaimedByOther({});
+        setCurrentPickId(null); setCompletedAt(null);
       });
       return;
     }
@@ -82,7 +88,7 @@ export function useDraftPicks(projectId: string | null, periodId: string | null)
       wrap(() => {
         setCurrentPickId(nextPickId); setCompletedAt(nextCompletedAt);
         setError("Couldn't load this project's draft rounds.");
-        setRoundProjects([]); setPicks([]); setSequence([]);
+        setRoundProjects([]); setPicks([]); setSequence([]); setClaimedByOther({});
       });
       return;
     }
@@ -111,10 +117,28 @@ export function useDraftPicks(projectId: string | null, periodId: string | null)
       .map((r) => ({ id: r.id, pick_count: r.pickCount, submitted_at: r.submittedAt, round_number: r.roundNumber }))
       .sort((a, b) => a.round_number - b.round_number);
 
+    // Other projects' submitted rounds — confirmed picks are readable via
+    // draft_picks_select_confirmed_board (0088). Map application → claimer.
+    const otherSubmitted = allRows.filter((r) => r.projectId !== projectId && r.submittedAt);
+    const otherSubmittedById = new Map(otherSubmitted.map((r) => [r.id, r]));
     const ids = rpList.map((r) => r.id);
-    const { data: pickRows } = ids.length
-      ? await supabase.from("draft_picks").select("id, round_project_id, application_id").in("round_project_id", ids)
-      : { data: [] as PickRow[] };
+    const otherIds = otherSubmitted.map((r) => r.id);
+    const [{ data: pickRows }, { data: claimedPickRows }] = await Promise.all([
+      ids.length
+        ? supabase.from("draft_picks").select("id, round_project_id, application_id").in("round_project_id", ids)
+        : Promise.resolve({ data: [] as PickRow[] }),
+      otherIds.length
+        ? supabase.from("draft_picks").select("application_id, round_project_id").in("round_project_id", otherIds)
+        : Promise.resolve({ data: [] as { application_id: string; round_project_id: string }[] }),
+    ]);
+
+    const nextClaimed: Record<string, ClaimedByProject> = {};
+    for (const row of claimedPickRows ?? []) {
+      if (nextClaimed[row.application_id]) continue;
+      const rp = otherSubmittedById.get(row.round_project_id);
+      if (!rp) continue;
+      nextClaimed[row.application_id] = { id: rp.projectId, name: rp.projectName };
+    }
 
     wrap(() => {
       setCurrentPickId(nextPickId);
@@ -122,12 +146,13 @@ export function useDraftPicks(projectId: string | null, periodId: string | null)
       setSequence(seq);
       setRoundProjects(rpList);
       setPicks((pickRows ?? []) as PickRow[]);
+      setClaimedByOther(nextClaimed);
     });
   }, [projectId, periodId]);
 
   // Clean slate on a project/period switch (so stale data from the previous
   // project doesn't linger); background refetches update in place instead.
-  useEffect(() => { setRoundProjects(null); setSequence([]); }, [projectId, periodId]);
+  useEffect(() => { setRoundProjects(null); setSequence([]); setClaimedByOther({}); }, [projectId, periodId]);
   useEffect(() => { loadAll(); }, [loadAll]);
   useDraftRealtime(periodId, loadAll);
 
@@ -185,14 +210,23 @@ export function useDraftPicks(projectId: string | null, periodId: string | null)
   // the Applicants list too, not just from the wishlist.
   const addToDraftWindow = useCallback(async (applicationId: string) => {
     if (!nextRound) return false;
+    if (claimedByOther[applicationId]) return false;
     const supabase = createClient();
     const { error: insertError } = await supabase
       .from("draft_picks")
       .insert({ round_project_id: nextRound.id, application_id: applicationId });
-    if (insertError) { setError("The draft window is full for this round."); return false; }
+    if (insertError) {
+      const msg = insertError.message ?? "";
+      setError(
+        /already been claimed/i.test(msg)
+          ? "This applicant has already been claimed."
+          : "The draft window is full for this round.",
+      );
+      return false;
+    }
     await loadAll();
     return true;
-  }, [nextRound, loadAll]);
+  }, [nextRound, loadAll, claimedByOther]);
 
   // Un-stages an applicant from the draft window, wherever it's dragged to
   // next. No-op (succeeds) if they aren't currently staged.
@@ -243,6 +277,7 @@ export function useDraftPicks(projectId: string | null, periodId: string | null)
     canUnsubmitCurrent,
     draftWindowPicks,
     confirmedPicks,
+    claimedByOther,
     error,
     setError,
     addToDraftWindow,
