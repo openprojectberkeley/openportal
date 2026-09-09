@@ -16,6 +16,14 @@ import { useEffect, useRef } from "react";
 // (submitted) draft_picks across projects (0088). draft_state changes (turn /
 // completed_at) are the shared signal everyone on the page gets, which is
 // enough to keep the whole panel in sync.
+// Every subscription gets its own channel topic. The realtime client keys
+// channels by topic and hands back the existing one on a repeat name, so two
+// hooks sharing `draft:<periodId>` -- the applications page runs useDraftPicks
+// and the cross-project board side by side -- would have the second try to add
+// postgres_changes callbacks to an already-subscribed channel and throw. It
+// also covers the same effect re-running before removeChannel() has finished.
+let channelSeq = 0;
+
 export function useDraftRealtime(periodId: string | null, onChange: () => void) {
   // Keep the latest callback in a ref so re-subscribing isn't tied to the
   // caller passing a stable function.
@@ -33,7 +41,7 @@ export function useDraftRealtime(periodId: string | null, onChange: () => void) 
     };
 
     const channel = supabase
-      .channel(`draft:${periodId}`)
+      .channel(`draft:${periodId}:${++channelSeq}`)
       // draft_state is one row per period -- filter to this period.
       .on("postgres_changes", { event: "*", schema: "public", table: "draft_state", filter: `period_id=eq.${periodId}` }, fire)
       // draft_rounds/draft_round_projects/draft_picks don't all carry period_id

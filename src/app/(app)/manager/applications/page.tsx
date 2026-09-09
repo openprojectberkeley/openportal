@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/client";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronDown, SlidersHorizontal, Mail, BarChart3, Table2, UserPlus } from "lucide-react";
+import { ChevronDown, SlidersHorizontal, Mail, BarChart3, Table2 } from "lucide-react";
 import { flipMove } from "@/lib/flip-move";
 import {
   DndContext,
@@ -53,13 +53,12 @@ import {
 import { ApplicationStats, type Stats } from "@/components/application-stats";
 import { ApplicationAnalyticsModal } from "@/components/application-analytics-modal";
 import { ApplicationSheetModal } from "@/components/application-sheet-modal";
+import { AllProjectsBoard } from "@/components/all-projects-board";
 import { ProjectAnalyticsModal } from "@/components/project-analytics-modal";
+import { enrichAppRows } from "@/lib/applicant-rows";
 import { rankLabel } from "@/lib/application-rank";
-import { compareReviewPriority, isRecruitingValid } from "@/lib/utils";
+import { compareReviewPriority } from "@/lib/utils";
 import { DEFAULT_ACCENT } from "@/lib/portal-color";
-import { coffeeWithByApplicant, type CoffeeState } from "@/lib/coffee-chat-indicator";
-import { fetchInfoseshAttendedIds, selectInChunks } from "@/lib/postgrest-chunk";
-import type { WishlistProject } from "@/components/applicant-indicators";
 
 // The project currently under review: which project the reviewer is
 // assigned to (or, for a full-access reviewer, has picked from all of them).
@@ -239,6 +238,9 @@ export default function ManagerApplicationsPage() {
   // Everyone currently on the selected project (left column). null = loading.
   const [roster, setRoster] = useState<RosterMember[] | null>(null);
   const [allCounts, setAllCounts] = useState<{ applicants: number; projects: number } | null>(null);
+  // Bumped when a review changes something the cross-project board shows
+  // (accepting someone puts them on a roster), so it refetches.
+  const [boardReloadToken, setBoardReloadToken] = useState(0);
   // Application ids the current project's reviewers have shortlisted, in the
   // PM's chosen order (persisted via application_wishlist.position). null = loading.
   const [wishlist, setWishlist] = useState<string[] | null>(null);
@@ -658,118 +660,7 @@ export default function ManagerApplicationsPage() {
 
       const rows = ((data ?? []) as unknown as { id: string; status: ReviewStatus; submitted_at: string | null; applicant_id: string | null; application_rankings: { rank: number }[] }[])
         .map(({ application_rankings, ...r }) => ({ ...r, rank: application_rankings[0]?.rank ?? 0 }));
-      const ids = [...new Set(rows.map((r) => r.applicant_id).filter((id): id is string => !!id))];
-      const appIds = rows.map((r) => r.id);
-      const byId: Record<string, Applicant> = {};
-      const returningById: Record<string, boolean> = {};
-      const coffeeById: Record<string, CoffeeState> = {};
-      let coffeeWithById: Record<string, string[]> = {};
-      const attendedInfo = new Set<string>();
-      // Board/exec applicants are auto-valid (same as application sheet / 0067).
-      const boardExecIds = new Set<string>();
-      // Other projects' wishlists for these applicants (excludes the selected project).
-      const wishlistedById: Record<string, WishlistProject[]> = {};
-      if (ids.length) {
-        // Chunk large `.in()` lists; infosesh uses dual `.in()` (not doubled OR).
-        const [mem, chats, infoAttended, roleRows, wishRows] = await Promise.all([
-          selectInChunks(ids, (chunk) =>
-            supabase.from("members").select("user_id, preferred_firstname, lastname, status").in("user_id", chunk),
-          ),
-          // A booked chat has applicant_id set; `complete` marks it done. Open
-          // (unbooked) slots have a null applicant_id and won't match.
-          selectInChunks(ids, (chunk) =>
-            supabase.from("coffee_chats").select("applicant_id, member_id, complete").in("applicant_id", chunk),
-          ),
-          // Attendance is under member_id or applicant_id; both are auth user ids.
-          fetchInfoseshAttendedIds(supabase, ids),
-          // Board/exec = access_level in ('board','exec'), same as is_board_or_exec().
-          selectInChunks(ids, (chunk) =>
-            supabase
-              .from("members_roles")
-              .select("user_id, roles!inner(access_level)")
-              .in("user_id", chunk)
-              .in("roles.access_level", ["board", "exec"]),
-          ),
-          // Cross-project shortlists (0086). Own project is filtered out below —
-          // the card already lives in (or can be added to) this project's wishlist.
-          appIds.length
-            ? selectInChunks(appIds, (chunk) =>
-                supabase
-                  .from("application_wishlist")
-                  .select("application_id, project_id, projects(id, name, color)")
-                  .in("application_id", chunk),
-              )
-            : Promise.resolve([] as never[]),
-        ]);
-        for (const uid of infoAttended) attendedInfo.add(uid);
-        for (const m of mem as (Applicant & { status: string | null })[]) {
-          byId[m.user_id] = m;
-          // A past member (active or rolled-off) is "returning"; mirrors is_returning_member().
-          returningById[m.user_id] = m.status === "active" || m.status === "inactive";
-        }
-        for (const r of roleRows as { user_id: string | null }[]) {
-          if (r.user_id) boardExecIds.add(r.user_id);
-        }
-        const chatRows = chats as { applicant_id: string; member_id: string; complete: boolean }[];
-        for (const ch of chatRows) {
-          if (ch.complete) coffeeById[ch.applicant_id] = "done";
-          else if (coffeeById[ch.applicant_id] !== "done") coffeeById[ch.applicant_id] = "booked";
-        }
-        const hostIds = [...new Set(chatRows.map((ch) => ch.member_id).filter(Boolean))];
-        const hostNameById: Record<string, string> = {};
-        if (hostIds.length) {
-          const hosts = await selectInChunks(hostIds, (chunk) =>
-            supabase.from("members").select("user_id, preferred_firstname, lastname").in("user_id", chunk),
-          );
-          for (const h of hosts as { user_id: string; preferred_firstname: string | null; lastname: string | null }[]) {
-            const name = [h.preferred_firstname, h.lastname].filter(Boolean).join(" ");
-            if (name) hostNameById[h.user_id] = name;
-          }
-        }
-        coffeeWithById = coffeeWithByApplicant(chatRows, hostNameById);
-        for (const w of wishRows as unknown as {
-          application_id: string;
-          project_id: string;
-          projects: { id: string; name: string; color: string | null } | null;
-        }[]) {
-          if (w.project_id === selectedProjectId) continue;
-          const project: WishlistProject = {
-            id: w.project_id,
-            name: w.projects?.name ?? "Untitled project",
-            color: w.projects?.color ?? null,
-          };
-          (wishlistedById[w.application_id] ??= []).push(project);
-        }
-        for (const list of Object.values(wishlistedById)) {
-          list.sort((a, b) => a.name.localeCompare(b.name));
-        }
-      }
-
-      setApps(
-        rows.map(({ applicant_id, ...r }) => {
-          const coffee: CoffeeState = (applicant_id && coffeeById[applicant_id]) || "none";
-          const returning = !!applicant_id && !!returningById[applicant_id];
-          const infosession = !!applicant_id && attendedInfo.has(applicant_id);
-          const boardExec = !!applicant_id && boardExecIds.has(applicant_id);
-          return {
-            ...r,
-            applicant: applicant_id
-              ? byId[applicant_id] ?? { user_id: applicant_id, preferred_firstname: null, lastname: null }
-              : null,
-            coffee,
-            coffeeWith: (applicant_id && coffeeWithById[applicant_id]) || [],
-            returning,
-            infosession,
-            valid: isRecruitingValid({
-              boardExec,
-              returning,
-              coffeeDone: coffee === "done",
-              infosession,
-            }),
-            wishlistedBy: wishlistedById[r.id] ?? [],
-          };
-        }),
-      );
+      setApps(await enrichAppRows(supabase, rows, { excludeWishlistProjectId: selectedProjectId }));
     })();
   }, [selectedPeriodId, selectedProjectId, reviewableProjects, appsReloadToken]);
 
@@ -879,11 +770,14 @@ export default function ManagerApplicationsPage() {
     // Accepting adds the applicant to project_members — refresh the roster so
     // they show up on the left without a full page reload.
     if (status === "accepted" && selectedProjectId && !allSelected) loadRoster(selectedProjectId);
+    if (allSelected) setBoardReloadToken((n) => n + 1);
     if (sheetOpen) setSheetReloadToken((n) => n + 1);
   };
 
   return (
-    <div className="w-full max-w-5xl mx-auto p-5 flex flex-col gap-6">
+    // The cross-project board scrolls sideways, so it gets a wider shell than
+    // the single-project split view.
+    <div className={`w-full ${allSelected ? "max-w-7xl" : "max-w-5xl"} mx-auto p-5 flex flex-col gap-6`}>
       <div className="flex flex-col gap-1">
         <Link href="/manager" className="text-sm text-muted-foreground hover:text-foreground">← Back</Link>
         <h1 className="text-2xl font-bold">Applications</h1>
@@ -1016,31 +910,22 @@ export default function ManagerApplicationsPage() {
           You aren&apos;t assigned to review any projects.
         </div>
       ) : allSelected ? (
-        // Cross-project mode has no single roster or rank grouping to show, so
-        // the page hands off to the sheet.
-        <div className="flex flex-col items-center gap-3 border rounded-xl px-4 py-12 text-center">
-          <p className="text-sm font-medium">Reviewing every project this period</p>
-          <p className="text-sm text-muted-foreground">
-            {allCounts
-              ? `${allCounts.applicants} application${allCounts.applicants === 1 ? "" : "s"} across ${allCounts.projects} project${allCounts.projects === 1 ? "" : "s"}.`
-              : "Loading counts…"}{" "}
-            Open the sheet to page through one project at a time.
-          </p>
-          <div className="flex items-center gap-2">
-            <Button size="sm" onClick={() => setSheetOpen(true)} disabled={!selectedPeriodId}>
-              <Table2 size={14} className="mr-1.5" />
-              Open sheet view
-            </Button>
-            {fullAccessReview && (
-              <Button asChild variant="outline" size="sm">
-                <Link href="/manager/draft">
-                  <UserPlus size={14} className="mr-1.5" />
-                  Draft members
-                </Link>
-              </Button>
-            )}
-          </div>
-        </div>
+        // Cross-project mode has no single roster or rank grouping, so it shows
+        // every project side by side instead -- read-only, with the sheet and
+        // the draft manager still a click away.
+        <AllProjectsBoard
+          periodId={selectedPeriodId}
+          periodEndsAt={selectedPeriod?.ends_at}
+          counts={allCounts}
+          canDraft={fullAccessReview}
+          showRecruitingStatus={showRecruitingStatus}
+          onShowRecruitingStatusChange={setShowRecruitingStatus}
+          onOpenSheet={() => setSheetOpen(true)}
+          onReview={(app, projectId) =>
+            setReviewFor({ id: app.id, name: applicantName(app), status: app.status, projectId })
+          }
+          reloadToken={boardReloadToken}
+        />
       ) : (
         <DndContext
           sensors={dndSensors}

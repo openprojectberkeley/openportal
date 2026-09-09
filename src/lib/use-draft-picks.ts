@@ -154,7 +154,10 @@ export function useDraftPicks(projectId: string | null, periodId: string | null)
   // project doesn't linger); background refetches update in place instead.
   useEffect(() => { setRoundProjects(null); setSequence([]); setClaimedByOther({}); }, [projectId, periodId]);
   useEffect(() => { loadAll(); }, [loadAll]);
-  useDraftRealtime(periodId, loadAll);
+  // No project selected (the applications page's cross-project mode) means
+  // loadAll has nothing to fetch, so don't hold a channel open for it either --
+  // the board has its own subscription.
+  useDraftRealtime(projectId ? periodId : null, loadAll);
 
   const draftStarted = currentPickId !== null;
   const phase: DraftPhase = completedAt ? "complete" : draftStarted ? "in_progress" : "not_started";
