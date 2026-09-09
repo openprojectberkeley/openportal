@@ -32,7 +32,7 @@ import { ApplicationReviewModal, type ReviewStatus } from "@/components/applicat
 import { useDraftRealtime } from "@/lib/use-draft-realtime";
 import { rankLabel } from "@/lib/application-rank";
 import { isRecruitingValid } from "@/lib/utils";
-import { chunkIds } from "@/lib/postgrest-chunk";
+import { chunkIds, selectInChunks } from "@/lib/postgrest-chunk";
 
 type Period = { id: string; name: string; status: "draft" | "open" | "closed"; starts_at: string; ends_at: string };
 
@@ -337,18 +337,27 @@ export function DraftRoundsManager() {
       return;
     }
     const appIds = [...appIdSet];
-    const [{ data: apps }, { data: rankings }] = await Promise.all([
-      supabase.from("applications").select("id, applicant_id, status, submitted_at").in("id", appIds),
-      supabase
-        .from("application_rankings")
-        .select("application_id, project_id, rank")
-        .in("application_id", appIds)
-        .eq("ranked", true),
+    const [apps, rankings] = await Promise.all([
+      selectInChunks<{
+        id: string;
+        applicant_id: string | null;
+        status: ReviewStatus;
+        submitted_at: string | null;
+      }>(appIds, (chunk) =>
+        supabase.from("applications").select("id, applicant_id, status, submitted_at").in("id", chunk),
+      ),
+      selectInChunks<{ application_id: string; project_id: string; rank: number }>(appIds, (chunk) =>
+        supabase
+          .from("application_rankings")
+          .select("application_id, project_id, rank")
+          .in("application_id", chunk)
+          .eq("ranked", true),
+      ),
     ]);
     if (gen !== loadBoardGenRef.current) return;
 
     const nextRank: Record<string, number> = {};
-    for (const r of (rankings ?? []) as { application_id: string; project_id: string; rank: number }[]) {
+    for (const r of rankings) {
       nextRank[`${r.application_id}:${r.project_id}`] = r.rank;
     }
     setRankByAppProject(nextRank);
@@ -356,12 +365,7 @@ export function DraftRoundsManager() {
     const submittedByApp: Record<string, string | null> = {};
     const nextStatus: Record<string, ReviewStatus> = {};
     const userIds: string[] = [];
-    for (const a of (apps ?? []) as {
-      id: string;
-      applicant_id: string | null;
-      status: ReviewStatus;
-      submitted_at: string | null;
-    }[]) {
+    for (const a of apps) {
       nextStatus[a.id] = a.status;
       submittedByApp[a.id] = a.submitted_at;
       if (a.applicant_id) {
