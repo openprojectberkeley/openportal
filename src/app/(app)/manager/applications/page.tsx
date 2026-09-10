@@ -939,6 +939,11 @@ export default function ManagerApplicationsPage() {
             setReviewFor({ id: app.id, name: applicantName(app), status: app.status, projectId })
           }
           reloadToken={boardReloadToken}
+          // The board reloads its own columns; this is for what the page owns.
+          onMutated={() => {
+            if (isExec && selectedPeriodId) loadStats(selectedPeriodId);
+            if (sheetOpen) setSheetReloadToken((n) => n + 1);
+          }}
         />
       ) : (
         <DndContext

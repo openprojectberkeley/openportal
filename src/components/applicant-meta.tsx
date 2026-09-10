@@ -48,8 +48,8 @@ function invalidReasons(app: AppRow): string[] {
 }
 
 function StatusBadge({ status }: { status: ReviewStatus }) {
-  if (status === "accepted") return <Badge className="bg-green-600 hover:bg-green-600">Accepted</Badge>;
-  if (status === "rejected") return <Badge variant="destructive">Rejected</Badge>;
+  if (status === "accepted") return <Badge className="shrink-0 bg-green-600 hover:bg-green-600">Accepted</Badge>;
+  if (status === "rejected") return <Badge variant="destructive" className="shrink-0">Rejected</Badge>;
   return null;
 }
 
@@ -57,7 +57,7 @@ function StatusBadge({ status }: { status: ReviewStatus }) {
 export function ReturningIndicator({ returning }: { returning: boolean }) {
   if (!returning) return null;
   return (
-    <Badge className="gap-1 bg-indigo-600 text-white hover:bg-indigo-600" title="Returning member">
+    <Badge className="shrink-0 gap-1 bg-indigo-600 text-white hover:bg-indigo-600" title="Returning member">
       <RotateCcw size={11} />
       Returning
     </Badge>
@@ -73,12 +73,17 @@ export function ApplicantMeta({
   periodEndsAt,
   rank,
   showRecruitingStatus,
+  compact,
 }: {
   app: AppRow;
   periodEndsAt: string | undefined;
   rank?: boolean;
   // Coffee chat + infosession indicators. Off by default so drafting cards stay dense.
   showRecruitingStatus?: boolean;
+  // Dense one-line variant (the exec draft board's 300px columns): returning /
+  // late move in behind showRecruitingStatus so the row only ever carries the
+  // name, its status, and whatever the viewer explicitly asked to see.
+  compact?: boolean;
 }) {
   return (
     <div className="flex min-w-0 flex-1 items-center gap-1.5">
@@ -92,11 +97,21 @@ export function ApplicantMeta({
         </span>
       )}
       <StatusBadge status={app.status} />
-      <ReturningIndicator returning={app.returning} />
-      <LateBadge submittedAt={app.submitted_at} endsAt={periodEndsAt} />
+      {!compact && (
+        <>
+          <ReturningIndicator returning={app.returning} />
+          <LateBadge submittedAt={app.submitted_at} endsAt={periodEndsAt} />
+        </>
+      )}
       <WishlistedByIndicator projects={app.wishlistedBy} />
       {showRecruitingStatus && (
         <>
+          {compact && (
+            <>
+              <ReturningIndicator returning={app.returning} />
+              <LateBadge submittedAt={app.submitted_at} endsAt={periodEndsAt} />
+            </>
+          )}
           <CoffeeChatIndicator state={app.coffee} withNames={app.coffeeWith} />
           <InfosessionIndicator attended={app.infosession} />
         </>
@@ -152,6 +167,15 @@ export type ApplicantCardActions = {
   // Pairs this card with the row it morphs into elsewhere in the tree during a
   // view transition. Must be unique per document while the transition runs.
   viewTransitionName?: string;
+  // Dense one-line variant -- tighter padding, and returning/late badges only
+  // when showRecruitingStatus is on. Used by the exec draft board's narrow
+  // columns; every other list keeps the roomier default.
+  compact?: boolean;
+  // Extra control rendered inside the hover overlay, ahead of the buttons (the
+  // draft board's outcome / move-to menu). It inherits the overlay's gradient
+  // veil, so it costs the card no layout width. Anything interactive in here
+  // must stop propagation -- the card root's onClick opens review.
+  overlayExtra?: React.ReactNode;
 };
 
 // Small helper so a button living on a draggable card doesn't start a drag,
@@ -201,6 +225,8 @@ function ApplicantCardInner({
   isWishlisted,
   showRank,
   showRecruitingStatus,
+  compact,
+  overlayExtra,
   shimmer,
   claimedBy,
   onAddToWishlist,
@@ -216,7 +242,8 @@ function ApplicantCardInner({
   const claimed = !!claimedBy;
   // Claimed applicants can't be drafted, but wishlist add/remove still works.
   const hasOverlay = !!(
-    onAddToWishlist
+    overlayExtra
+    || onAddToWishlist
     || onWishlistToggle
     || (!claimed && showAddToDraft && onAddToDraft)
     || onRemove
@@ -246,6 +273,7 @@ function ApplicantCardInner({
           periodEndsAt={periodEndsAt}
           rank={showRank}
           showRecruitingStatus={showRecruitingStatus}
+          compact={compact}
         />
       </div>
 
@@ -276,7 +304,11 @@ function ApplicantCardInner({
       )}
 
       {hasOverlay && (
-        <div className="absolute inset-y-0 right-0 flex items-center gap-0.5 rounded-r-lg pl-10 pr-3 bg-gradient-to-l from-background via-background/95 to-transparent opacity-0 pointer-events-none transition-opacity group-hover:opacity-100 group-hover:pointer-events-auto">
+        // has-[[data-state=open]] keeps the veil (and its contents) up while a
+        // menu opened from inside it is still open -- otherwise moving the
+        // pointer to the menu fades the trigger out from under it.
+        <div className={`absolute inset-y-0 right-0 flex items-center gap-0.5 rounded-r-lg ${compact ? "pl-8 pr-2.5" : "pl-10 pr-3"} bg-gradient-to-l from-background via-background/95 to-transparent opacity-0 pointer-events-none transition-opacity group-hover:opacity-100 group-hover:pointer-events-auto has-[[data-state=open]]:opacity-100 has-[[data-state=open]]:pointer-events-auto`}>
+          {overlayExtra}
           {!claimed && showAddToDraft && onAddToDraft && (
             <OverlayButton
               onClick={() => onAddToDraft(app.id)}
@@ -322,11 +354,18 @@ function ApplicantCardInner({
 
 function cardClassName(
   app: AppRow,
-  opts?: { grab?: boolean; dragClass?: string; tint?: "accent" | "staged" | "claimed"; shimmer?: boolean },
+  opts?: {
+    grab?: boolean;
+    dragClass?: string;
+    tint?: "accent" | "staged" | "claimed";
+    shimmer?: boolean;
+    compact?: boolean;
+  },
 ): string {
   const invalid = !app.valid;
   return [
-    "group relative flex items-center gap-2 border rounded-lg px-3 py-2 select-none transition-colors cursor-pointer",
+    "group relative flex items-center border rounded-lg select-none transition-colors cursor-pointer",
+    opts?.compact ? "gap-1.5 px-2.5 py-1" : "gap-2 px-3 py-2",
     // A tinted card drops both the normal and the invalid-red background rather
     // than fighting them: "accent" is painted by an inline style, "staged"
     // by the card token below. --card is only a shade off --background in light
@@ -390,7 +429,12 @@ export const SortableApplicantCard = memo(function SortableApplicantCard(actions
       {...attributes}
       {...listeners}
       onClick={() => actions.onReview(actions.app)}
-      className={cardClassName(actions.app, { grab: true, tint: cardTint(actions), shimmer: actions.shimmer })}
+      className={cardClassName(actions.app, {
+        grab: true,
+        tint: cardTint(actions),
+        shimmer: actions.shimmer,
+        compact: actions.compact,
+      })}
     >
       <ApplicantCardInner {...actions} draggable />
     </div>
@@ -408,7 +452,11 @@ export const StaticApplicantCard = memo(function StaticApplicantCard({
       data-app-id={actions.app.id}
       style={{ viewTransitionName: actions.viewTransitionName, ...accentStyle(actions.accent) }}
       onClick={() => actions.onReview(actions.app)}
-      className={cardClassName(actions.app, { tint: cardTint(actions), shimmer: actions.shimmer })}
+      className={cardClassName(actions.app, {
+        tint: cardTint(actions),
+        shimmer: actions.shimmer,
+        compact: actions.compact,
+      })}
     >
       <ApplicantCardInner {...actions} draggable={draggable} />
     </div>

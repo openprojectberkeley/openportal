@@ -27,12 +27,23 @@ export type BoardProject = {
   color: string | null;
 };
 
-// Confirmed and staged picks alike are a flat, draft-ordered list: the board
-// shows who a project drafted, not which round each pick came from.
+// One drafted person in a column. Confirmed and staged sit in the same flat,
+// draft-ordered list -- the board shows who a project drafted, not which round
+// each pick came from -- so `submitted` is what tells the two apart. The pick
+// id and the applicant's accepted project ride along because the board's own
+// actions need them: move_draft_pick takes a pick id, and the outcome menu has
+// to know whether "Accepted" means accepted onto *this* column.
+export type BoardCard = {
+  app: AppRow;
+  pickId: string;
+  roundProjectId: string;
+  submitted: boolean;
+  acceptedProjectId: string | null;
+};
+
 export type BoardColumn = {
   project: BoardProject;
-  confirmed: AppRow[];
-  staged: AppRow[];
+  picks: BoardCard[];
 };
 
 type RoundProjectRow = {
@@ -45,10 +56,21 @@ type RoundProjectRow = {
 };
 
 // One applicant's place in a column, before the AppRow is resolved.
-type Slot = { appId: string; roundNumber: number; createdAt: string };
+type Slot = {
+  pickId: string;
+  appId: string;
+  roundProjectId: string;
+  roundNumber: number;
+  createdAt: string;
+  submitted: boolean;
+};
 
 export function useAllProjectsBoard(periodId: string | null, enabled: boolean, reloadToken = 0) {
   const [columns, setColumns] = useState<BoardColumn[] | null>(null);
+  // Projects with a round-project this period. The board's "Move to" menu and
+  // its add-applicant card may only target these -- anything else raises
+  // "That project is not drafting in this application period." (0091).
+  const [draftProjectIds, setDraftProjectIds] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   // Generation guard: this load has two awaited round trips, so a period switch
   // (or a realtime refetch) can overtake an in-flight one. Only the newest load
@@ -81,22 +103,29 @@ export function useAllProjectsBoard(periodId: string | null, enabled: boolean, r
     const projects = (projRows ?? []) as BoardProject[];
     const rounds = (rpRows ?? []) as unknown as RoundProjectRow[];
 
-    // Split each project's picks by whether their round has been submitted:
-    // submitted = confirmed, unsubmitted = still sitting in a draft window.
-    const confirmedSlots: Record<string, Slot[]> = {};
-    const stagedSlots: Record<string, Slot[]> = {};
+    // One bucket per project: staged and confirmed picks share a list, each
+    // carrying its own `submitted` flag for the card to paint itself with.
+    const slotsByProject: Record<string, Slot[]> = {};
     // Draft position, for column order: the pick_order of a project's earliest round.
     const orderByProject: Record<string, { roundNumber: number; pickOrder: number }> = {};
     const appIdSet = new Set<string>();
+    const draftProjects = new Set<string>();
     for (const rp of rounds) {
       const roundNumber = rp.draft_rounds?.round_number ?? 0;
+      draftProjects.add(rp.project_id);
       const seen = orderByProject[rp.project_id];
       if (!seen || roundNumber < seen.roundNumber) {
         orderByProject[rp.project_id] = { roundNumber, pickOrder: rp.pick_order };
       }
-      const bucket = rp.submitted_at ? confirmedSlots : stagedSlots;
       for (const pick of rp.draft_picks ?? []) {
-        (bucket[rp.project_id] ??= []).push({ appId: pick.application_id, roundNumber, createdAt: pick.created_at });
+        (slotsByProject[rp.project_id] ??= []).push({
+          pickId: pick.id,
+          appId: pick.application_id,
+          roundProjectId: rp.id,
+          roundNumber,
+          createdAt: pick.created_at,
+          submitted: !!rp.submitted_at,
+        });
         appIdSet.add(pick.application_id);
       }
     }
@@ -106,17 +135,29 @@ export function useAllProjectsBoard(periodId: string | null, enabled: boolean, r
     const appIds = [...appIdSet];
     const rowById = new Map<string, AppRow>();
     const rankByAppProject: Record<string, number> = {};
+    // Which project (if any) already accepted them -- not part of AppRow, since
+    // only this board's outcome menu needs it.
+    const acceptedByAppId: Record<string, string | null> = {};
     if (appIds.length) {
       const [apps, rankings] = await Promise.all([
-        selectInChunks<{ id: string; applicant_id: string | null; status: ReviewStatus; submitted_at: string | null }>(
-          appIds,
-          (chunk) => supabase.from("applications").select("id, applicant_id, status, submitted_at").in("id", chunk),
+        selectInChunks<{
+          id: string;
+          applicant_id: string | null;
+          status: ReviewStatus;
+          submitted_at: string | null;
+          accepted_project_id: string | null;
+        }>(appIds, (chunk) =>
+          supabase
+            .from("applications")
+            .select("id, applicant_id, status, submitted_at, accepted_project_id")
+            .in("id", chunk),
         ),
         selectInChunks<{ application_id: string; project_id: string; rank: number }>(appIds, (chunk) =>
           supabase.from("application_rankings").select("application_id, project_id, rank").in("application_id", chunk).eq("ranked", true),
         ),
       ]);
       for (const r of rankings) rankByAppProject[`${r.application_id}:${r.project_id}`] = r.rank;
+      for (const a of apps) acceptedByAppId[a.id] = a.accepted_project_id;
       const base: BaseAppRow[] = apps.map((a) => ({
         id: a.id,
         status: a.status,
@@ -130,30 +171,32 @@ export function useAllProjectsBoard(periodId: string | null, enabled: boolean, r
 
     // A card in project X's column shows X's rank and drops X from the
     // "also wishlisted by" chips -- that column already speaks for X.
-    const forColumn = (slot: Slot, projectId: string): AppRow | null => {
+    const forColumn = (slot: Slot, projectId: string): BoardCard | null => {
       const row = rowById.get(slot.appId);
       if (!row) return null;
       return {
-        ...row,
-        rank: rankByAppProject[`${slot.appId}:${projectId}`] ?? 0,
-        wishlistedBy: row.wishlistedBy.filter((w) => w.id !== projectId),
+        app: {
+          ...row,
+          rank: rankByAppProject[`${slot.appId}:${projectId}`] ?? 0,
+          wishlistedBy: row.wishlistedBy.filter((w) => w.id !== projectId),
+        },
+        pickId: slot.pickId,
+        roundProjectId: slot.roundProjectId,
+        submitted: slot.submitted,
+        acceptedProjectId: acceptedByAppId[slot.appId] ?? null,
       };
     };
     const bySequence = (a: Slot, b: Slot) =>
       a.roundNumber - b.roundNumber || a.createdAt.localeCompare(b.createdAt);
 
-    // Both lists stay in draft sequence (round, then pick time) -- the round
+    // The list stays in draft sequence (round, then pick time) -- the round
     // itself is no longer surfaced, only the order it produced.
-    const listFor = (slots: Slot[] | undefined, projectId: string) =>
-      (slots ?? [])
-        .sort(bySequence)
-        .map((slot) => forColumn(slot, projectId))
-        .filter((a): a is AppRow => !!a);
-
     const next: BoardColumn[] = projects.map((project) => ({
       project,
-      confirmed: listFor(confirmedSlots[project.id], project.id),
-      staged: listFor(stagedSlots[project.id], project.id),
+      picks: (slotsByProject[project.id] ?? [])
+        .sort(bySequence)
+        .map((slot) => forColumn(slot, project.id))
+        .filter((c): c is BoardCard => !!c),
     }));
 
     // Projects in the draft come first, in draft order; the rest trail
@@ -168,6 +211,7 @@ export function useAllProjectsBoard(periodId: string | null, enabled: boolean, r
     });
 
     setColumns(next);
+    setDraftProjectIds(draftProjects);
   }, [enabled, periodId]);
 
   // Clean slate when the period changes or the view is left, so stale columns
@@ -176,5 +220,57 @@ export function useAllProjectsBoard(periodId: string | null, enabled: boolean, r
   useEffect(() => { loadAll(); }, [loadAll, reloadToken]);
   useDraftRealtime(enabled ? periodId : null, loadAll);
 
-  return { columns, error, reload: loadAll };
+  return { columns, draftProjectIds, error, reload: loadAll };
+}
+
+// The add-member picker's roster: every draft-eligible applicant this period,
+// name-sorted. Fetched lazily on first open rather than folded into loadAll --
+// that runs again on every realtime tick, and this list only matters while the
+// picker is open. Mirrors the draft manager's loadPeriodApplicants.
+export function usePeriodApplicants(periodId: string | null) {
+  const [applicants, setApplicants] = useState<{ id: string; name: string }[] | null>(null);
+  const loadedFor = useRef<string | null>(null);
+
+  // A period switch invalidates whatever was fetched for the previous one.
+  useEffect(() => {
+    loadedFor.current = null;
+    setApplicants(null);
+  }, [periodId]);
+
+  const load = useCallback(async () => {
+    if (!periodId || loadedFor.current === periodId) return;
+    loadedFor.current = periodId;
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from("applications")
+      .select("id, applicant_id")
+      .eq("period_id", periodId)
+      .in("status", ["submitted", "accepted"]);
+    if (error) { loadedFor.current = null; return; }
+
+    const rows = (data ?? []) as { id: string; applicant_id: string | null }[];
+    const userIds = [...new Set(rows.map((r) => r.applicant_id).filter((id): id is string => !!id))];
+    const nameByUser: Record<string, string> = {};
+    if (userIds.length) {
+      const members = await selectInChunks<{
+        user_id: string;
+        preferred_firstname: string | null;
+        lastname: string | null;
+      }>(userIds, (chunk) =>
+        supabase.from("members").select("user_id, preferred_firstname, lastname").in("user_id", chunk),
+      );
+      for (const m of members) {
+        nameByUser[m.user_id] =
+          [m.preferred_firstname, m.lastname].filter(Boolean).join(" ") || "Applicant";
+      }
+    }
+
+    setApplicants(
+      rows
+        .map((r) => ({ id: r.id, name: (r.applicant_id && nameByUser[r.applicant_id]) || "Applicant" }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    );
+  }, [periodId]);
+
+  return { applicants, load };
 }

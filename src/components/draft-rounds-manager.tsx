@@ -28,6 +28,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ProjectIcon } from "@/components/project-icon";
+import { ApplicantPickerDialog } from "@/components/applicant-picker-dialog";
 import { ApplicationReviewModal, type ReviewStatus } from "@/components/application-review-modal";
 import { useDraftRealtime } from "@/lib/use-draft-realtime";
 import { rankLabel } from "@/lib/application-rank";
@@ -494,8 +495,12 @@ export function DraftRoundsManager() {
   // A round-project confirms several picks at once, so this sums the picks
   // themselves -- counting confirmed round-projects would report turns taken,
   // not people drafted.
+  // Rejected applicants keep their pick since 0091 (the card stays on the exec
+  // board with a red badge), so they have to be filtered out here -- otherwise
+  // this counts people the draft can never place.
   const confirmedCount = Object.values(boardRows).reduce(
-    (sum, row) => sum + (row.submittedAt ? row.appIds.length : 0),
+    (sum, row) =>
+      sum + (row.submittedAt ? row.appIds.filter((id) => statusByAppId[id] !== "rejected").length : 0),
     0,
   );
   // "274 of 289" -- null until the eligible-applicant count lands.
@@ -1046,6 +1051,7 @@ export function DraftRoundsManager() {
                 round={rounds[roundPage]}
                 boardRows={boardRows}
                 nameByAppId={nameByAppId}
+                statusByAppId={statusByAppId}
                 indByAppId={indByAppId}
                 rankByAppProject={rankByAppProject}
                 periodEndsAt={selectedPeriod?.ends_at}
@@ -1101,8 +1107,8 @@ export function DraftRoundsManager() {
       />
 
       {addTarget && (
-        <AddApplicantModal
-          target={addTarget}
+        <ApplicantPickerDialog
+          title={`Add to ${addTarget.projectName}`}
           applicants={periodApplicants}
           alreadyPicked={boardRows[addTarget.roundProjectId]?.appIds ?? []}
           filter={addFilter}
@@ -1186,6 +1192,7 @@ function PicksThisRound({
   round,
   boardRows,
   nameByAppId,
+  statusByAppId,
   indByAppId,
   rankByAppProject,
   periodEndsAt,
@@ -1199,6 +1206,7 @@ function PicksThisRound({
   round: Round;
   boardRows: Record<string, { submittedAt: string | null; appIds: string[] }>;
   nameByAppId: Record<string, string>;
+  statusByAppId: Record<string, ReviewStatus>;
   indByAppId: Record<string, PickIndicators>;
   rankByAppProject: Record<string, number>;
   periodEndsAt: string | undefined;
@@ -1220,7 +1228,10 @@ function PicksThisRound({
           {round.projects.map((rp) => {
             const row = boardRows[rp.id] ?? { submittedAt: null, appIds: [] };
             const confirmed = !!row.submittedAt;
-            const isFull = row.appIds.length >= rp.pick_count;
+            // Rejected picks don't hold a slot (0091's guard skips them), so
+            // they mustn't grey the add button out either.
+            const isFull =
+              row.appIds.filter((id) => statusByAppId[id] !== "rejected").length >= rp.pick_count;
             return (
               <div
                 key={rp.id}
@@ -1313,64 +1324,6 @@ function PicksThisRound({
 // The exec's manual-staging picker: any applicant this period, minus whoever
 // is already picked for this round-project. Bypasses the normal turn-based
 // flow entirely, same as the admin unsubmit/confirm controls above.
-function AddApplicantModal({
-  target,
-  applicants,
-  alreadyPicked,
-  filter,
-  onFilterChange,
-  onPick,
-  onClose,
-}: {
-  target: { roundProjectId: string; projectId: string; projectName: string };
-  applicants: { id: string; name: string }[] | null;
-  alreadyPicked: string[];
-  filter: string;
-  onFilterChange: (value: string) => void;
-  onPick: (applicationId: string) => void;
-  onClose: () => void;
-}) {
-  const pickedSet = new Set(alreadyPicked);
-  const options = (applicants ?? []).filter(
-    (a) => !pickedSet.has(a.id) && a.name.toLowerCase().includes(filter.trim().toLowerCase()),
-  );
-  return (
-    <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>Add to {target.projectName}</DialogTitle>
-        </DialogHeader>
-        <div className="flex flex-col gap-3">
-          <Input
-            autoFocus
-            placeholder="Search applicants…"
-            value={filter}
-            onChange={(e) => onFilterChange(e.target.value)}
-          />
-          <div className="flex max-h-72 flex-col gap-1 overflow-y-auto">
-            {applicants === null ? (
-              <p className="text-sm text-muted-foreground py-4 text-center">Loading applicants…</p>
-            ) : options.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-4 text-center">No matching applicants.</p>
-            ) : (
-              options.map((a) => (
-                <button
-                  key={a.id}
-                  type="button"
-                  onClick={() => onPick(a.id)}
-                  className="rounded-md px-3 py-2 text-left text-sm hover:bg-accent"
-                >
-                  {a.name}
-                </button>
-              ))
-            )}
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 // The "who's left" list, opened from the draft status bar: every eligible
 // applicant this period without a confirmed pick. Read-only -- staging still
 // happens on the board -- but a name opens the same application card the
