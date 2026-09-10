@@ -1,15 +1,15 @@
 "use client";
 
-// Cross-project draft board for a whole application period: every project, who
-// is already on it, and who it has confirmed / staged in the draft. The exec's
-// read-only counterpart to a PM's single-project DraftWindowPanel -- one fetch
-// for the entire period rather than one per project.
+// Cross-project draft board for a whole application period: every project and
+// who it has confirmed / staged in the draft. The exec's read-only counterpart
+// to a PM's single-project DraftWindowPanel -- one fetch for the entire period
+// rather than one per project. Deliberately draft-only: the existing roster
+// isn't shown here, so it isn't fetched either.
 //
 // Readable without any new policy: draft_picks_select (0072) is
 // can_review_project(), which short-circuits on can_review_all_projects()
 // (0057), so a full-access reviewer already sees staged *and* confirmed picks
-// everywhere. project_members_select (0033) is PM-rows-or-exec-or-own-project,
-// so a reviewer who isn't exec simply sees a PM-only roster.
+// everywhere.
 
 import { createClient } from "@/lib/supabase/client";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -27,16 +27,11 @@ export type BoardProject = {
   color: string | null;
 };
 
-export type BoardRosterMember = { user_id: string; name: string; isPm: boolean };
-
-// Confirmed picks keep their round, which is the only place round number
-// survives on the board -- the applicant cards themselves carry no round.
-export type BoardRound = { roundNumber: number; apps: AppRow[] };
-
+// Confirmed and staged picks alike are a flat, draft-ordered list: the board
+// shows who a project drafted, not which round each pick came from.
 export type BoardColumn = {
   project: BoardProject;
-  roster: BoardRosterMember[];
-  confirmed: BoardRound[];
+  confirmed: AppRow[];
   staged: AppRow[];
 };
 
@@ -47,13 +42,6 @@ type RoundProjectRow = {
   submitted_at: string | null;
   draft_rounds: { round_number: number } | null;
   draft_picks: { id: string; application_id: string; created_at: string }[];
-};
-
-type ProjectMemberRow = {
-  project_id: string;
-  user_id: string;
-  is_pm: boolean;
-  members: { user_id: string; preferred_firstname: string | null; lastname: string | null } | null;
 };
 
 // One applicant's place in a column, before the AppRow is resolved.
@@ -72,7 +60,7 @@ export function useAllProjectsBoard(periodId: string | null, enabled: boolean, r
     const gen = ++genRef.current;
     const supabase = createClient();
 
-    const [{ data: projRows }, { data: rpRows, error: rpError }, { data: pmRows }] = await Promise.all([
+    const [{ data: projRows }, { data: rpRows, error: rpError }] = await Promise.all([
       supabase.from("projects").select("id, name, icon, icon_url, color").order("name"),
       // Nested draft_picks keeps the whole period's board to one round trip --
       // same shape as the exec draft manager's loadBoard.
@@ -80,8 +68,6 @@ export function useAllProjectsBoard(periodId: string | null, enabled: boolean, r
         .from("draft_round_projects")
         .select("id, project_id, pick_order, submitted_at, draft_rounds!inner(round_number, period_id), draft_picks(id, application_id, created_at)")
         .eq("draft_rounds.period_id", periodId),
-      // No project filter: RLS scopes this to what the viewer may see.
-      supabase.from("project_members").select("project_id, user_id, is_pm, members(user_id, preferred_firstname, lastname)"),
     ]);
 
     if (gen !== genRef.current) return;
@@ -94,19 +80,6 @@ export function useAllProjectsBoard(periodId: string | null, enabled: boolean, r
 
     const projects = (projRows ?? []) as BoardProject[];
     const rounds = (rpRows ?? []) as unknown as RoundProjectRow[];
-
-    // Rosters, PMs first then alphabetical (same order as the single-project view).
-    const rosterByProject: Record<string, BoardRosterMember[]> = {};
-    for (const r of (pmRows ?? []) as unknown as ProjectMemberRow[]) {
-      (rosterByProject[r.project_id] ??= []).push({
-        user_id: r.user_id,
-        name: [r.members?.preferred_firstname, r.members?.lastname].filter(Boolean).join(" ") || "Member",
-        isPm: r.is_pm,
-      });
-    }
-    for (const list of Object.values(rosterByProject)) {
-      list.sort((a, b) => (a.isPm !== b.isPm ? (a.isPm ? -1 : 1) : a.name.localeCompare(b.name)));
-    }
 
     // Split each project's picks by whether their round has been submitted:
     // submitted = confirmed, unsubmitted = still sitting in a draft window.
@@ -169,27 +142,19 @@ export function useAllProjectsBoard(periodId: string | null, enabled: boolean, r
     const bySequence = (a: Slot, b: Slot) =>
       a.roundNumber - b.roundNumber || a.createdAt.localeCompare(b.createdAt);
 
-    const next: BoardColumn[] = projects.map((project) => {
-      const confirmedByRound = new Map<number, AppRow[]>();
-      for (const slot of (confirmedSlots[project.id] ?? []).sort(bySequence)) {
-        const app = forColumn(slot, project.id);
-        if (!app) continue;
-        const list = confirmedByRound.get(slot.roundNumber);
-        if (list) list.push(app);
-        else confirmedByRound.set(slot.roundNumber, [app]);
-      }
-      return {
-        project,
-        roster: rosterByProject[project.id] ?? [],
-        confirmed: [...confirmedByRound.entries()]
-          .sort((a, b) => a[0] - b[0])
-          .map(([roundNumber, apps]) => ({ roundNumber, apps })),
-        staged: (stagedSlots[project.id] ?? [])
-          .sort(bySequence)
-          .map((slot) => forColumn(slot, project.id))
-          .filter((a): a is AppRow => !!a),
-      };
-    });
+    // Both lists stay in draft sequence (round, then pick time) -- the round
+    // itself is no longer surfaced, only the order it produced.
+    const listFor = (slots: Slot[] | undefined, projectId: string) =>
+      (slots ?? [])
+        .sort(bySequence)
+        .map((slot) => forColumn(slot, projectId))
+        .filter((a): a is AppRow => !!a);
+
+    const next: BoardColumn[] = projects.map((project) => ({
+      project,
+      confirmed: listFor(confirmedSlots[project.id], project.id),
+      staged: listFor(stagedSlots[project.id], project.id),
+    }));
 
     // Projects in the draft come first, in draft order; the rest trail
     // alphabetically (projects is already name-ordered).

@@ -1,19 +1,18 @@
 "use client";
 
 // The cross-project board behind ?project=all on the applications manager: one
-// column per project, scrolled horizontally, showing who's already on the team
-// and who the draft has confirmed / staged for it. Read-only -- clicking a card
+// column per project, scrolled horizontally, showing who the draft has
+// confirmed / staged for it -- newly drafted members only, not the existing
+// roster, and with no round breakdown. Read-only -- clicking a card
 // opens review, and nothing here stages, un-stages or reorders a pick. That
 // stays with the project's own PM view and the exec draft manager.
 
 import Link from "next/link";
 import { Table2, UserPlus } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { ScrollArea } from "@/components/overlay-scrollbar";
-import { PersonName } from "@/components/person-profile-provider";
 import { ProjectIcon } from "@/components/project-icon";
 import { StaticApplicantCard, type AppRow } from "@/components/applicant-meta";
 import { ApplicationListSkeleton } from "@/components/skeletons";
@@ -63,9 +62,8 @@ function ProjectColumn({
   showRecruitingStatus: boolean;
   onReview: (app: AppRow, projectId: string) => void;
 }) {
-  const { project, roster, confirmed, staged } = column;
+  const { project, confirmed, staged } = column;
   const accent = project.color || DEFAULT_ACCENT;
-  const confirmedCount = confirmed.reduce((n, r) => n + r.apps.length, 0);
   const review = (app: AppRow) => onReview(app, project.id);
 
   return (
@@ -76,45 +74,26 @@ function ProjectColumn({
         <div className="flex min-w-0 flex-col">
           <span className="truncate text-sm font-semibold" title={project.name}>{project.name}</span>
           <span className="text-xs text-muted-foreground">
-            {roster.length} on team · {confirmedCount} confirmed · {staged.length} staged
+            {confirmed.length} confirmed · {staged.length} staged
           </span>
         </div>
       </div>
 
       <div className="flex flex-col gap-2">
-        <SectionHeading label="On the team" count={roster.length} />
-        {roster.length === 0 ? (
-          <EmptySection>No one on this project yet.</EmptySection>
-        ) : (
-          roster.map((m) => (
-            <div key={m.user_id} className="flex items-center gap-2 rounded-lg border px-3 py-2">
-              <PersonName userId={m.user_id} name={m.name} className="min-w-0 flex-1 truncate text-sm font-medium" />
-              {m.isPm && <Badge variant="outline">PM</Badge>}
-            </div>
-          ))
-        )}
-      </div>
-
-      <div className="flex flex-col gap-2">
-        <SectionHeading label="Confirmed" count={confirmedCount} />
-        {confirmedCount === 0 ? (
+        <SectionHeading label="Confirmed" count={confirmed.length} />
+        {confirmed.length === 0 ? (
           <EmptySection>No picks confirmed yet.</EmptySection>
         ) : (
-          confirmed.map((round) => (
-            <div key={round.roundNumber} className="flex flex-col gap-2">
-              <span className="text-[11px] font-medium text-muted-foreground/80">Round {round.roundNumber}</span>
-              {round.apps.map((app) => (
-                <StaticApplicantCard
-                  key={app.id}
-                  app={app}
-                  accent={accent}
-                  periodEndsAt={periodEndsAt}
-                  showRank
-                  showRecruitingStatus={showRecruitingStatus}
-                  onReview={review}
-                />
-              ))}
-            </div>
+          confirmed.map((app) => (
+            <StaticApplicantCard
+              key={app.id}
+              app={app}
+              accent={accent}
+              periodEndsAt={periodEndsAt}
+              showRank
+              showRecruitingStatus={showRecruitingStatus}
+              onReview={review}
+            />
           ))
         )}
       </div>
