@@ -14,10 +14,14 @@
 import { createClient } from "@/lib/supabase/client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReviewStatus } from "@/components/application-review-modal";
-import type { AppRow } from "@/components/applicant-meta";
+import { applicantName, type AppRow } from "@/components/applicant-meta";
 import { enrichAppRows, type BaseAppRow } from "@/lib/applicant-rows";
 import { selectInChunks } from "@/lib/postgrest-chunk";
 import { useDraftRealtime } from "@/lib/use-draft-realtime";
+
+// The statuses the draft can still place. Rejected applications are out of
+// play, so they belong to neither the roster nor its head count.
+const DRAFT_ELIGIBLE_STATUSES = ["submitted", "accepted"] as const;
 
 export type BoardProject = {
   id: string;
@@ -245,7 +249,7 @@ export function usePeriodApplicants(periodId: string | null) {
       .from("applications")
       .select("id, applicant_id")
       .eq("period_id", periodId)
-      .in("status", ["submitted", "accepted"]);
+      .in("status", DRAFT_ELIGIBLE_STATUSES);
     if (error) { loadedFor.current = null; return; }
 
     const rows = (data ?? []) as { id: string; applicant_id: string | null }[];
@@ -273,4 +277,87 @@ export function usePeriodApplicants(periodId: string | null) {
   }, [periodId]);
 
   return { applicants, load };
+}
+
+// The period's draft-eligible roster, enriched exactly like a board card, so
+// the "not drafted" list can show the same recruiting indicators the columns
+// do. Kept apart from `usePeriodApplicants` (which only needs id + name for
+// the add-member picker) because this enrichment is the expensive one.
+//
+// Lazy for that reason -- it touches every applicant in the period, and only
+// matters while the list is open -- and re-run on each open rather than cached:
+// nothing subscribes to `applications`, so a first-open snapshot would drift as
+// review carries on around it.
+export type RosterRow = {
+  app: AppRow;
+  // Set when someone was accepted onto a project outside the draft
+  // (accept_application places them without creating a pick).
+  acceptedProjectId: string | null;
+};
+
+export function usePeriodRoster(periodId: string | null) {
+  const [roster, setRoster] = useState<RosterRow[] | null>(null);
+  // Cheap head count, fetched up front: it stands in for the roster's own
+  // length until someone actually opens the list.
+  const [eligibleCount, setEligibleCount] = useState<number | null>(null);
+  const countGenRef = useRef(0);
+  const rosterGenRef = useRef(0);
+
+  useEffect(() => {
+    const gen = ++countGenRef.current;
+    rosterGenRef.current++;
+    setRoster(null);
+    setEligibleCount(null);
+    if (!periodId) return;
+    (async () => {
+      const { count } = await createClient()
+        .from("applications")
+        .select("id", { count: "exact", head: true })
+        .eq("period_id", periodId)
+        .in("status", DRAFT_ELIGIBLE_STATUSES);
+      if (gen === countGenRef.current) setEligibleCount(count ?? 0);
+    })();
+  }, [periodId]);
+
+  const load = useCallback(async () => {
+    if (!periodId) return;
+    const gen = ++rosterGenRef.current;
+    const supabase = createClient();
+    const { data } = await supabase
+      .from("applications")
+      .select("id, applicant_id, status, submitted_at, accepted_project_id")
+      .eq("period_id", periodId)
+      .in("status", DRAFT_ELIGIBLE_STATUSES);
+    if (gen !== rosterGenRef.current) return;
+
+    const rows = (data ?? []) as {
+      id: string;
+      applicant_id: string | null;
+      status: ReviewStatus;
+      submitted_at: string | null;
+      accepted_project_id: string | null;
+    }[];
+    const acceptedByAppId: Record<string, string | null> = {};
+    for (const r of rows) acceptedByAppId[r.id] = r.accepted_project_id;
+    // `rank` is per project and this list belongs to no column, so it stays 0.
+    const enriched = await enrichAppRows(
+      supabase,
+      rows.map((r) => ({
+        id: r.id,
+        status: r.status,
+        submitted_at: r.submitted_at,
+        applicant_id: r.applicant_id,
+        rank: 0,
+      })),
+    );
+    if (gen !== rosterGenRef.current) return;
+
+    setRoster(
+      enriched
+        .map((app) => ({ app, acceptedProjectId: acceptedByAppId[app.id] ?? null }))
+        .sort((a, b) => applicantName(a.app).localeCompare(applicantName(b.app))),
+    );
+  }, [periodId]);
+
+  return { roster, eligibleCount, load };
 }

@@ -14,11 +14,13 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { Check, ChevronDown, Plus, Table2, UserPlus } from "lucide-react";
+import { Check, ChevronDown, Plus, Table2, UserPlus, UserSearch } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -31,7 +33,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ScrollArea } from "@/components/overlay-scrollbar";
 import { ProjectIcon } from "@/components/project-icon";
-import { StaticApplicantCard, type AppRow } from "@/components/applicant-meta";
+import { applicantName, ReturningIndicator, StaticApplicantCard, type AppRow } from "@/components/applicant-meta";
+import { InvalidIndicator, LateBadge } from "@/components/applicant-indicators";
 import { ApplicantPickerDialog } from "@/components/applicant-picker-dialog";
 import { ApplicationListSkeleton } from "@/components/skeletons";
 import { createClient } from "@/lib/supabase/client";
@@ -39,9 +42,11 @@ import { DEFAULT_ACCENT, accentStyle, readableTextColor } from "@/lib/portal-col
 import {
   useAllProjectsBoard,
   usePeriodApplicants,
+  usePeriodRoster,
   type BoardCard,
   type BoardColumn,
   type BoardProject,
+  type RosterRow,
 } from "@/lib/use-all-projects-board";
 
 // The three states the per-card menu cycles between. "drafted" is the default:
@@ -253,6 +258,92 @@ function ProjectColumn({
   );
 }
 
+// The "who's left" list, opened from the board toolbar: every draft-eligible
+// applicant this period without a confirmed pick. Read-only -- placing someone
+// still happens on a column's add-member card -- but a name opens the same
+// application card the columns do, and the recruiting indicators carry over so
+// an exec can see at a glance why someone may have gone unpicked.
+function UndraftedDialog({
+  rows,
+  stagedByAppId,
+  periodEndsAt,
+  filter,
+  onFilterChange,
+  open,
+  onOpenApplicant,
+  onClose,
+}: {
+  rows: RosterRow[] | null;
+  // Applicants staged on a project but not confirmed yet, by application id --
+  // still undrafted, but worth saying where they are sitting.
+  stagedByAppId: Map<string, string[]>;
+  periodEndsAt: string | undefined;
+  filter: string;
+  onFilterChange: (value: string) => void;
+  open: boolean;
+  onOpenApplicant: (app: AppRow) => void;
+  onClose: () => void;
+}) {
+  const needle = filter.trim().toLowerCase();
+  const options = (rows ?? []).filter((r) => applicantName(r.app).toLowerCase().includes(needle));
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>
+            Not drafted
+            {rows && (
+              <span className="ml-2 font-normal tabular-nums text-muted-foreground">
+                {rows.length} {rows.length === 1 ? "person" : "people"}
+              </span>
+            )}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="flex flex-col gap-3">
+          <Input
+            autoFocus
+            placeholder="Search applicants…"
+            value={filter}
+            onChange={(e) => onFilterChange(e.target.value)}
+          />
+          <div className="flex max-h-72 flex-col gap-1 overflow-y-auto">
+            {rows === null ? (
+              <p className="text-sm text-muted-foreground py-4 text-center">Loading applicants…</p>
+            ) : options.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-4 text-center">
+                {rows.length === 0 ? "Everyone eligible has been drafted." : "No matching applicants."}
+              </p>
+            ) : (
+              options.map(({ app }) => {
+                const staged = stagedByAppId.get(app.id);
+                return (
+                  <div key={app.id} className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm bg-background">
+                    <button
+                      type="button"
+                      onClick={() => onOpenApplicant(app)}
+                      className="min-w-0 truncate text-left font-medium hover:underline"
+                    >
+                      {applicantName(app)}
+                    </button>
+                    <InvalidIndicator valid={app.valid} />
+                    <ReturningIndicator returning={app.returning} />
+                    <LateBadge submittedAt={app.submitted_at} endsAt={periodEndsAt} />
+                    {staged && (
+                      <Badge variant="outline" className="ml-auto shrink-0 font-normal text-muted-foreground">
+                        Staged{staged.length > 0 ? ` · ${staged.join(", ")}` : ""}
+                      </Badge>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function AllProjectsBoard({
   periodId,
   periodEndsAt,
@@ -262,6 +353,7 @@ export function AllProjectsBoard({
   onShowRecruitingStatusChange,
   onOpenSheet,
   onReview,
+  reviewOpen,
   reloadToken,
   onMutated,
 }: {
@@ -275,7 +367,12 @@ export function AllProjectsBoard({
   onShowRecruitingStatusChange: (next: boolean) => void;
   onOpenSheet: () => void;
   // Carries the column's project so review opens with the right context project.
-  onReview: (app: AppRow, projectId: string) => void;
+  // The "not drafted" list has no column behind it, hence the null.
+  onReview: (app: AppRow, projectId: string | null) => void;
+  // Whether the page's review modal is up. The "not drafted" list stays mounted
+  // behind it rather than stacking: both dialogs sit at z-50, so showing them
+  // together would double the scrim and the focus trap.
+  reviewOpen: boolean;
   // Bumped by the page when a review changes something the board shows.
   reloadToken: number;
   // Fired after the board itself changes an outcome or a placement, so the page
@@ -290,8 +387,22 @@ export function AllProjectsBoard({
   const [busyPickId, setBusyPickId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const { applicants, load: loadApplicants } = usePeriodApplicants(periodId);
+  // The "not drafted" list: everyone the draft hasn't placed yet.
+  const [undraftedOpen, setUndraftedOpen] = useState(false);
+  const [undraftedFilter, setUndraftedFilter] = useState("");
+  const { roster, eligibleCount, load: loadRoster } = usePeriodRoster(periodId);
 
   useEffect(() => { if (addFor) loadApplicants(); }, [addFor, loadApplicants]);
+
+  // A period switch reloads the roster from scratch, so a list left open here
+  // would sit on its loading state against the new period forever.
+  useEffect(() => { setUndraftedOpen(false); }, [periodId]);
+
+  const openUndrafted = () => {
+    setUndraftedFilter("");
+    setUndraftedOpen(true);
+    loadRoster();
+  };
 
   // Every RPC here runs the same way: clear the last error, call, surface the
   // message the function raised (they're written to be read), then reload. Only
@@ -352,6 +463,38 @@ export function AllProjectsBoard({
     [periodId, run],
   );
 
+  // Who the draft has actually placed, and who is merely staged and on which
+  // project. A staged applicant can sit under two projects at once -- draft_picks
+  // is unique on (round_project_id, application_id), not on the applicant -- so
+  // the project names are a list. Rejected picks are skipped: the card stays on
+  // the board with a red badge (0091), but the roster below excludes them too,
+  // so counting them here would make the two disagree.
+  const confirmedAppIds = new Set<string>();
+  const stagedByAppId = new Map<string, string[]>();
+  for (const column of columns ?? []) {
+    for (const card of column.picks) {
+      if (card.app.status === "rejected") continue;
+      if (card.submitted) {
+        confirmedAppIds.add(card.app.id);
+        continue;
+      }
+      const names = stagedByAppId.get(card.app.id) ?? [];
+      names.push(column.project.name);
+      stagedByAppId.set(card.app.id, names);
+    }
+  }
+  // Anyone accepted outside the draft is already placed, so they don't belong
+  // on the list even though they have no pick.
+  const undrafted = (roster ?? []).filter((r) => !confirmedAppIds.has(r.app.id) && !r.acceptedProjectId);
+  // The roster is lazy, so the button falls back to the head count's own
+  // arithmetic until someone opens the list -- the two agree except for anyone
+  // accepted outside the draft.
+  const undraftedCount = roster
+    ? undrafted.length
+    : eligibleCount === null
+      ? null
+      : Math.max(eligibleCount - confirmedAppIds.size, 0);
+
   // Move targets are the other projects actually drafting this period; anything
   // else raises "That project is not drafting in this application period."
   const draftingProjects = (columns ?? [])
@@ -386,6 +529,14 @@ export function AllProjectsBoard({
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {/* Only offered when this period actually has a draft -- before one is
+              set up everyone is undrafted, which says nothing. */}
+          {undraftedCount !== null && draftProjectIds.size > 0 && (
+            <Button variant="outline" size="sm" onClick={openUndrafted}>
+              <UserSearch size={14} className="mr-1.5" />
+              {undraftedCount} not drafted
+            </Button>
+          )}
           <Button size="sm" onClick={onOpenSheet} disabled={!periodId}>
             <Table2 size={14} className="mr-1.5" />
             Open sheet view
@@ -450,6 +601,21 @@ export function AllProjectsBoard({
           onFilterChange={setAddFilter}
           onPick={(applicationId) => addPick(addFor.id, applicationId)}
           onClose={() => { setAddFor(null); setAddFilter(""); }}
+        />
+      )}
+
+      {undraftedOpen && (
+        <UndraftedDialog
+          rows={roster && undrafted}
+          stagedByAppId={stagedByAppId}
+          periodEndsAt={periodEndsAt}
+          filter={undraftedFilter}
+          onFilterChange={setUndraftedFilter}
+          // Hidden, not unmounted, while a review card is up: closing the
+          // review brings this back with its filter intact.
+          open={!reviewOpen}
+          onOpenApplicant={(app) => onReview(app, null)}
+          onClose={() => setUndraftedOpen(false)}
         />
       )}
     </div>

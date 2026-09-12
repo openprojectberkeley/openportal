@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/supabase/client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, GripVertical, Play, Plus, RotateCcw, Trash2, Undo2, UserSearch, X } from "lucide-react";
+import { Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, GripVertical, Play, Plus, RotateCcw, Trash2, Undo2, X } from "lucide-react";
 import {
   DndContext,
   PointerSensor,
@@ -77,19 +77,9 @@ type Round = { id: string; round_number: number; projects: RoundProject[] };
 // applications view: returning member, late submission, and recruiting-invalid.
 type PickIndicators = { returning: boolean; invalid: boolean; submittedAt: string | null };
 
-// One draft-eligible applicant this period -- the shared roster behind both
-// the manual-add picker and the "not drafted" list. `acceptedProjectId` marks
-// someone already placed outside the draft (accept_application sets it without
-// creating a pick), so they don't read as undrafted.
-type PeriodApplicant = {
-  id: string;
-  name: string;
-  status: ReviewStatus;
-  submittedAt: string | null;
-  acceptedProjectId: string | null;
-  returning: boolean;
-  invalid: boolean;
-};
+// One draft-eligible applicant this period -- the roster behind the exec's
+// manual-add picker.
+type PeriodApplicant = { id: string; name: string };
 
 // One stop in the flattened draft sequence: a project's turn within a round.
 // Rounds with pick_count = 0 sit out, so they're excluded from the sequence.
@@ -165,9 +155,6 @@ export function DraftRoundsManager() {
   // turn-based flow.
   const [addTarget, setAddTarget] = useState<{ roundProjectId: string; projectId: string; projectName: string } | null>(null);
   const [periodApplicants, setPeriodApplicants] = useState<PeriodApplicant[] | null>(null);
-  // The "not drafted" list, opened from the draft status bar.
-  const [undraftedOpen, setUndraftedOpen] = useState(false);
-  const [undraftedFilter, setUndraftedFilter] = useState("");
   // Period-wide applicant count for the "confirmed / total applications" counter.
   const [applicationCount, setApplicationCount] = useState<number | null>(null);
   const [addFilter, setAddFilter] = useState("");
@@ -441,9 +428,6 @@ export function DraftRoundsManager() {
   useEffect(() => {
     setPeriodApplicants(null);
     setApplicationCount(null);
-    // The roster only reloads when a list is opened, so a list left open here
-    // would sit on its loading state against the new period forever.
-    setUndraftedOpen(false);
     setRoundPage(0);
     recruitingCacheRef.current = { periodId: null, byUser: new Map() };
     loadBoardGenRef.current += 1;
@@ -505,37 +489,6 @@ export function DraftRoundsManager() {
   );
   // "274 of 289" -- null until the eligible-applicant count lands.
   const draftedLabel = applicationCount === null ? null : `${confirmedCount} of ${applicationCount}`;
-
-  // Who's been confirmed, and who's merely staged and on which project. A
-  // staged applicant can sit under two projects at once -- draft_picks is
-  // unique on (round_project_id, application_id), not on the applicant -- so
-  // the project names are a list.
-  const projectNameByRpId: Record<string, string> = {};
-  for (const r of rounds ?? []) for (const p of r.projects) projectNameByRpId[p.id] = p.name;
-  const confirmedAppIds = new Set<string>();
-  const stagedByAppId = new Map<string, string[]>();
-  for (const [rpId, row] of Object.entries(boardRows)) {
-    for (const appId of row.appIds) {
-      if (row.submittedAt) {
-        confirmedAppIds.add(appId);
-        continue;
-      }
-      const names = stagedByAppId.get(appId) ?? [];
-      if (projectNameByRpId[rpId]) names.push(projectNameByRpId[rpId]);
-      stagedByAppId.set(appId, names);
-    }
-  }
-  // Everyone eligible who isn't confirmed onto a project yet. Anyone accepted
-  // outside the draft is already placed, so they don't belong here even though
-  // they have no pick.
-  const undrafted = (periodApplicants ?? []).filter((a) => !confirmedAppIds.has(a.id) && !a.acceptedProjectId);
-  // The roster is lazy, so fall back to the counter's own arithmetic until it
-  // lands -- the two agree except for anyone accepted outside the draft.
-  const undraftedCount = periodApplicants
-    ? undrafted.length
-    : applicationCount === null
-      ? null
-      : Math.max(applicationCount - confirmedCount, 0);
 
   // Keep the round pager pointed at whichever round is actually on the clock
   // -- but only when the turn moves into a *different* round, so browsing
@@ -626,52 +579,31 @@ export function DraftRoundsManager() {
     loadBoard(selectedPeriodId);
   };
 
-  // The period's draft-eligible roster, shared by the manual-add picker and
-  // the "not drafted" list. Names and recruiting flags come from the same
-  // per-period cache the board uses, so an open here mostly hits memory.
-  // Re-run on every open rather than once: nothing subscribes to
+  // The period's draft-eligible roster behind the manual-add picker. Names come
+  // from the same per-period cache the board uses, so an open here mostly hits
+  // memory. Re-run on every open rather than once: nothing subscribes to
   // `applications`, so a first-open snapshot would drift as review continues.
   const loadPeriodApplicants = useCallback(async (periodId: string) => {
     const gen = ++loadApplicantsGenRef.current;
     const supabase = createClient();
     const { data: apps } = await supabase
       .from("applications")
-      .select("id, applicant_id, status, submitted_at, accepted_project_id")
+      .select("id, applicant_id")
       .eq("period_id", periodId)
       .in("status", DRAFT_ELIGIBLE_STATUSES);
     if (gen !== loadApplicantsGenRef.current) return;
 
-    const rows = (apps ?? []) as {
-      id: string;
-      applicant_id: string | null;
-      status: ReviewStatus;
-      submitted_at: string | null;
-      accepted_project_id: string | null;
-    }[];
+    const rows = (apps ?? []) as { id: string; applicant_id: string | null }[];
     await ensureRecruitingFlags(periodId, rows.map((r) => r.applicant_id).filter((id): id is string => !!id));
     if (gen !== loadApplicantsGenRef.current) return;
 
     const byUser = recruitingCacheRef.current.byUser;
     setPeriodApplicants(
       rows
-        .map((r) => {
-          const flags = r.applicant_id ? byUser.get(r.applicant_id) : undefined;
-          const returning = !!flags?.returning;
-          return {
-            id: r.id,
-            name: flags?.name ?? "Applicant",
-            status: r.status,
-            submittedAt: r.submitted_at,
-            acceptedProjectId: r.accepted_project_id,
-            returning,
-            invalid: !isRecruitingValid({
-              boardExec: !!flags?.boardExec,
-              returning,
-              coffeeDone: !!flags?.coffeeDone,
-              infosession: !!flags?.infosession,
-            }),
-          };
-        })
+        .map((r) => ({
+          id: r.id,
+          name: (r.applicant_id && byUser.get(r.applicant_id)?.name) || "Applicant",
+        }))
         .sort((a, b) => a.name.localeCompare(b.name)),
     );
   }, [ensureRecruitingFlags]);
@@ -679,12 +611,6 @@ export function DraftRoundsManager() {
   const openAddManually = (roundProjectId: string, projectId: string, projectName: string) => {
     setAddFilter("");
     setAddTarget({ roundProjectId, projectId, projectName });
-    if (selectedPeriodId) loadPeriodApplicants(selectedPeriodId);
-  };
-
-  const openUndrafted = () => {
-    setUndraftedFilter("");
-    setUndraftedOpen(true);
     if (selectedPeriodId) loadPeriodApplicants(selectedPeriodId);
   };
 
@@ -829,16 +755,6 @@ export function DraftRoundsManager() {
     if (updateError) setError("Couldn't save the pick count.");
   };
 
-  // Only offered once the draft is under way -- before it starts everyone is
-  // undrafted, which says nothing.
-  const undraftedButton =
-    undraftedCount === null ? null : (
-      <Button variant="outline" size="sm" onClick={openUndrafted}>
-        <UserSearch size={14} className="mr-1.5" />
-        {undraftedCount} not drafted
-      </Button>
-    );
-
   return (
     <div className="flex flex-col gap-6">
       {error && <p className="text-sm text-red-500">{error}</p>}
@@ -878,7 +794,6 @@ export function DraftRoundsManager() {
                   <span className="text-muted-foreground"> ({new Date(completedAt).toLocaleString()})</span>.
                 </span>
               </div>
-              {undraftedButton}
             </>
           ) : currentStop === null ? (
             <>
@@ -922,7 +837,6 @@ export function DraftRoundsManager() {
                   Next
                   <ChevronRight size={14} className="ml-1" />
                 </Button>
-                {undraftedButton}
                 <Button
                   size="sm"
                   className="bg-green-600 hover:bg-green-600/90"
@@ -1120,22 +1034,6 @@ export function DraftRoundsManager() {
 
       <ProjectInfoModal project={infoProject} onClose={() => setInfoProject(null)} />
 
-      {undraftedOpen && (
-        <UndraftedModal
-          applicants={periodApplicants && undrafted}
-          stagedByAppId={stagedByAppId}
-          periodEndsAt={selectedPeriod?.ends_at}
-          filter={undraftedFilter}
-          onFilterChange={setUndraftedFilter}
-          // Stays mounted but hidden behind an open review card: both dialogs
-          // sit at z-50, so stacking them would double the scrim and the focus
-          // trap. Closing the review brings this back with its filter intact.
-          open={!reviewFor}
-          onOpenApplicant={(a) => setReviewFor({ id: a.id, name: a.name, status: a.status })}
-          onClose={() => setUndraftedOpen(false)}
-        />
-      )}
-
       {reviewFor && (
         <ApplicationReviewModal
           applicationId={reviewFor.id}
@@ -1318,93 +1216,6 @@ function PicksThisRound({
         </div>
       )}
     </div>
-  );
-}
-
-// The exec's manual-staging picker: any applicant this period, minus whoever
-// is already picked for this round-project. Bypasses the normal turn-based
-// flow entirely, same as the admin unsubmit/confirm controls above.
-// The "who's left" list, opened from the draft status bar: every eligible
-// applicant this period without a confirmed pick. Read-only -- staging still
-// happens on the board -- but a name opens the same application card the
-// board's picks do, and the recruiting indicators carry over from there so an
-// exec can see at a glance why someone may have gone unpicked.
-function UndraftedModal({
-  applicants,
-  stagedByAppId,
-  periodEndsAt,
-  filter,
-  onFilterChange,
-  open,
-  onOpenApplicant,
-  onClose,
-}: {
-  applicants: PeriodApplicant[] | null;
-  stagedByAppId: Map<string, string[]>;
-  periodEndsAt: string | undefined;
-  filter: string;
-  onFilterChange: (value: string) => void;
-  open: boolean;
-  onOpenApplicant: (applicant: PeriodApplicant) => void;
-  onClose: () => void;
-}) {
-  const needle = filter.trim().toLowerCase();
-  const options = (applicants ?? []).filter((a) => a.name.toLowerCase().includes(needle));
-  return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>
-            Not drafted
-            {applicants && (
-              <span className="ml-2 font-normal tabular-nums text-muted-foreground">
-                {applicants.length} {applicants.length === 1 ? "person" : "people"}
-              </span>
-            )}
-          </DialogTitle>
-        </DialogHeader>
-        <div className="flex flex-col gap-3">
-          <Input
-            autoFocus
-            placeholder="Search applicants…"
-            value={filter}
-            onChange={(e) => onFilterChange(e.target.value)}
-          />
-          <div className="flex max-h-72 flex-col gap-1 overflow-y-auto">
-            {applicants === null ? (
-              <p className="text-sm text-muted-foreground py-4 text-center">Loading applicants…</p>
-            ) : options.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-4 text-center">
-                {applicants.length === 0 ? "Everyone eligible has been drafted." : "No matching applicants."}
-              </p>
-            ) : (
-              options.map((a) => {
-                const staged = stagedByAppId.get(a.id);
-                return (
-                  <div key={a.id} className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm bg-background">
-                    <button
-                      type="button"
-                      onClick={() => onOpenApplicant(a)}
-                      className="min-w-0 truncate text-left font-medium hover:underline"
-                    >
-                      {a.name}
-                    </button>
-                    <InvalidIndicator valid={!a.invalid} />
-                    <ReturningIndicator returning={a.returning} />
-                    <LateBadge submittedAt={a.submittedAt} endsAt={periodEndsAt} />
-                    {staged && (
-                      <Badge variant="outline" className="ml-auto shrink-0 font-normal text-muted-foreground">
-                        Staged{staged.length > 0 ? ` · ${staged.join(", ")}` : ""}
-                      </Badge>
-                    )}
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
   );
 }
 

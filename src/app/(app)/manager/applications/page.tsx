@@ -938,6 +938,7 @@ export default function ManagerApplicationsPage() {
           onReview={(app, projectId) =>
             setReviewFor({ id: app.id, name: applicantName(app), status: app.status, projectId })
           }
+          reviewOpen={!!reviewFor}
           reloadToken={boardReloadToken}
           // The board reloads its own columns; this is for what the page owns.
           onMutated={() => {
