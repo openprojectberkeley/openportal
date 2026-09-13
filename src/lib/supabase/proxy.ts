@@ -10,6 +10,17 @@ function isAuthCallbackPath(pathname: string) {
   return pathname === "/auth/callback" || pathname === "/auth/callback/";
 }
 
+// Endpoints that authorize themselves and must never be bounced to the login
+// page. The scheduled calendar sync is called by Vercel Cron with a CRON_SECRET
+// bearer token and no Supabase session cookie — redirecting it here would make
+// the cron silently never run, with a 307 to /auth/login as its only symptom.
+// The route still rejects an unauthorized caller with 401/403 on its own.
+const SELF_AUTHORIZING_PATHS = ["/api/admin/calendar-sync"];
+
+export function isSelfAuthorizingPath(pathname: string) {
+  return SELF_AUTHORIZING_PATHS.some((p) => pathname === p || pathname === `${p}/`);
+}
+
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
     request,
@@ -81,7 +92,11 @@ export async function updateSession(request: NextRequest) {
   const { data } = await supabase.auth.getClaims();
   const user = data?.claims;
 
-  if (!user && !request.nextUrl.pathname.startsWith("/auth")) {
+  if (
+    !user &&
+    !request.nextUrl.pathname.startsWith("/auth") &&
+    !isSelfAuthorizingPath(request.nextUrl.pathname)
+  ) {
     const url = request.nextUrl.clone();
     url.pathname = "/auth/login";
     return NextResponse.redirect(url);

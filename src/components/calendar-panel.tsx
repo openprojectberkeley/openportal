@@ -2,24 +2,41 @@
 
 import { createClient } from "@/lib/supabase/client";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight, Plus, Pencil, Trash2, MapPin, CalendarPlus } from "lucide-react";
+import { ChevronLeft, ChevronRight, ChevronDown, Plus, Pencil, Trash2, MapPin, CalendarPlus, ExternalLink, RefreshCw, ClipboardCheck, Check } from "lucide-react";
 import { EventListSkeleton } from "@/components/skeletons";
-import { accentTint } from "@/lib/portal-color";
+import { accentTint, hoverForeground, DEFAULT_ACCENT } from "@/lib/portal-color";
 import { downloadEventIcs } from "@/lib/ics";
+import { dayKey, dayKeysFor } from "@/lib/event-days";
 import { cn } from "@/lib/utils";
 import { useRoleSim } from "@/components/role-simulation-provider";
+import { CATEGORY_META, EVENT_CATEGORIES, isRoleGated, type EventCategory } from "@/lib/event-category";
 import { usePortalMeta } from "@/components/portal-meta-provider";
 import { EventFormDialog, deletePortalEvent, EVENT_FORM_SELECT, type EventFormValue } from "@/components/event-form-dialog";
+import { PortalAttendanceModal } from "@/components/portal-attendance-modal";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { googleSubscribeUrl, icsSubscribeUrl, publicCalendarId } from "@/lib/calendar-subscribe";
 
 export type PortalEvent = {
   id: string;
-  portal_id: string;
+  /** null = a club-wide event: no portal, visibility decided by role. */
+  portal_id: string | null;
   title: string;
   description: string | null;
   location: string | null;
   start_time: string;
   end_time: string | null;
   all_day: boolean;
+  category: EventCategory;
+  attendance_enabled: boolean;
+  category_overridden: boolean;
+  external_source: string | null;
+  external_link: string | null;
+  cancelled_at: string | null;
   portals: { name: string; color: string | null } | null;
 };
 
@@ -28,6 +45,11 @@ type Props = {
   // for it. When omitted, it's the aggregate view (every event the user can
   // see). Editing is gated per-event by whether the user manages that portal.
   portalId?: string;
+  // Identity for the header band. Passed in rather than derived from the events'
+  // `portals(name, color)` embed, because a portal with no events yet has no
+  // embed to read — exactly when the band's label matters most.
+  portalName?: string;
+  portalColor?: string | null;
 };
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -35,14 +57,6 @@ const MONTHS = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
 ];
-
-// Local YYYY-MM-DD key for a Date (used to bucket events by day).
-function dayKey(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
 
 function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
@@ -76,8 +90,14 @@ function EventCard({
 }) {
   // Opaque card color, reused for the hover overlay's gradient so it washes out
   // the content beneath the buttons in the card's own colour.
-  const cardBg = color
-    ? accentTint(color, 18)!
+  //
+  // A categorized event is tinted by its category, so GMs, socials and board
+  // meetings read apart at a glance even when they share one portal.
+  // "general" events keep the portal tint — that's the pre-category behavior,
+  // and every hand-created event defaults to it.
+  const tint = ev.category !== "general" ? CATEGORY_META[ev.category].color : color;
+  const cardBg = tint
+    ? accentTint(tint, 18)!
     : "color-mix(in srgb, hsl(var(--accent)) 40%, hsl(var(--background)))";
   return (
     <div
@@ -104,11 +124,23 @@ function EventCard({
           )}
           {ev.description && <span className="text-xs text-muted-foreground">{ev.description}</span>}
         </div>
-        {name && (
-          <span className="text-[10px] text-muted-foreground whitespace-nowrap max-w-[8rem] truncate flex-shrink-0" title={name}>
-            {name}
-          </span>
-        )}
+        <span className="flex flex-col items-end gap-0.5 flex-shrink-0">
+          {ev.category !== "general" && (
+            <span
+              className="text-[10px] font-medium whitespace-nowrap"
+              style={{ color: CATEGORY_META[ev.category].color }}
+              title={isRoleGated(ev.category) ? "Visible to board and exec only" : undefined}
+            >
+              {CATEGORY_META[ev.category].label}
+              {isRoleGated(ev.category) && " \u00b7 board only"}
+            </span>
+          )}
+          {name && (
+            <span className="text-[10px] text-muted-foreground whitespace-nowrap max-w-[8rem] truncate" title={name}>
+              {name}
+            </span>
+          )}
+        </span>
       </div>
 
       {/* Controls overlay the bottom-right on hover — no layout space taken. A
@@ -119,6 +151,19 @@ function EventCard({
           style={{ background: `linear-gradient(to top left, ${cardBg} 0%, ${cardBg} 22%, transparent 60%)` }}
         >
           <div className="flex items-center gap-0.5 pointer-events-auto">
+            {ev.external_link && (
+              <a
+                href={ev.external_link}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded"
+                aria-label={`Open ${ev.title} in Google Calendar`}
+                title="Open in Google Calendar"
+              >
+                <ExternalLink size={13} />
+              </a>
+            )}
             <button
               onClick={(e) => { e.stopPropagation(); downloadEventIcs(ev); }}
               className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded"
@@ -152,8 +197,104 @@ function EventCard({
   );
 }
 
-export function CalendarPanel({ portalId }: Props) {
-  const { ready, isExec } = useRoleSim();
+// The dashboard's subscribe control, sitting inside the calendar card above the
+// month grid. Portal calendars don't get one — they're scoped to a portal,
+// while the Google feed is the club-wide schedule.
+function SubscribeMenu() {
+  const [copied, setCopied] = useState(false);
+  const calendarId = publicCalendarId();
+
+  // No calendar configured — hide the control rather than render a dead link.
+  if (!calendarId) return null;
+
+  const copyIcs = async () => {
+    try {
+      await navigator.clipboard.writeText(icsSubscribeUrl(calendarId));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard unavailable (non-secure context) — nothing to do.
+    }
+  };
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button className="mb-3 w-full flex items-center justify-center gap-1.5 rounded-lg border px-2.5 py-2 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors">
+          <CalendarPlus size={14} /> Subscribe
+          <ChevronDown size={13} />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-56">
+        <DropdownMenuItem asChild>
+          <a href={googleSubscribeUrl(calendarId)} target="_blank" rel="noopener noreferrer">
+            Add to Google Calendar
+          </a>
+        </DropdownMenuItem>
+        {/* Keeps the menu open so the "Copied!" confirmation is actually seen. */}
+        <DropdownMenuItem onSelect={(e) => { e.preventDefault(); copyIcs(); }}>
+          {copied ? <><Check size={14} /> Copied!</> : "Copy iCal link"}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+// On a portal page, a second card tinted with the portal's accent sits BEHIND
+// the calendar and pokes out above it, so the portal's name reads as a tab on
+// the stack. That says "this calendar belongs to that portal" — which matters,
+// because club events deliberately don't appear here and the absence otherwise
+// looks like a bug.
+//
+// `mt-PEEK` on the wrapper reserves the space the backing card borrows with its
+// negative offset, so it never rides up over whatever sits above it.
+const PEEK = "1.5rem";
+
+function PortalBackingCard({
+  name,
+  color,
+  children,
+}: {
+  name?: string;
+  color?: string | null;
+  children: React.ReactNode;
+}) {
+  if (!name) return <>{children}</>;
+
+  return (
+    <div className="relative" style={{ marginTop: PEEK }}>
+      <div
+        aria-hidden
+        className="absolute inset-x-0 bottom-0 rounded-xl border flex items-start"
+        style={{
+          top: `calc(-1 * ${PEEK})`,
+          // The raw accent at full strength, exactly like the portal card's
+          // hover swipe — so a portal reads the same color here as on the
+          // dashboard. DEFAULT_ACCENT keeps a colorless portal intentional
+          // rather than transparent. Border matches the fill so the peek is one
+          // solid shape instead of a rimmed box.
+          backgroundColor: color || DEFAULT_ACCENT,
+          borderColor: color || DEFAULT_ACCENT,
+        }}
+      >
+        <span
+          className="px-3 text-xs font-medium truncate max-w-full"
+          // Black or white, whichever wins on contrast against that accent —
+          // the same hoverForeground() the portal cards use for their swipe.
+          style={{ lineHeight: PEEK, color: hoverForeground(color) }}
+        >
+          {name}
+        </span>
+      </div>
+      {/* `relative` lifts the calendar above the backing card; its opaque
+          background is what clips the backing card down to the peeking strip. */}
+      <div className="relative">{children}</div>
+    </div>
+  );
+}
+
+export function CalendarPanel({ portalId, portalName, portalColor }: Props) {
+  const { ready, isExec, isBoardOrExec } = useRoleSim();
   const { overrides } = usePortalMeta();
 
   const [events, setEvents] = useState<PortalEvent[]>([]);
@@ -163,6 +304,8 @@ export function CalendarPanel({ portalId }: Props) {
   const [viewMonth, setViewMonth] = useState(today.getMonth());
   const [selectedKey, setSelectedKey] = useState<string>(dayKey(today));
   const [hoverKey, setHoverKey] = useState<string | null>(null);
+  // null = no filter. Otherwise only this category is shown.
+  const [categoryFilter, setCategoryFilter] = useState<EventCategory | null>(null);
 
   // Portals the current user can manage events for (exec ⇒ all).
   const [manageablePortals, setManageablePortals] = useState<{ id: string; name: string }[]>([]);
@@ -172,13 +315,27 @@ export function CalendarPanel({ portalId }: Props) {
   // null = not resolved yet.
   const [visiblePortalIds, setVisiblePortalIds] = useState<Set<string> | null>(null);
 
+  // Club-wide tools, dashboard only. The club calendar has no portal, so its
+  // attendance sheet and its Google sync have no portal settings page to live
+  // on — they belong here, next to the events they act on.
+  const [attendanceOpen, setAttendanceOpen] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState<string | null>(null);
+  const showClubTools = !portalId && isBoardOrExec;
+
   const [formOpen, setFormOpen] = useState(false);
   const [editingEvent, setEditingEvent] = useState<PortalEvent | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const loadEvents = useCallback(async () => {
     const supabase = createClient();
-    let query = supabase.from("portal_events").select(EVENT_FORM_SELECT).order("start_time");
+    let query = supabase
+      .from("portal_events")
+      .select(EVENT_FORM_SELECT)
+      // Events deleted in Google are soft-cancelled, not removed, so their
+      // attendance history survives — but they shouldn't show on the calendar.
+      .is("cancelled_at", null)
+      .order("start_time");
     if (portalId) query = query.eq("portal_id", portalId);
     const { data } = await query;
     // `portals(name, color)` is a to-one FK embed (object at runtime); supabase-js
@@ -231,14 +388,26 @@ export function CalendarPanel({ portalId }: Props) {
     })();
   }, [ready, isExec]);
 
+  // An in-session portal settings save lands in `overrides` first, so the band
+  // retints without a reload — same precedence resolve() uses for event tints.
+  const bandName = portalId ? overrides[portalId]?.name ?? portalName : undefined;
+  const bandColor = portalId
+    ? (overrides[portalId] ? overrides[portalId].color : portalColor) ?? null
+    : null;
+
   const manageableIds = useMemo(() => new Set(manageablePortals.map((p) => p.id)), [manageablePortals]);
   const canManage = (pid: string) => manageableIds.has(pid);
-  const canAdd = portalId ? canManage(portalId) : manageablePortals.length > 0;
+  // A club event (no portal) is exec-managed; RLS enforces the same split.
+  const canManageEvent = (ev: PortalEvent) => (ev.portal_id === null ? isExec : canManage(ev.portal_id));
+  const canAdd = portalId ? canManage(portalId) : manageablePortals.length > 0 || isExec;
 
   // Resolve a portal's live name/color: an in-session settings save (context)
   // wins over the value embedded at fetch time.
   const resolve = useCallback(
     (ev: PortalEvent): { name: string | null; color: string | null } => {
+      // Club events have no portal, so nothing to label or tint them with —
+      // their category badge and color carry the identity instead.
+      if (ev.portal_id === null) return { name: null, color: null };
       const o = overrides[ev.portal_id];
       return {
         name: o?.name ?? ev.portals?.name ?? null,
@@ -252,19 +421,36 @@ export function CalendarPanel({ portalId }: Props) {
   // doesn't genuinely belong to when viewing as a non-exec persona — RLS returns
   // all of them to the real exec user, so we filter client-side. A per-portal
   // calendar (portalId set) and a real/simulated exec view are unfiltered.
-  const visibleEvents = useMemo(() => {
-    if (portalId || isExec) return events;
+  const permittedEvents = useMemo(() => {
+    // Board-category events are role-gated, not portal-gated (RLS in 0093).
+    // RLS already enforces this for real users; mirroring it here is what makes
+    // the "view as → Member" simulation honest, since RLS still answers as the
+    // real exec.
+    const roleFiltered = isBoardOrExec ? events : events.filter((e) => !isRoleGated(e.category));
+    if (portalId || isExec) return roleFiltered;
     if (visiblePortalIds === null) return [];
-    return events.filter((e) => visiblePortalIds.has(e.portal_id));
-  }, [events, portalId, isExec, visiblePortalIds]);
+    return roleFiltered.filter((e) => e.portal_id === null || visiblePortalIds.has(e.portal_id));
+  }, [events, portalId, isExec, isBoardOrExec, visiblePortalIds]);
+
+  // Categories actually present, so the chips never offer an empty filter.
+  const presentCategories = useMemo(() => {
+    const seen = new Set(permittedEvents.map((e) => e.category));
+    return EVENT_CATEGORIES.filter((c) => seen.has(c));
+  }, [permittedEvents]);
+
+  const visibleEvents = useMemo(
+    () => (categoryFilter ? permittedEvents.filter((e) => e.category === categoryFilter) : permittedEvents),
+    [permittedEvents, categoryFilter],
+  );
 
   // Bucket events by local day key for quick lookup while rendering the grid.
   const eventsByDay = useMemo(() => {
     const map = new Map<string, PortalEvent[]>();
     for (const ev of visibleEvents) {
-      const key = dayKey(new Date(ev.start_time));
-      if (!map.has(key)) map.set(key, []);
-      map.get(key)!.push(ev);
+      for (const key of dayKeysFor(ev)) {
+        if (!map.has(key)) map.set(key, []);
+        map.get(key)!.push(ev);
+      }
     }
     return map;
   }, [visibleEvents]);
@@ -330,6 +516,27 @@ export function CalendarPanel({ portalId }: Props) {
     jumpTo(saved.start_time);
   };
 
+  const syncCalendar = async () => {
+    setSyncing(true);
+    setSyncResult(null);
+    try {
+      const res = await fetch("/api/admin/calendar-sync", { method: "POST" });
+      const body = await res.json();
+      if (!res.ok) {
+        setSyncResult(body.error ?? `Sync failed (${res.status}).`);
+      } else {
+        setSyncResult(
+          `${body.created} added, ${body.updated} updated, ${body.cancelled} cancelled.`,
+        );
+        await loadEvents();
+      }
+    } catch {
+      setSyncResult("Sync failed — check your connection and try again.");
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   const deleteEvent = async (ev: PortalEvent) => {
     if (!window.confirm(`Delete "${ev.title}"? This can't be undone.`)) return;
     setDeletingId(ev.id);
@@ -340,7 +547,10 @@ export function CalendarPanel({ portalId }: Props) {
   };
 
   return (
+    <PortalBackingCard name={bandName} color={bandColor}>
     <div className="border rounded-xl p-4 bg-background">
+      {!portalId && <SubscribeMenu />}
+
       <div className="flex flex-col sm:flex-row lg:flex-col gap-4 lg:gap-3">
         {/* Month section (shrinks when the events sections sit beside it). */}
         <div className="w-full sm:w-1/2 lg:w-full flex flex-col gap-3">
@@ -406,6 +616,50 @@ export function CalendarPanel({ portalId }: Props) {
               );
             })}
           </div>
+
+          {presentCategories.length > 1 && (
+            <div className="flex flex-wrap gap-1">
+              <button
+                onClick={() => setCategoryFilter(null)}
+                aria-pressed={categoryFilter === null}
+                className={cn(
+                  "text-[10px] font-medium px-2 py-0.5 rounded-full border transition-colors",
+                  categoryFilter === null
+                    ? "bg-foreground text-background border-foreground"
+                    : "text-muted-foreground hover:text-foreground hover:bg-accent",
+                )}
+              >
+                All
+              </button>
+              {presentCategories.map((c) => {
+                const active = categoryFilter === c;
+                return (
+                  <button
+                    key={c}
+                    onClick={() => setCategoryFilter(active ? null : c)}
+                    aria-pressed={active}
+                    className={cn(
+                      "text-[10px] font-medium px-2 py-0.5 rounded-full border transition-colors flex items-center gap-1",
+                      active ? "text-background" : "text-muted-foreground hover:text-foreground hover:bg-accent",
+                    )}
+                    style={
+                      active
+                        ? { backgroundColor: CATEGORY_META[c].color, borderColor: CATEGORY_META[c].color }
+                        : undefined
+                    }
+                  >
+                    {!active && (
+                      <span
+                        className="h-1.5 w-1.5 rounded-full"
+                        style={{ backgroundColor: CATEGORY_META[c].color }}
+                      />
+                    )}
+                    {CATEGORY_META[c].label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* Events sections: divider swaps between top (stacked) and left (split). */}
@@ -430,7 +684,7 @@ export function CalendarPanel({ portalId }: Props) {
               <div className="flex flex-col gap-2">
                 {selectedEvents.map((ev) => {
                   const { name, color } = resolve(ev);
-                  const manage = canManage(ev.portal_id);
+                  const manage = canManageEvent(ev);
                   return (
                     <EventCard
                       key={ev.id}
@@ -438,7 +692,9 @@ export function CalendarPanel({ portalId }: Props) {
                       name={name}
                       color={color}
                       onEdit={manage ? () => openEdit(ev) : undefined}
-                      onDelete={manage ? () => deleteEvent(ev) : undefined}
+                      // Deleting a synced row just resurrects it on the next
+                      // sync, minus its attendance — remove it in Google instead.
+                      onDelete={manage && !ev.external_source ? () => deleteEvent(ev) : undefined}
                       deleting={deletingId === ev.id}
                     />
                   );
@@ -470,15 +726,50 @@ export function CalendarPanel({ portalId }: Props) {
         </div>
       </div>
 
+      {showClubTools && (
+        <div className="flex flex-col gap-1.5 border-t mt-3 pt-3">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setAttendanceOpen(true)}
+              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <ClipboardCheck size={13} /> Club attendance
+            </button>
+            {isExec && (
+              <button
+                onClick={syncCalendar}
+                disabled={syncing}
+                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+              >
+                <RefreshCw size={13} className={syncing ? "animate-spin" : undefined} />
+                {syncing ? "Syncing..." : "Sync Google Calendar"}
+              </button>
+            )}
+          </div>
+          {syncResult && <p className="text-[11px] text-muted-foreground">{syncResult}</p>}
+        </div>
+      )}
+
+      {showClubTools && (
+        <PortalAttendanceModal
+          open={attendanceOpen}
+          onOpenChange={setAttendanceOpen}
+          canManage={isBoardOrExec}
+          canEditEvents={isExec}
+        />
+      )}
+
       <EventFormDialog
         open={formOpen}
         onOpenChange={setFormOpen}
         event={editingEvent}
         portalId={portalId}
         portals={portalId ? undefined : manageablePortals}
+        allowClubEvent={!portalId && isExec}
         defaultDate={selectedKey}
         onSaved={handleSaved}
       />
     </div>
+    </PortalBackingCard>
   );
 }

@@ -24,10 +24,18 @@ type RosterRow = { user_id: string; name: string };
 type AttendanceMap = Record<string, Status>;
 
 type Props = {
-  portalId: string;
+  /** Omit for the club-wide sheet: events with no portal, roster = active members. */
+  portalId?: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   canManage: boolean;
+  /**
+   * Whether the viewer may add/edit/delete the events themselves, as opposed to
+   * only marking attendance. Defaults to `canManage`. The club sheet passes
+   * exec-only here: board and PMs take attendance at club events, but only
+   * exec creates or retags one (migration 0095).
+   */
+  canEditEvents?: boolean;
 };
 
 const STATUSES: { value: Status; label: string; short: string }[] = [
@@ -72,8 +80,9 @@ function EventHeaderCell({
   onDelete,
 }: {
   ev: EventFormValue;
-  onEdit: () => void;
-  onDelete: () => void;
+  /** Omitted when the viewer may mark attendance but not change the event. */
+  onEdit?: () => void;
+  onDelete?: () => void;
 }) {
   const titleRef = useRef<HTMLSpanElement>(null);
   const [truncated, setTruncated] = useState(false);
@@ -101,24 +110,30 @@ function EventHeaderCell({
       </div>
 
       {/* Edit / delete, revealed top-right on hover. */}
-      <div className="absolute top-1 right-1 z-50 hidden items-center gap-0.5 group-hover/evt:flex">
-        <button
-          onClick={onEdit}
-          aria-label={`Edit ${ev.title}`}
-          title="Edit event"
-          className="rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-        >
-          <Pencil size={12} />
-        </button>
-        <button
-          onClick={onDelete}
-          aria-label={`Delete ${ev.title}`}
-          title="Delete event"
-          className="rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-red-500"
-        >
-          <Trash2 size={12} />
-        </button>
-      </div>
+      {(onEdit || onDelete) && (
+        <div className="absolute top-1 right-1 z-50 hidden items-center gap-0.5 group-hover/evt:flex">
+          {onEdit && (
+            <button
+              onClick={onEdit}
+              aria-label={`Edit ${ev.title}`}
+              title="Edit event"
+              className="rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <Pencil size={12} />
+            </button>
+          )}
+          {onDelete && (
+            <button
+              onClick={onDelete}
+              aria-label={`Delete ${ev.title}`}
+              title="Delete event"
+              className="rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-red-500"
+            >
+              <Trash2 size={12} />
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Read-in-full overlay — only when the title is actually cut off. The same
           box, positioned over the cell but not truncated. */}
@@ -134,10 +149,13 @@ function EventHeaderCell({
   );
 }
 
-// Attendance for a portal's events. Portal admins get a members × events grid and
-// mark each cell present/absent/excused; ordinary members see a read-only list of
-// their own attendance across the portal's events. RLS enforces the same split.
-export function PortalAttendanceModal({ portalId, open, onOpenChange, canManage }: Props) {
+// Attendance for a portal's events, or — with `portalId` omitted — for the
+// club-wide events that belong to no portal (migration 0095). Managers get a
+// members × events grid and mark each cell present/absent/excused; ordinary
+// members see a read-only list of their own attendance. RLS enforces the same
+// split, via can_take_event_attendance().
+export function PortalAttendanceModal({ portalId, open, onOpenChange, canManage, canEditEvents }: Props) {
+  const canEdit = canEditEvents ?? canManage;
   const [events, setEvents] = useState<EventFormValue[]>([]);
   const [roster, setRoster] = useState<RosterRow[]>([]);
   const [attendance, setAttendance] = useState<AttendanceMap>({});
@@ -157,22 +175,33 @@ export function PortalAttendanceModal({ portalId, open, onOpenChange, canManage 
 
       // Admins get a chronological grid (oldest → newest across columns);
       // members get a most-recent-first list.
-      const { data: eventRows } = await supabase
-        .from("portal_events")
-        .select(EVENT_FORM_SELECT)
-        .eq("portal_id", portalId)
+      const eventQuery = supabase.from("portal_events").select(EVENT_FORM_SELECT);
+      const { data: eventRows } = await (portalId
+        ? eventQuery.eq("portal_id", portalId)
+        : eventQuery.is("portal_id", null))
+        // Only events that opted in — socials and info sessions would otherwise
+        // pad the grid with columns nobody ever marks.
+        .eq("attendance_enabled", true)
+        .is("cancelled_at", null)
         .order("start_time", { ascending: canManage });
 
       const evs = (eventRows ?? []) as unknown as EventFormValue[];
       const eventIds = evs.map((e) => e.id);
 
       // Roster (admins only — members don't need other people's names).
-      const rosterPromise = canManage
-        ? supabase
-            .from("portal_members")
-            .select("user_id, members(preferred_firstname, lastname)")
-            .eq("portal_id", portalId)
-        : Promise.resolve({ data: [] as unknown[] });
+      // The club sheet has no portal roster, so it uses active members: you
+      // can't be marked absent from a club you aren't currently in.
+      const rosterPromise = !canManage
+        ? Promise.resolve({ data: [] as unknown[] })
+        : portalId
+          ? supabase
+              .from("portal_members")
+              .select("user_id, members(preferred_firstname, lastname)")
+              .eq("portal_id", portalId)
+          : supabase
+              .from("members")
+              .select("user_id, preferred_firstname, lastname")
+              .eq("status", "active");
 
       // Attendance rows. Admins get everything for the portal's events (RLS
       // permits it); members get only their own (RLS restricts it, the .eq is
@@ -195,11 +224,19 @@ export function PortalAttendanceModal({ portalId, open, onOpenChange, canManage 
 
       setEvents(evs);
 
+      // Two row shapes: the portal roster nests the member under `members`,
+      // while the club roster reads the members table directly and is flat.
+      type RosterSource = {
+        user_id: string;
+        members?: { preferred_firstname: string | null; lastname: string | null } | null;
+        preferred_firstname?: string | null;
+        lastname?: string | null;
+      };
       setRoster(
-        ((rosterRows ?? []) as { user_id: string; members: unknown }[])
-          .map((pm) => {
-            const m = pm.members as { preferred_firstname: string | null; lastname: string | null } | null;
-            return { user_id: pm.user_id, name: fullName(m?.preferred_firstname, m?.lastname) };
+        ((rosterRows ?? []) as RosterSource[])
+          .map((row) => {
+            const m = row.members ?? row;
+            return { user_id: row.user_id, name: fullName(m.preferred_firstname, m.lastname) };
           })
           .sort(byName),
       );
@@ -272,11 +309,15 @@ export function PortalAttendanceModal({ portalId, open, onOpenChange, canManage 
   };
 
   const handleSaved = (saved: EventFormValue) => {
-    setEvents((prev) =>
-      (prev.some((e) => e.id === saved.id) ? prev.map((e) => (e.id === saved.id ? saved : e)) : [...prev, saved]).sort(
-        byStart,
-      ),
-    );
+    setEvents((prev) => {
+      // This grid only lists events with attendance on, so toggling it off in
+      // the form means the event leaves the grid rather than updating in place.
+      if (!saved.attendance_enabled) return prev.filter((e) => e.id !== saved.id);
+      const next = prev.some((e) => e.id === saved.id)
+        ? prev.map((e) => (e.id === saved.id ? saved : e))
+        : [...prev, saved];
+      return next.sort(byStart);
+    });
   };
 
   const deleteEvent = async (ev: EventFormValue) => {
@@ -330,6 +371,8 @@ export function PortalAttendanceModal({ portalId, open, onOpenChange, canManage 
               <EventFormFields
                 event={editingEvent}
                 portalId={portalId}
+                clubEvent={!portalId}
+                defaultAttendance
                 onSaved={(ev) => { handleSaved(ev); setFormOpen(false); }}
                 onCancel={() => setFormOpen(false)}
               />
@@ -339,8 +382,8 @@ export function PortalAttendanceModal({ portalId, open, onOpenChange, canManage 
           <MemberRosterSkeleton />
         ) : events.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-3 py-8">
-            <p className="text-sm text-muted-foreground">No events yet.</p>
-            {canManage && (
+            <p className="text-sm text-muted-foreground">No events to take attendance for yet.</p>
+            {canEdit && (
               <Button size="sm" variant="outline" onClick={openCreate}>
                 <Plus size={14} /> Add event
               </Button>
@@ -378,21 +421,23 @@ export function PortalAttendanceModal({ portalId, open, onOpenChange, canManage 
                         <EventHeaderCell
                           key={ev.id}
                           ev={ev}
-                          onEdit={() => openEdit(ev)}
-                          onDelete={() => deleteEvent(ev)}
+                          onEdit={canEdit ? () => openEdit(ev) : undefined}
+                          onDelete={canEdit ? () => deleteEvent(ev) : undefined}
                         />
                       ))}
                       {/* Add-event column: a "+" to the right of the most recent event. */}
-                      <th className="sticky top-0 z-20 bg-background border-b px-1 py-2 align-bottom w-12">
-                        <button
-                          onClick={openCreate}
-                          aria-label="Add event"
-                          title="Add event"
-                          className="mx-auto flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-                        >
-                          <Plus size={16} />
-                        </button>
-                      </th>
+                      {canEdit && (
+                        <th className="sticky top-0 z-20 bg-background border-b px-1 py-2 align-bottom w-12">
+                          <button
+                            onClick={openCreate}
+                            aria-label="Add event"
+                            title="Add event"
+                            className="mx-auto flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                          >
+                            <Plus size={16} />
+                          </button>
+                        </th>
+                      )}
                     </tr>
                   </thead>
                   <tbody>

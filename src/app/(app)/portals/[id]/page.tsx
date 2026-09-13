@@ -154,7 +154,7 @@ function PortalDetail() {
         <div className="flex-1 min-w-0" />
 
         <div className="w-full lg:w-80 lg:flex-shrink-0 order-first lg:order-none">
-          <CalendarPanel portalId={portal.id} />
+          <CalendarPanel portalId={portal.id} portalName={portal.name} portalColor={portal.color} />
         </div>
       </div>
 
