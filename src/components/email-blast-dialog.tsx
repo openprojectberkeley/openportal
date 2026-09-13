@@ -25,11 +25,11 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "acceptances", label: "Acceptances" },
 ];
 
-// Sentinel for "every accepted applicant, regardless of project" in the
+// Sentinel for "every drafted applicant, regardless of project" in the
 // acceptances tab's project picker — same idiom as the applications page.
 const ALL_PROJECTS = "__all__";
 
-// An accepted applicant plus the project they were placed on.
+// A drafted applicant plus the project that confirmed them.
 type Acceptance = Recipient & { project_id: string | null };
 type ProjectOption = { id: string; name: string };
 
@@ -203,8 +203,9 @@ function TabBody({
 
 // VP Tech/President-only dialog that assembles a copyable recipient list plus a
 // matching script for one of three cohorts — every active member, everyone with
-// an empty/unfinished application this period, and this period's acceptances
-// (per project, or all of them). It never sends anything.
+// an empty/unfinished application this period, and everyone this period's draft
+// confirmed (per project, or all of them), who are the people the acceptance
+// letter goes out to. It never sends anything.
 export function EmailBlastDialog({
   open,
   onOpenChange,
@@ -260,19 +261,45 @@ export function EmailBlastDialog({
     setDrafts((data ?? []) as Recipient[]);
   }, [period.id]);
 
-  // This period's acceptances. `accepted_project_id` is the authoritative
-  // placement (written by accept_application, whether from the review modal or
-  // complete_draft) -- project_members would also include earlier cycles.
+  // Who this period's confirmation email goes to: everyone holding a CONFIRMED
+  // draft pick, addressed by the project whose column they sit in. Not
+  // `applications.status = 'accepted'` -- since 0092 that means the applicant
+  // has already answered yes, i.e. the opposite of who still needs the letter
+  // (and complete_draft no longer places anyone, so it would be empty anyway).
+  // Anyone already marked rejected has declined and is dropped.
   const loadAcceptances = useCallback(async () => {
     const supabase = createClient();
+    // Same nested shape as the ?project=all board's loadAll -- one round trip
+    // for the period's whole draft.
     const { data, error: err } = await supabase
-      .from("applications")
-      .select("applicant_id, accepted_project_id")
-      .eq("period_id", period.id)
-      .eq("status", "accepted");
+      .from("draft_round_projects")
+      .select("project_id, submitted_at, draft_rounds!inner(period_id), draft_picks(application_id)")
+      .eq("draft_rounds.period_id", period.id);
     if (err) { setError(err.message); setAcceptances([]); return; }
-    const rows = (data ?? []) as { applicant_id: string; accepted_project_id: string | null }[];
-    const ids = [...new Set(rows.map((r) => r.applicant_id))];
+    const rounds = (data ?? []) as unknown as {
+      project_id: string;
+      submitted_at: string | null;
+      draft_picks: { application_id: string }[];
+    }[];
+
+    // Application id -> the project that confirmed it. A staged pick is still
+    // just a proposal, so only submitted round-projects count; the claimed
+    // check (0088) means at most one project can confirm the same applicant,
+    // and first-wins keeps a stray duplicate from double-listing them.
+    const projectByAppId = new Map<string, string>();
+    for (const rp of rounds) {
+      if (!rp.submitted_at) continue;
+      for (const pick of rp.draft_picks ?? []) {
+        if (!projectByAppId.has(pick.application_id)) projectByAppId.set(pick.application_id, rp.project_id);
+      }
+    }
+
+    const appRows = await selectInChunks<{ id: string; applicant_id: string; status: string }>(
+      [...projectByAppId.keys()],
+      (chunk) => supabase.from("applications").select("id, applicant_id, status").in("id", chunk),
+    );
+    const drafted = appRows.filter((a) => a.status !== "rejected");
+    const ids = [...new Set(drafted.map((a) => a.applicant_id))];
 
     const [emailRows, projectRows] = await Promise.all([
       selectInChunks<{ user_id: string; email: string | null }>(ids, (chunk) =>
@@ -282,15 +309,14 @@ export function EmailBlastDialog({
     ]);
     const emailById = new Map(emailRows.map((m) => [m.user_id, m.email]));
 
-    setAcceptances(
-      rows.map((r) => ({
-        user_id: r.applicant_id,
-        email: emailById.get(r.applicant_id) ?? null,
-        project_id: r.accepted_project_id,
-      })),
-    );
-    // Only offer projects that actually took someone this period.
-    const placed = new Set(rows.map((r) => r.accepted_project_id).filter(Boolean));
+    const rows = drafted.map((a) => ({
+      user_id: a.applicant_id,
+      email: emailById.get(a.applicant_id) ?? null,
+      project_id: projectByAppId.get(a.id) ?? null,
+    }));
+    setAcceptances(rows);
+    // Only offer projects that actually drafted someone this period.
+    const placed = new Set(rows.map((r) => r.project_id).filter(Boolean));
     setProjects(
       ((projectRows.data ?? []) as ProjectOption[]).filter((p) => placed.has(p.id)),
     );
@@ -367,13 +393,13 @@ export function EmailBlastDialog({
               error={error}
               intro={
                 allProjects
-                  ? "Everyone accepted onto a project this period."
-                  : `Everyone accepted onto ${selectedProjectName ?? "this project"}.`
+                  ? "Everyone drafted onto a project this period, minus anyone who has already declined."
+                  : `Everyone drafted onto ${selectedProjectName ?? "this project"}, minus anyone who has already declined.`
               }
               emptyLabel={
                 allProjects
-                  ? "Nobody has been accepted for this period yet."
-                  : "Nobody has been accepted onto this project yet."
+                  ? "Nobody has been drafted for this period yet."
+                  : "Nobody has been drafted onto this project yet."
               }
               script={buildAcceptanceScript(period.name, allProjects ? null : selectedProjectName)}
             >

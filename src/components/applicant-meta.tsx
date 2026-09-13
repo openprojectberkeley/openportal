@@ -74,12 +74,17 @@ export function ApplicantMeta({
   rank,
   showRecruitingStatus,
   compact,
+  hideStatus,
 }: {
   app: AppRow;
   periodEndsAt: string | undefined;
   rank?: boolean;
   // Coffee chat + infosession indicators. Off by default so drafting cards stay dense.
   showRecruitingStatus?: boolean;
+  // Drop the Accepted/Rejected badge. For a card that already carries the same
+  // word somewhere else -- the draft board's outcome chip -- so the two don't
+  // say it twice.
+  hideStatus?: boolean;
   // Dense one-line variant (the exec draft board's 300px columns): returning /
   // late move in behind showRecruitingStatus so the row only ever carries the
   // name, its status, and whatever the viewer explicitly asked to see.
@@ -96,7 +101,7 @@ export function ApplicantMeta({
           {rankLabel(app.rank).split(" ")[0]}
         </span>
       )}
-      <StatusBadge status={app.status} />
+      {!hideStatus && <StatusBadge status={app.status} />}
       {!compact && (
         <>
           <ReturningIndicator returning={app.returning} />
@@ -176,6 +181,16 @@ export type ApplicantCardActions = {
   // veil, so it costs the card no layout width. Anything interactive in here
   // must stop propagation -- the card root's onClick opens review.
   overlayExtra?: React.ReactNode;
+  // Pull `overlayExtra` out of the hover overlay and into the card's own row,
+  // at its right edge, visible at rest. For a control that IS the card's
+  // resting state rather than an action on it -- the draft board pins the
+  // outcome chip once an applicant has answered, in place of the status badge
+  // `hideStatus` then drops. Assumes the card carries no other overlay action
+  // (the board's don't): those still live under the veil, which would cover a
+  // pinned control on hover.
+  pinExtra?: boolean;
+  // Drop the card's own Accepted/Rejected badge -- see ApplicantMeta.
+  hideStatus?: boolean;
 };
 
 // Small helper so a button living on a draggable card doesn't start a drag,
@@ -227,6 +242,8 @@ function ApplicantCardInner({
   showRecruitingStatus,
   compact,
   overlayExtra,
+  pinExtra,
+  hideStatus,
   shimmer,
   claimedBy,
   onAddToWishlist,
@@ -240,9 +257,12 @@ function ApplicantCardInner({
   const invalid = !app.valid;
   const reasons = invalid ? invalidReasons(app) : [];
   const claimed = !!claimedBy;
+  // A pinned extra sits in the row instead of the overlay, so on a card whose
+  // only overlay content was that extra there is no overlay left to build.
+  const pinned = !!(pinExtra && overlayExtra);
   // Claimed applicants can't be drafted, but wishlist add/remove still works.
   const hasOverlay = !!(
-    overlayExtra
+    (!pinned && overlayExtra)
     || onAddToWishlist
     || onWishlistToggle
     || (!claimed && showAddToDraft && onAddToDraft)
@@ -274,6 +294,7 @@ function ApplicantCardInner({
           rank={showRank}
           showRecruitingStatus={showRecruitingStatus}
           compact={compact}
+          hideStatus={hideStatus}
         />
       </div>
 
@@ -291,6 +312,11 @@ function ApplicantCardInner({
           <Star size={14} className="fill-amber-500" />
         </span>
       )}
+
+      {/* Always-visible control at the card's right edge, where the overlay
+          would have put it -- but in flow, so the name truncates against it
+          instead of sliding underneath. */}
+      {pinned && <div className="shrink-0">{overlayExtra}</div>}
 
       {/* Its own clipping wrapper rather than overflow-hidden on the card root,
           which would also clip the invalid-applicant tooltip above the card. */}

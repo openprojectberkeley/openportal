@@ -6,14 +6,15 @@
 // and staged/confirmed in a single list.
 //
 // This is also where drafting is finished, so it is no longer read-only: each
-// card carries a hover menu that sets the applicant's outcome (Drafted /
-// Accepted / Rejected) or moves them to another project, and each column ends
-// in an add-member card. All three go through the exec-only RPCs from
-// migration 0091 -- RLS makes a client-side move impossible by design (no
-// UPDATE policy on draft_picks, DELETE only while a round is unsubmitted).
+// card carries a hover menu that records the applicant's answer to the
+// confirmation we sent them (Drafted / Accepted / Rejected) or moves them to
+// another project, and each column ends in an add-member card. All three go
+// through the exec-only RPCs from migration 0091 -- RLS makes a client-side
+// move impossible by design (no UPDATE policy on draft_picks, DELETE only
+// while a round is unsubmitted).
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, Plus, Table2, UserPlus, UserSearch } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -25,6 +26,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
@@ -49,8 +51,12 @@ import {
   type RosterRow,
 } from "@/lib/use-all-projects-board";
 
-// The three states the per-card menu cycles between. "drafted" is the default:
-// picked, but nobody has decided their outcome yet.
+// The three states the per-card menu cycles between, and all three are THEIR
+// decision, not ours: we draft, we email the confirmation, they answer.
+// "drafted" is the default -- sent, no reply yet. "accepted" is the only one
+// that does anything: it makes them an official member of this column's
+// project (accept_application, 0057). "rejected" is a label; nothing else
+// happens on it yet (0092).
 type Outcome = "drafted" | "accepted" | "rejected";
 
 const OUTCOME_LABEL: Record<Outcome, string> = {
@@ -65,6 +71,33 @@ function outcomeOf(card: BoardCard, projectId: string): Outcome {
   return "drafted";
 }
 
+// The board's rows with any in-flight outcome click already applied. Clicking
+// the menu repaints the chip immediately instead of waiting for the RPC and the
+// reload behind it; patching the rows here (rather than threading an override
+// down to the chip) keeps outcomeOf the single definition of what a card shows,
+// so the colour, pinned-vs-hover-only, and the card's own status badge all
+// follow from the same place. Reverted by the caller if the RPC says no.
+function withPendingOutcomes(
+  columns: BoardColumn[] | null,
+  pending: Record<string, Outcome>,
+): BoardColumn[] | null {
+  if (!columns || Object.keys(pending).length === 0) return columns;
+  return columns.map((column) => ({
+    ...column,
+    picks: column.picks.map((card) => {
+      const outcome = pending[card.pickId];
+      if (!outcome) return card;
+      return {
+        ...card,
+        // Mirrors what set_draft_outcome writes: 'drafted' is back to
+        // undecided, and only an accept carries a placement.
+        app: { ...card.app, status: outcome === "drafted" ? "submitted" : outcome },
+        acceptedProjectId: outcome === "accepted" ? column.project.id : null,
+      };
+    }),
+  }));
+}
+
 // Clicks inside the card must not reach the card root, whose onClick opens the
 // review modal -- same helper the card's own overlay buttons use.
 const stopClick = {
@@ -74,6 +107,8 @@ const stopClick = {
 
 // The hover menu itself. Lives in the card's overlay slot, so it takes no
 // layout width and rides the same gradient veil as the card's other actions.
+// The labels are deliberately the bare words -- the tooltip and the menu's own
+// heading are what say whose decision they record.
 function CardMenu({
   card,
   project,
@@ -95,6 +130,11 @@ function CardMenu({
   // still just "Drafted". Say so on the chip rather than letting the two read
   // as a contradiction.
   const elsewhere = card.app.status === "accepted" && card.acceptedProjectId !== project.id;
+  const explain: Record<Outcome, string> = {
+    drafted: "Drafted — confirmation sent, no reply yet",
+    accepted: `Accepted — they took the offer; now a member of ${project.name}`,
+    rejected: "Rejected — they turned the offer down",
+  };
   return (
     <div {...stopClick} className="shrink-0">
       <DropdownMenu>
@@ -106,13 +146,16 @@ function CardMenu({
               : outcome === "rejected" ? "bg-destructive hover:bg-destructive"
               : ""
             } ${busy ? "opacity-50" : ""}`}
-            title={elsewhere ? "Accepted onto another project" : `Outcome: ${OUTCOME_LABEL[outcome]}`}
+            title={elsewhere ? "Accepted onto another project" : explain[outcome]}
           >
             <ChevronDown size={12} className="opacity-70" />
             {OUTCOME_LABEL[outcome]}
           </Badge>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="max-h-72">
+          <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+            Their response
+          </DropdownMenuLabel>
           {(["drafted", "accepted", "rejected"] as Outcome[]).map((value) => (
             <DropdownMenuItem key={value} onSelect={() => onOutcome(value)}>
               {outcome === value ? <Check size={14} className="mr-2" /> : <span className="mr-2 w-3.5" />}
@@ -216,32 +259,43 @@ function ProjectColumn({
         {picks.length === 0 ? (
           <EmptySection>No one drafted yet.</EmptySection>
         ) : (
-          picks.map((card) => (
-            <StaticApplicantCard
-              key={card.pickId}
-              app={card.app}
-              compact
-              // A confirmed pick wears the project's accent; one still sitting
-              // in an unsubmitted window keeps the draft window's white, so
-              // nothing is hidden but the two still read differently.
-              accent={card.submitted ? accent : null}
-              staged={!card.submitted}
-              periodEndsAt={periodEndsAt}
-              showRank
-              showRecruitingStatus={showRecruitingStatus}
-              onReview={review}
-              overlayExtra={
-                <CardMenu
-                  card={card}
-                  project={project}
-                  moveTargets={moveTargets}
-                  busy={busyPickId === card.pickId}
-                  onOutcome={(outcome) => onOutcome(card, project.id, outcome)}
-                  onMove={(toProjectId) => onMove(card, toProjectId)}
-                />
-              }
-            />
-          ))
+          picks.map((card) => {
+            // Once someone has answered, the chip stops being a hover action and
+            // becomes the card's resting state: it moves into the row and stays
+            // put, and the card's own Accepted/Rejected badge comes off, since
+            // the chip says the same word in the same colour. Still "drafted"
+            // (including accepted onto some OTHER project, which outcomeOf reads
+            // as drafted here) keeps both the hover-only chip and the badge.
+            const decided = outcomeOf(card, project.id) !== "drafted";
+            return (
+              <StaticApplicantCard
+                key={card.pickId}
+                app={card.app}
+                compact
+                // A confirmed pick wears the project's accent; one still sitting
+                // in an unsubmitted window keeps the draft window's white, so
+                // nothing is hidden but the two still read differently.
+                accent={card.submitted ? accent : null}
+                staged={!card.submitted}
+                periodEndsAt={periodEndsAt}
+                showRank
+                showRecruitingStatus={showRecruitingStatus}
+                onReview={review}
+                pinExtra={decided}
+                hideStatus={decided}
+                overlayExtra={
+                  <CardMenu
+                    card={card}
+                    project={project}
+                    moveTargets={moveTargets}
+                    busy={busyPickId === card.pickId}
+                    onOutcome={(outcome) => onOutcome(card, project.id, outcome)}
+                    onMove={(toProjectId) => onMove(card, toProjectId)}
+                  />
+                }
+              />
+            );
+          })
         )}
 
         {/* Same geometry as a compact card, dashed: an empty slot to fill. */}
@@ -379,11 +433,19 @@ export function AllProjectsBoard({
   // can refresh what it owns (period stats, the sheet view).
   onMutated?: () => void;
 }) {
-  const { columns, draftProjectIds, error, reload } = useAllProjectsBoard(periodId, true, reloadToken);
+  const { columns: loadedColumns, draftProjectIds, error, reload } = useAllProjectsBoard(periodId, true, reloadToken);
+  // Outcome clicks that haven't come back from the database yet, by pick.
+  const [pendingOutcome, setPendingOutcome] = useState<Record<string, Outcome>>({});
+  const columns = useMemo(() => withPendingOutcomes(loadedColumns, pendingOutcome), [loadedColumns, pendingOutcome]);
+  // Per-pick click counter, so a slow answer to an earlier click can't clear
+  // (or report an error over) the chip a later click is already showing.
+  const outcomeSeq = useRef(new Map<string, number>());
   // Which project's add-member picker is open, and its search text.
   const [addFor, setAddFor] = useState<BoardProject | null>(null);
   const [addFilter, setAddFilter] = useState("");
   // The pick currently mid-RPC -- its menu greys out until the reload lands.
+  // Only move/add use it: an outcome repaints optimistically instead, so its
+  // menu stays live and undimmed throughout.
   const [busyPickId, setBusyPickId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const { applicants, load: loadApplicants } = usePeriodApplicants(periodId);
@@ -427,16 +489,49 @@ export function AllProjectsBoard({
     [reload, onMutated],
   );
 
+  const clearPending = useCallback((pickId: string) => {
+    setPendingOutcome((prev) => {
+      if (!(pickId in prev)) return prev;
+      const next = { ...prev };
+      delete next[pickId];
+      return next;
+    });
+  }, []);
+
+  // Unlike move/add this doesn't go through `run`: the chip changes on click
+  // and the RPC catches up behind it. The reload still happens (set_draft_outcome
+  // writes applications/project_members, which realtime doesn't carry), and
+  // clearing the pending entry afterwards hands the chip back to loaded data
+  // that already says the same thing. A failure puts it back where it was and
+  // shows why.
   const setOutcome = useCallback(
-    (card: BoardCard, projectId: string, outcome: Outcome) =>
-      run(card.pickId, () =>
-        createClient().rpc("set_draft_outcome", {
-          p_application_id: card.app.id,
-          p_project_id: projectId,
-          p_outcome: outcome,
-        }),
-      ),
-    [run],
+    async (card: BoardCard, projectId: string, outcome: Outcome) => {
+      const pickId = card.pickId;
+      const seq = (outcomeSeq.current.get(pickId) ?? 0) + 1;
+      outcomeSeq.current.set(pickId, seq);
+      setActionError(null);
+      setPendingOutcome((prev) => ({ ...prev, [pickId]: outcome }));
+
+      const { error: rpcError } = await createClient().rpc("set_draft_outcome", {
+        p_application_id: card.app.id,
+        p_project_id: projectId,
+        p_outcome: outcome,
+      });
+      // A later click on this same card owns the chip now; let its own call
+      // finish the job.
+      if (outcomeSeq.current.get(pickId) !== seq) return;
+
+      if (rpcError) {
+        setActionError(rpcError.message || "That didn't work.");
+        clearPending(pickId);
+        return;
+      }
+      await reload();
+      if (outcomeSeq.current.get(pickId) !== seq) return;
+      clearPending(pickId);
+      onMutated?.();
+    },
+    [reload, onMutated, clearPending],
   );
 
   const movePick = useCallback(

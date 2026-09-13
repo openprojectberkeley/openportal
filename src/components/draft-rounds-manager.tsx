@@ -63,9 +63,9 @@ type Project = { id: string; name: string } & ProjectMeta;
 const PROJECT_COLS = "id, name, icon, icon_url, color, type, client, description, difficulty, estimated_members, num_subteams";
 
 // Who the draft can actually touch. Rejected applicants are excluded outright:
-// draft_picks_guard refuses to stage them and complete_draft skips them
-// (0083_draft_exclude_rejected.sql), so counting them would inflate every
-// total past what the draft can ever reach.
+// draft_picks_guard refuses to stage them and their kept picks hold no slot
+// (0083_draft_exclude_rejected.sql, 0091), so counting them would inflate
+// every total past what the draft can ever reach.
 const DRAFT_ELIGIBLE_STATUSES = ["submitted", "accepted"] as const;
 
 // A project's participation in one round: its draft position and how many
@@ -529,10 +529,11 @@ export function DraftRoundsManager() {
   };
 
   // Wipes every staged/confirmed pick for the period and un-submits every
-  // round before clearing the position -- since placement is deferred to
-  // completeDraft(), nothing on applications/project_members needs
-  // undoing here; a reset genuinely sends everyone back to plain
-  // applicants. Goes through the RPC (not a plain draft_state upsert)
+  // round before clearing the position -- since placement only happens when an
+  // applicant is marked Accepted on the ?project=all board (0092), nothing on
+  // applications/project_members needs undoing here; a reset genuinely sends
+  // everyone back to plain applicants. Goes through the RPC (not a plain
+  // draft_state upsert)
   // because RLS blocks deleting draft_picks under an already-submitted
   // round for anyone but this SECURITY DEFINER function.
   const resetDraft = async () => {
@@ -548,8 +549,9 @@ export function DraftRoundsManager() {
     }
   };
 
-  // Places every confirmed pick in the period onto its project for real
-  // (accept_application under the hood) and locks the draft as completed.
+  // Locks the draft as completed. Since 0092 that is all it does: nobody is
+  // placed here, because the outcome is the applicant's answer to their
+  // confirmation, which only arrives after the draft is over.
   const completeDraft = async () => {
     if (!selectedPeriodId) return;
     setWorking(true);
@@ -1000,7 +1002,7 @@ export function DraftRoundsManager() {
             ? "Every staged and confirmed pick this draft is cleared and every round un-submitted. Applicants go back to being plain applicants — nothing has been placed on a project yet, so there's nothing to undo there. Round order and pick counts are unaffected."
           : confirmTarget?.kind === "unsubmit"
             ? "This project's confirmed picks for this round go back to staged. Nothing is deleted — round order, pick counts, and every other project are unaffected."
-            : "Places every confirmed pick onto its project for real (same as accepting them manually) and locks the draft. This can't be undone from here."
+            : "Locks the draft so picks can no longer change. Nobody is placed on a project yet — each person becomes a member when you mark them Accepted on the board, after they reply to their confirmation. This can't be undone from here."
         }
         confirmLabel={
           confirmTarget?.kind === "round" ? "Delete round"
