@@ -42,6 +42,7 @@ import { ApplicationListSkeleton } from "@/components/skeletons";
 import { createClient } from "@/lib/supabase/client";
 import { DEFAULT_ACCENT, accentStyle, readableTextColor } from "@/lib/portal-color";
 import {
+  useAddableMembers,
   useAllProjectsBoard,
   usePeriodApplicants,
   usePeriodRoster,
@@ -50,6 +51,7 @@ import {
   type BoardProject,
   type RosterRow,
 } from "@/lib/use-all-projects-board";
+import type { PickableMember } from "@/components/applicant-picker-dialog";
 
 // The three states the per-card menu cycles between, and all three are THEIR
 // decision, not ours: we draft, we email the confirmation, they answer.
@@ -449,6 +451,9 @@ export function AllProjectsBoard({
   const [busyPickId, setBusyPickId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const { applicants, load: loadApplicants } = usePeriodApplicants(periodId);
+  // The same search box also looks for accounts that never applied (0096).
+  // Only runs while the picker is actually open.
+  const addableMembers = useAddableMembers(periodId, addFilter, !!addFor);
   // The "not drafted" list: everyone the draft hasn't placed yet.
   const [undraftedOpen, setUndraftedOpen] = useState(false);
   const [undraftedFilter, setUndraftedFilter] = useState("");
@@ -552,6 +557,25 @@ export function AllProjectsBoard({
           p_period_id: periodId,
           p_project_id: projectId,
           p_application_id: applicationId,
+        }),
+      );
+    },
+    [periodId, run],
+  );
+
+  // Someone with no application: the RPC creates their application row (or
+  // submits the draft they abandoned) and then places the pick, so from here it
+  // is the same one-shot mutation as addPick and reloads the board the same way.
+  const addMember = useCallback(
+    async (projectId: string, userId: string) => {
+      if (!periodId) return;
+      setAddFor(null);
+      setAddFilter("");
+      await run(null, () =>
+        createClient().rpc("add_member_to_draft", {
+          p_period_id: periodId,
+          p_project_id: projectId,
+          p_user_id: userId,
         }),
       );
     },
@@ -695,6 +719,13 @@ export function AllProjectsBoard({
           filter={addFilter}
           onFilterChange={setAddFilter}
           onPick={(applicationId) => addPick(addFor.id, applicationId)}
+          memberPicker={{
+            members: addableMembers.members,
+            searching: addableMembers.searching,
+            tooShort: addableMembers.tooShort,
+            minChars: addableMembers.minChars,
+            onPick: (m: PickableMember) => addMember(addFor.id, m.user_id),
+          }}
           onClose={() => { setAddFor(null); setAddFilter(""); }}
         />
       )}

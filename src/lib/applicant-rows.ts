@@ -25,6 +25,10 @@ export type BaseAppRow = {
   submitted_at: string | null;
   applicant_id: string | null;
   rank: number;
+  // 0096: an exec added this person to the draft; they never applied. Optional
+  // because callers whose query can't return one (anything joining
+  // application_rankings!inner -- these rows have no rankings) needn't select it.
+  exec_added?: boolean | null;
 };
 
 /**
@@ -129,7 +133,7 @@ export async function enrichAppRows(
     }
   }
 
-  return rows.map(({ applicant_id, ...r }) => {
+  return rows.map(({ applicant_id, exec_added, ...r }) => {
     const coffee: CoffeeState = (applicant_id && coffeeById[applicant_id]) || "none";
     const returning = !!applicant_id && !!returningById[applicant_id];
     const infosession = !!applicant_id && attendedInfo.has(applicant_id);
@@ -145,6 +149,7 @@ export async function enrichAppRows(
       infosession,
       valid: isRecruitingValid({ boardExec, returning, coffeeDone: coffee === "done", infosession }),
       wishlistedBy: wishlistedById[r.id] ?? [],
+      execAdded: !!exec_added,
     };
   });
 }

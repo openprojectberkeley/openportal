@@ -1,6 +1,6 @@
 "use client";
 
-import { Coffee, Check, Clock, Presentation, FileCheck, AlertTriangle, Star } from "lucide-react";
+import { Coffee, Check, Clock, Presentation, FileCheck, FileQuestion, AlertTriangle, Star } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn, isLate, daysLate } from "@/lib/utils";
@@ -58,6 +58,29 @@ export function InfosessionIndicator({ attended }: { attended?: boolean | null }
       <Presentation size={14} />
       <Check size={12} className="stroke-[3]" />
     </span>
+  );
+}
+
+// Slate "No application" pill for someone an exec added to the draft board
+// directly (applications.exec_added, 0096). Their card has no rank, no essays
+// and no answers -- this says why, so an empty review sheet doesn't read as a
+// loading bug. Renders null for everyone else, so it can sit in a badge cluster
+// unconditionally.
+export function NoApplicationIndicator({ execAdded }: { execAdded?: boolean | null }) {
+  if (!execAdded) return null;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Badge variant="outline" className="shrink-0 gap-1 border-dashed text-muted-foreground">
+          <FileQuestion size={11} />
+          No application
+        </Badge>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="max-w-[16rem]">
+        Added to the draft by an exec. They never submitted a written application, so there are no
+        rankings or essays to review.
+      </TooltipContent>
+    </Tooltip>
   );
 }
 

@@ -7,7 +7,7 @@ import { AlertTriangle, GripVertical, RotateCcw, Star, UserPlus, X } from "lucid
 import { PersonName } from "@/components/person-profile-provider";
 import { Badge } from "@/components/ui/badge";
 import type { ReviewStatus } from "@/components/application-review-modal";
-import { CoffeeChatIndicator, InfosessionIndicator, LateBadge, WishlistedByIndicator, type CoffeeState, type WishlistProject } from "@/components/applicant-indicators";
+import { CoffeeChatIndicator, InfosessionIndicator, LateBadge, NoApplicationIndicator, WishlistedByIndicator, type CoffeeState, type WishlistProject } from "@/components/applicant-indicators";
 import { rankLabel } from "@/lib/application-rank";
 import { accentStyle } from "@/lib/portal-color";
 
@@ -32,6 +32,9 @@ export type AppRow = {
   // Other projects that have shortlisted this applicant (excludes the viewer's
   // currently selected project). Empty when nobody else has them wishlisted.
   wishlistedBy: WishlistProject[];
+  // An exec put this person on the draft board without an application of their
+  // own (0096). Their row carries no rankings, essays or answers.
+  execAdded: boolean;
 };
 
 export function applicantName(a: AppRow): string {
@@ -102,10 +105,13 @@ export function ApplicantMeta({
         </span>
       )}
       {!hideStatus && <StatusBadge status={app.status} />}
+      {/* Always shown, compact included: it is the only thing explaining an
+          otherwise empty application, and these cards live on the dense board. */}
+      <NoApplicationIndicator execAdded={app.execAdded} />
       {!compact && (
         <>
           <ReturningIndicator returning={app.returning} />
-          <LateBadge submittedAt={app.submitted_at} endsAt={periodEndsAt} />
+          {!app.execAdded && <LateBadge submittedAt={app.submitted_at} endsAt={periodEndsAt} />}
         </>
       )}
       <WishlistedByIndicator projects={app.wishlistedBy} />
@@ -114,7 +120,10 @@ export function ApplicantMeta({
           {compact && (
             <>
               <ReturningIndicator returning={app.returning} />
-              <LateBadge submittedAt={app.submitted_at} endsAt={periodEndsAt} />
+              {/* An exec-added row is stamped at the moment it was created, which
+                  is all but guaranteed to be after the deadline. "Late" would be
+                  reading a timestamp that was never a submission. */}
+              {!app.execAdded && <LateBadge submittedAt={app.submitted_at} endsAt={periodEndsAt} />}
             </>
           )}
           <CoffeeChatIndicator state={app.coffee} withNames={app.coffeeWith} />
