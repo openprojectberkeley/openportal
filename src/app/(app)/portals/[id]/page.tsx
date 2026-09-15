@@ -13,6 +13,7 @@ import { PortalSettingsModal } from "@/components/portal-settings-modal";
 import { PortalMembersModal } from "@/components/portal-members-modal";
 import { PortalAttendanceModal } from "@/components/portal-attendance-modal";
 import { PortalDefaultIcon } from "@/components/portal-default-icon";
+import { PortalContent } from "@/components/portal-content";
 
 type Portal = {
   id: string;
@@ -21,6 +22,7 @@ type Portal = {
   icon: string | null;
   icon_url: string | null;
   color: string | null;
+  content: string | null;
 };
 
 // useParams() reads uncached route data; cacheComponents requires it to sit
@@ -59,7 +61,7 @@ function PortalDetail() {
       // row means no access.
       const { data: portalRow } = await supabase
         .from("portals")
-        .select("id, name, description, icon, icon_url, color")
+        .select("id, name, description, icon, icon_url, color, content")
         .eq("id", portalId)
         .maybeSingle();
 
@@ -150,8 +152,17 @@ function PortalDetail() {
       </div>
 
       <div className="flex flex-col lg:flex-row gap-6">
-        {/* Intentionally blank for now — portal content (tasks, etc.) comes later. */}
-        <div className="flex-1 min-w-0" />
+        {/* min-w-0 is load-bearing: it lets a wide table or long URL inside the
+            markdown page scroll instead of stretching the row and squashing the
+            calendar. */}
+        <div className="flex-1 min-w-0">
+          <PortalContent
+            portalId={portal.id}
+            canEdit={isAdmin}
+            content={portal.content}
+            onSaved={(content) => setPortal((p) => (p ? { ...p, content } : p))}
+          />
+        </div>
 
         <div className="w-full lg:w-80 lg:flex-shrink-0 order-first lg:order-none">
           <CalendarPanel portalId={portal.id} portalName={portal.name} portalColor={portal.color} />

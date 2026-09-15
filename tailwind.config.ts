@@ -49,6 +49,54 @@ export default {
           "5": "hsl(var(--chart-5))",
         },
       },
+      // Point @tailwindcss/typography at this app's own tokens. Its stock
+      // `prose` is a neutral-gray, 16px scale; the app is a tinted HSL palette
+      // at 14px, so without this the markdown page reads as foreign text
+      // pasted onto the page.
+      typography: {
+        DEFAULT: {
+          css: {
+            "--tw-prose-body": "hsl(var(--foreground))",
+            "--tw-prose-headings": "hsl(var(--foreground))",
+            "--tw-prose-lead": "hsl(var(--muted-foreground))",
+            "--tw-prose-links": "hsl(var(--foreground))",
+            "--tw-prose-bold": "hsl(var(--foreground))",
+            "--tw-prose-counters": "hsl(var(--muted-foreground))",
+            "--tw-prose-bullets": "hsl(var(--muted-foreground))",
+            "--tw-prose-hr": "hsl(var(--border))",
+            "--tw-prose-quotes": "hsl(var(--muted-foreground))",
+            "--tw-prose-quote-borders": "hsl(var(--border))",
+            "--tw-prose-captions": "hsl(var(--muted-foreground))",
+            "--tw-prose-code": "hsl(var(--foreground))",
+            "--tw-prose-pre-code": "hsl(var(--foreground))",
+            "--tw-prose-pre-bg": "hsl(var(--muted))",
+            "--tw-prose-th-borders": "hsl(var(--border))",
+            "--tw-prose-td-borders": "hsl(var(--border))",
+            // prose-invert reads the same tokens; the CSS vars in globals.css
+            // already flip under .dark, so both themes resolve correctly.
+            "--tw-prose-invert-body": "hsl(var(--foreground))",
+            "--tw-prose-invert-headings": "hsl(var(--foreground))",
+            "--tw-prose-invert-lead": "hsl(var(--muted-foreground))",
+            "--tw-prose-invert-links": "hsl(var(--foreground))",
+            "--tw-prose-invert-bold": "hsl(var(--foreground))",
+            "--tw-prose-invert-counters": "hsl(var(--muted-foreground))",
+            "--tw-prose-invert-bullets": "hsl(var(--muted-foreground))",
+            "--tw-prose-invert-hr": "hsl(var(--border))",
+            "--tw-prose-invert-quotes": "hsl(var(--muted-foreground))",
+            "--tw-prose-invert-quote-borders": "hsl(var(--border))",
+            "--tw-prose-invert-captions": "hsl(var(--muted-foreground))",
+            "--tw-prose-invert-code": "hsl(var(--foreground))",
+            "--tw-prose-invert-pre-code": "hsl(var(--foreground))",
+            "--tw-prose-invert-pre-bg": "hsl(var(--muted))",
+            "--tw-prose-invert-th-borders": "hsl(var(--border))",
+            "--tw-prose-invert-td-borders": "hsl(var(--border))",
+            // Inline code ships with backtick pseudo-elements; drop them and
+            // give it a chip instead.
+            "code::before": { content: '""' },
+            "code::after": { content: '""' },
+          },
+        },
+      },
       borderRadius: {
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
@@ -72,5 +120,5 @@ export default {
       },
     },
   },
-  plugins: [require("tailwindcss-animate")],
+  plugins: [require("tailwindcss-animate"), require("@tailwindcss/typography")],
 } satisfies Config;

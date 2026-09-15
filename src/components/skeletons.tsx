@@ -74,7 +74,21 @@ export function EventListSkeleton({ count = 2 }: { count?: number }) {
   );
 }
 
-// Mirrors the portal detail page: back link, icon + title, side calendar.
+// Mirrors PortalContent: a few lines of prose filling the main column.
+function PortalContentSkeleton() {
+  return (
+    <div className="flex flex-col gap-2.5">
+      <Skeleton className="h-5 w-48" />
+      <Skeleton className="h-3 w-full" />
+      <Skeleton className="h-3 w-11/12" />
+      <Skeleton className="h-3 w-4/5" />
+      <Skeleton className="h-3 w-full" />
+      <Skeleton className="h-3 w-2/3" />
+    </div>
+  );
+}
+
+// Mirrors the portal detail page: back link, icon + title, page, side calendar.
 export function PortalDetailSkeleton() {
   return (
     <div className="w-full max-w-6xl mx-auto p-5 flex flex-col gap-6">
@@ -84,7 +98,9 @@ export function PortalDetailSkeleton() {
         <Skeleton className="h-9 w-52" />
       </div>
       <div className="flex flex-col lg:flex-row gap-6">
-        <div className="flex-1 min-w-0" />
+        <div className="flex-1 min-w-0">
+          <PortalContentSkeleton />
+        </div>
         <div className="w-full lg:w-80 lg:flex-shrink-0">
           <CalendarSkeleton />
         </div>
