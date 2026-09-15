@@ -42,7 +42,6 @@ import { ApplicationListSkeleton } from "@/components/skeletons";
 import { createClient } from "@/lib/supabase/client";
 import { DEFAULT_ACCENT, accentStyle, readableTextColor } from "@/lib/portal-color";
 import {
-  useAddableMembers,
   useAllProjectsBoard,
   usePeriodApplicants,
   usePeriodRoster,
@@ -51,7 +50,7 @@ import {
   type BoardProject,
   type RosterRow,
 } from "@/lib/use-all-projects-board";
-import type { PickableMember } from "@/components/applicant-picker-dialog";
+import type { AddableMember } from "@/components/applicant-picker-dialog";
 
 // The three states the per-card menu cycles between, and all three are THEIR
 // decision, not ours: we draft, we email the confirmation, they answer.
@@ -444,16 +443,12 @@ export function AllProjectsBoard({
   const outcomeSeq = useRef(new Map<string, number>());
   // Which project's add-member picker is open, and its search text.
   const [addFor, setAddFor] = useState<BoardProject | null>(null);
-  const [addFilter, setAddFilter] = useState("");
   // The pick currently mid-RPC -- its menu greys out until the reload lands.
   // Only move/add use it: an outcome repaints optimistically instead, so its
   // menu stays live and undimmed throughout.
   const [busyPickId, setBusyPickId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const { applicants, load: loadApplicants } = usePeriodApplicants(periodId);
-  // The same search box also looks for accounts that never applied (0096).
-  // Only runs while the picker is actually open.
-  const addableMembers = useAddableMembers(periodId, addFilter, !!addFor);
   // The "not drafted" list: everyone the draft hasn't placed yet.
   const [undraftedOpen, setUndraftedOpen] = useState(false);
   const [undraftedFilter, setUndraftedFilter] = useState("");
@@ -551,7 +546,6 @@ export function AllProjectsBoard({
     async (projectId: string, applicationId: string) => {
       if (!periodId) return;
       setAddFor(null);
-      setAddFilter("");
       await run(null, () =>
         createClient().rpc("add_draft_pick", {
           p_period_id: periodId,
@@ -570,7 +564,6 @@ export function AllProjectsBoard({
     async (projectId: string, userId: string) => {
       if (!periodId) return;
       setAddFor(null);
-      setAddFilter("");
       await run(null, () =>
         createClient().rpc("add_member_to_draft", {
           p_period_id: periodId,
@@ -716,17 +709,12 @@ export function AllProjectsBoard({
           alreadyPicked={
             columns?.find((c) => c.project.id === addFor.id)?.picks.map((card) => card.app.id) ?? []
           }
-          filter={addFilter}
-          onFilterChange={setAddFilter}
           onPick={(applicationId) => addPick(addFor.id, applicationId)}
-          memberPicker={{
-            members: addableMembers.members,
-            searching: addableMembers.searching,
-            tooShort: addableMembers.tooShort,
-            minChars: addableMembers.minChars,
-            onPick: (m: PickableMember) => addMember(addFor.id, m.user_id),
+          memberSearch={{
+            periodId,
+            onPick: (m: AddableMember) => addMember(addFor.id, m.user_id),
           }}
-          onClose={() => { setAddFor(null); setAddFilter(""); }}
+          onClose={() => setAddFor(null)}
         />
       )}
 

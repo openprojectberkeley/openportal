@@ -281,58 +281,6 @@ export function usePeriodApplicants(periodId: string | null) {
   return { applicants, load };
 }
 
-// The other half of the add-member picker: accounts with NO application in play
-// this period (0096), so the board can draft someone who never applied.
-//
-// Server-side search rather than a fetched list, because the candidate set is
-// "every account that didn't apply" -- most of the members table, and most of it
-// irrelevant. search_addable_members is exec-gated, returns nothing under two
-// characters, and caps at 50 rows; this hook just debounces the typing and drops
-// results that arrive out of order.
-export type AddableMember = {
-  user_id: string;
-  name: string | null;
-  email: string | null;
-  // They started an application this period and never submitted it. Adding them
-  // submits what they had rather than discarding it, so the picker says so.
-  has_draft: boolean;
-};
-
-const MEMBER_SEARCH_MIN = 2;
-const MEMBER_SEARCH_DEBOUNCE_MS = 250;
-
-export function useAddableMembers(periodId: string | null, query: string, enabled: boolean) {
-  const [members, setMembers] = useState<AddableMember[] | null>(null);
-  const [searching, setSearching] = useState(false);
-  const genRef = useRef(0);
-
-  const needle = query.trim();
-  const tooShort = needle.length < MEMBER_SEARCH_MIN;
-
-  useEffect(() => {
-    // ++ on every run, so a request in flight for older text can never land.
-    const gen = ++genRef.current;
-    if (!enabled || !periodId || tooShort) {
-      setMembers(null);
-      setSearching(false);
-      return;
-    }
-    setSearching(true);
-    const timer = setTimeout(async () => {
-      const { data, error } = await createClient().rpc("search_addable_members", {
-        p_period_id: periodId,
-        p_query: needle,
-      });
-      if (gen !== genRef.current) return;
-      setMembers(error ? [] : ((data ?? []) as AddableMember[]));
-      setSearching(false);
-    }, MEMBER_SEARCH_DEBOUNCE_MS);
-    return () => clearTimeout(timer);
-  }, [periodId, needle, tooShort, enabled]);
-
-  return { members, searching, tooShort, minChars: MEMBER_SEARCH_MIN };
-}
-
 // The period's draft-eligible roster, enriched exactly like a board card, so
 // the "not drafted" list can show the same recruiting indicators the columns
 // do. Kept apart from `usePeriodApplicants` (which only needs id + name for

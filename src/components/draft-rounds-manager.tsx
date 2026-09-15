@@ -157,7 +157,6 @@ export function DraftRoundsManager() {
   const [periodApplicants, setPeriodApplicants] = useState<PeriodApplicant[] | null>(null);
   // Period-wide applicant count for the "confirmed / total applications" counter.
   const [applicationCount, setApplicationCount] = useState<number | null>(null);
-  const [addFilter, setAddFilter] = useState("");
   // Recruiting flags (infosesh / coffee / returning / board-exec) barely change
   // during a live draft; cache per period so realtime refreshes don't re-hit
   // the fat attendance/coffee queries on every tick.
@@ -611,7 +610,6 @@ export function DraftRoundsManager() {
   }, [ensureRecruitingFlags]);
 
   const openAddManually = (roundProjectId: string, projectId: string, projectName: string) => {
-    setAddFilter("");
     setAddTarget({ roundProjectId, projectId, projectName });
     if (selectedPeriodId) loadPeriodApplicants(selectedPeriodId);
   };
@@ -1027,8 +1025,6 @@ export function DraftRoundsManager() {
           title={`Add to ${addTarget.projectName}`}
           applicants={periodApplicants}
           alreadyPicked={boardRows[addTarget.roundProjectId]?.appIds ?? []}
-          filter={addFilter}
-          onFilterChange={setAddFilter}
           onPick={addApplicantManually}
           onClose={() => setAddTarget(null)}
         />

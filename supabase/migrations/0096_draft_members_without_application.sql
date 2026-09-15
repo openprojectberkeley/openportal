@@ -130,9 +130,8 @@ $$;
 -- Exec-only, so the endpoint comes off the unauthenticated surface. It has to
 -- be revoked from PUBLIC, not just anon: Postgres's default ACL on a new
 -- function is a PUBLIC grant, and `revoke ... from anon` leaves that standing --
--- has_function_privilege('anon', ...) still returns true. (The 0091 RPCs revoke
--- anon only and are still PUBLIC-executable today for exactly this reason; they
--- raise 'not authorized' internally, so it is exposure rather than a hole.)
+-- has_function_privilege('anon', ...) still returns true. Every RPC written
+-- before this one had that bug; 0097 sweeps them.
 revoke execute on function public.search_addable_members(uuid, text) from public, anon;
 grant execute on function public.search_addable_members(uuid, text) to authenticated;
 
