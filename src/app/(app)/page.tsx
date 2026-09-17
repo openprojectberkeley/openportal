@@ -9,6 +9,7 @@ import { useRoleSim } from "@/components/role-simulation-provider";
 import { initials, PersonName } from "@/components/person-profile-provider";
 import { PortalCard, type PortalSummary } from "@/components/portal-card";
 import { CalendarPanel } from "@/components/calendar-panel";
+import { ResumeReviewPanel } from "@/components/resume-review-panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PortalGridSkeleton, CalendarSkeleton } from "@/components/skeletons";
 import { getHomeView, shouldShowReapplyBanner } from "@/lib/member-status";
@@ -399,6 +400,8 @@ export default function HomePage() {
           </div>
         )}
 
+        <ResumeReviewPanel />
+
         <div className="flex flex-col lg:flex-row gap-6">
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between mb-3">
@@ -559,6 +562,12 @@ function ApplicantChecklist({
                 <ArrowRight size={16} className="text-muted-foreground/50 flex-shrink-0 group-hover:translate-x-0.5 group-hover:text-muted-foreground transition-all" />
               </button>
             ))}
+          </div>
+
+          {/* Not a step in the checklist — an always-available service, so it
+              sits below the progress bar and never counts toward it. */}
+          <div className="pt-2 border-t">
+            <ResumeReviewPanel />
           </div>
 
           {simulating && persona === "member" && (

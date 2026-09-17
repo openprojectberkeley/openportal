@@ -21,10 +21,13 @@ function relativeTime(iso: string): string {
   return `${days}d ago`;
 }
 
-// Where a notification should take you: host-facing notices (a booking, an
-// applicant cancel, or a reminder for a chat you host) open the manager grid;
-// everything else opens the applicant coffee-chat page.
+// Where a notification should take you. Resume-review notices are always
+// requester-facing, so they land on that page regardless of who you are; for
+// coffee chats, host-facing notices (a booking, an applicant cancel, or a
+// reminder for a chat you host) open the manager grid and everything else
+// opens the applicant coffee-chat page.
 function hrefFor(n: AppNotification, selfId: string | null): string {
+  if (n.type === "resume_review_completed") return "/resume-review";
   const isHost = !!selfId && n.member_id === selfId;
   return isHost ? "/manager/coffee-chats" : "/coffee-chat";
 }

@@ -100,6 +100,9 @@ export function AppNavbar() {
                 <DropdownMenuItem onSelect={() => router.push("/")}>
                   Home
                 </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => router.push("/resume-review")}>
+                  Resume Review
+                </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => setProfileOpen(true)}>
                   Profile
                 </DropdownMenuItem>
