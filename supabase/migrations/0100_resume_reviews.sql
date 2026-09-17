@@ -101,9 +101,10 @@ alter table public.notifications
     'resume_review_completed'
   ));
 
--- Email the requester when feedback lands. The edge function only builds an ICS
--- for CALENDAR_TYPES, so a resume-review row sends a plain title/body email and
--- needs no function change.
+-- Resume review is in-app only: NO email when feedback lands. The 0037 emailing
+-- function is re-stated here (unchanged, coffee-chat types only) rather than
+-- left alone, so that running this file always lands the non-emailing state
+-- even on a database where an earlier draft of it added the type to the list.
 create or replace function public.on_notification_email()
 returns trigger
 language plpgsql
@@ -114,14 +115,14 @@ declare
   v_url    text;
   v_secret text;
 begin
-  -- Cross-user events only. Reminders never email.
+  -- Cross-user coffee-chat events only. Reminders never email, and neither do
+  -- resume reviews — 'resume_review_completed' is deliberately absent here.
   if new.type not in (
     'chat_booked',
     'chat_cancelled_by_applicant',
     'chat_cancelled_by_host',
     'location_added',
-    'location_updated',
-    'resume_review_completed'
+    'location_updated'
   ) then
     return new;
   end if;
