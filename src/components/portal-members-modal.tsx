@@ -10,9 +10,10 @@ import { AddMemberPicker, useAddMemberFilters } from "@/components/add-member-pi
 import { MemberRosterSkeleton } from "@/components/skeletons";
 import { AdminCrown } from "@/components/admin-crown";
 
-// `locked` rows (project-derived or the portal owner) are managed by triggers
-// and can't be edited from the UI. `owner` crowns render gold.
-type MemberRow = { user_id: string; name: string; is_admin: boolean; locked: boolean; owner: boolean };
+// `managed` rows mirror the project roster (0013 sync triggers), so edits to
+// them go through project_members instead. Owner rows are locked and their
+// crowns render gold.
+type MemberRow = { user_id: string; name: string; is_admin: boolean; managed: boolean; owner: boolean };
 type MemberOption = { user_id: string; name: string };
 
 type Props = {
@@ -32,6 +33,8 @@ const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompar
 export function PortalMembersModal({ portalId, open, onOpenChange, canEdit }: Props) {
   const [rows, setRows] = useState<MemberRow[]>([]);
   const [allMembers, setAllMembers] = useState<MemberOption[]>([]);
+  // Set for project portals: the roster is the project's, so writes go there.
+  const [projectId, setProjectId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const filters = useAddMemberFilters(open && canEdit);
 
@@ -49,7 +52,9 @@ export function PortalMembersModal({ portalId, open, onOpenChange, canEdit }: Pr
       canEdit
         ? supabase.from("members").select("user_id, preferred_firstname, lastname")
         : Promise.resolve({ data: [] as unknown[] }),
-    ]).then(([{ data: pmRows }, { data: memberRows }]) => {
+      supabase.from("portals").select("type, project_id").eq("id", portalId).single(),
+    ]).then(([{ data: pmRows }, { data: memberRows }, { data: portal }]) => {
+      setProjectId(portal?.type === "project" ? (portal.project_id as string | null) : null);
       setRows(
         (pmRows ?? [])
           .map((pm) => {
@@ -58,7 +63,7 @@ export function PortalMembersModal({ portalId, open, onOpenChange, canEdit }: Pr
               user_id: pm.user_id as string,
               name: fullName(m?.preferred_firstname, m?.lastname),
               is_admin: pm.is_admin as boolean,
-              locked: (pm.managed as boolean) || (pm.is_owner as boolean),
+              managed: pm.managed as boolean,
               owner: pm.is_owner as boolean,
             };
           })
@@ -76,20 +81,18 @@ export function PortalMembersModal({ portalId, open, onOpenChange, canEdit }: Pr
 
   const addMember = async (m: MemberOption) => {
     const supabase = createClient();
-    const { error } = await supabase
-      .from("portal_members")
-      .insert({ portal_id: portalId, user_id: m.user_id, is_admin: false });
+    const { error } = projectId
+      ? await supabase.from("project_members").insert({ project_id: projectId, user_id: m.user_id, is_pm: false })
+      : await supabase.from("portal_members").insert({ portal_id: portalId, user_id: m.user_id, is_admin: false });
     if (error) return;
-    setRows((prev) => [...prev, { ...m, is_admin: false, locked: false, owner: false }].sort(byName));
+    setRows((prev) => [...prev, { ...m, is_admin: false, managed: !!projectId, owner: false }].sort(byName));
   };
 
   const removeMember = async (row: MemberRow) => {
     const supabase = createClient();
-    const { error } = await supabase
-      .from("portal_members")
-      .delete()
-      .eq("portal_id", portalId)
-      .eq("user_id", row.user_id);
+    const { error } = row.managed && projectId
+      ? await supabase.from("project_members").delete().eq("project_id", projectId).eq("user_id", row.user_id)
+      : await supabase.from("portal_members").delete().eq("portal_id", portalId).eq("user_id", row.user_id);
     if (error) return;
     setRows((prev) => prev.filter((r) => r.user_id !== row.user_id));
   };
@@ -97,14 +100,16 @@ export function PortalMembersModal({ portalId, open, onOpenChange, canEdit }: Pr
   const toggleAdmin = async (row: MemberRow) => {
     const next = !row.is_admin;
     const supabase = createClient();
-    const { error } = await supabase
-      .from("portal_members")
-      .update({ is_admin: next })
-      .eq("portal_id", portalId)
-      .eq("user_id", row.user_id);
+    const { error } = row.managed && projectId
+      ? await supabase.from("project_members").update({ is_pm: next }).eq("project_id", projectId).eq("user_id", row.user_id)
+      : await supabase.from("portal_members").update({ is_admin: next }).eq("portal_id", portalId).eq("user_id", row.user_id);
     if (error) return;
     setRows((prev) => prev.map((r) => (r.user_id === row.user_id ? { ...r, is_admin: next } : r)));
   };
+
+  // Owner rows are always locked; managed rows are editable only when the
+  // write can be routed to the project (i.e. this is a project portal).
+  const isLocked = (r: MemberRow) => r.owner || (r.managed && !projectId);
 
   const available = allMembers.filter((m) => !rows.some((r) => r.user_id === m.user_id));
 
@@ -136,12 +141,12 @@ export function PortalMembersModal({ portalId, open, onOpenChange, canEdit }: Pr
                   <AdminCrown
                     active={r.is_admin}
                     owner={r.owner}
-                    locked={r.locked}
-                    onToggle={!r.locked && canEdit ? () => toggleAdmin(r) : undefined}
+                    locked={isLocked(r)}
+                    onToggle={!isLocked(r) && canEdit ? () => toggleAdmin(r) : undefined}
                   />
                   {/* The remove column is always reserved so crowns stay aligned
                       even when a member can't be removed. */}
-                  {!r.locked && canEdit ? (
+                  {!isLocked(r) && canEdit ? (
                     <button onClick={() => removeMember(r)} className="w-4 flex-shrink-0 flex justify-center text-muted-foreground hover:text-red-500 transition-colors">
                       <X size={13} />
                     </button>
