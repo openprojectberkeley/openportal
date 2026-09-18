@@ -3,8 +3,9 @@
 import { createClient } from "@/lib/supabase/client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { FileText, Upload, Clock, Check, X } from "lucide-react";
+import { FileText, Upload, Clock, Check, X, Inbox } from "lucide-react";
 import { PersonName } from "@/components/person-profile-provider";
+import { useRoleSim } from "@/components/role-simulation-provider";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { uploadResume, resumeSignedUrl, MAX_RESUME_BYTES } from "@/lib/resume-upload";
@@ -29,6 +30,7 @@ function formatDate(iso: string): string {
 }
 
 export default function ResumeReviewPage() {
+  const { isExec } = useRoleSim();
   const [userId, setUserId] = useState<string | null>(null);
   const [resume, setResume] = useState<Resume | null>(null);
   const [reviews, setReviews] = useState<Review[] | null>(null);
@@ -157,6 +159,16 @@ export default function ResumeReviewPage() {
           Ask a member of our team to look over your resume. You can request one any time —
           it&apos;s not part of the application.
         </p>
+        {/* Exec staff the queue; the route itself is guarded server-side. */}
+        {isExec && (
+          <Link
+            href="/resume-review/queue"
+            className="mt-1 inline-flex w-fit items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:border-foreground/20 hover:text-foreground transition-colors"
+          >
+            <Inbox size={14} />
+            Review queue
+          </Link>
+        )}
       </div>
 
       {error && (

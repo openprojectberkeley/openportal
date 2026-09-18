@@ -98,7 +98,7 @@ export default function ManagerResumeReviewsPage() {
     <div className="w-full max-w-3xl mx-auto p-6 flex flex-col gap-8">
       <div className="flex flex-col gap-1.5">
         <Link
-          href="/manager"
+          href="/resume-review"
           className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors w-fit"
         >
           <ArrowLeft size={14} />

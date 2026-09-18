@@ -2,13 +2,12 @@
 
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, ArrowRight, Coffee, FileSearch, FileText, Users } from "lucide-react";
+import { ArrowLeft, ArrowRight, Coffee, FileText, Users } from "lucide-react";
 
 const items = [
   { label: "Coffee Chats", href: "/manager/coffee-chats", description: "Review and manage coffee chat bookings.", icon: Coffee },
   { label: "Infosession Attendance", href: "/manager/infosession", description: "Track and manage infosession attendance.", icon: Users },
   { label: "Applications", href: "/manager/applications", description: "Review submitted applications.", icon: FileText },
-  { label: "Resume Reviews", href: "/manager/resume-reviews", description: "Give feedback on requested resumes.", icon: FileSearch },
 ];
 
 export default function ManagerPage() {

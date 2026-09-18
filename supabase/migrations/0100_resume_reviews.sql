@@ -2,7 +2,7 @@
 --
 -- Anyone signed in can ask for feedback on the resume they already have on file
 -- (`members.resume_path`, uploaded on the application page into the private
--- `application-resumes` bucket). A board/exec reviewer picks the request up,
+-- `application-resumes` bucket). An exec reviewer picks the request up,
 -- writes feedback, and the requester is notified in-app + by email.
 --
 -- Two things are deliberate here:
@@ -47,12 +47,14 @@ create unique index if not exists resume_reviews_one_pending_per_requester
 
 alter table public.resume_reviews enable row level security;
 
--- Requester reads own; board/exec read everything (they staff the queue).
+-- Requester reads own; exec reads everything (they staff the queue). Note this
+-- is is_exec(), NOT is_board_or_exec() -- reviewing is exec-only, unlike the
+-- application review flow that board also works.
 drop policy if exists "resume_reviews_select" on public.resume_reviews;
 create policy "resume_reviews_select"
 on public.resume_reviews
 for select to authenticated
-using ( requester_id = (select auth.uid()) or public.is_board_or_exec() );
+using ( requester_id = (select auth.uid()) or public.is_exec() );
 
 -- Requester creates own, and only in the 'pending' state with no feedback
 -- pre-filled. The partial unique index above stops a second concurrent one.
@@ -79,7 +81,7 @@ using ( requester_id = (select auth.uid()) and status = 'pending' )
 with check ( requester_id = (select auth.uid()) and status = 'cancelled' );
 
 -- Reviewers work the queue through complete_resume_review() below, which runs
--- as definer; no board/exec UPDATE policy is granted here on purpose, so the
+-- as definer; no exec UPDATE policy is granted here on purpose, so the
 -- notification can never be skipped by writing the row directly.
 
 -- ---------------------------------------------------------------------------
@@ -167,7 +169,7 @@ declare
   v_reviewer  uuid := auth.uid();
   v_name      text;
 begin
-  if not public.is_board_or_exec() then
+  if not public.is_exec() then
     raise exception 'not authorized';
   end if;
 
