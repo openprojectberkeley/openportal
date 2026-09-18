@@ -21,6 +21,9 @@ type QueueItem = {
   status: "pending" | "completed" | "cancelled";
   feedback: string | null;
   completed_at: string | null;
+  reviewer_id: string | null;
+  reviewerName: string | null;
+  reviewerAvatarUrl: string | null;
 };
 
 function formatDate(iso: string): string {
@@ -45,16 +48,20 @@ export default function ManagerResumeReviewsPage() {
     const supabase = createClient();
     const { data: rows } = await supabase
       .from("resume_reviews")
-      .select("id, requester_id, resume_path, resume_filename, target_roles, needed_by, created_at, status, feedback, completed_at")
+      .select("id, requester_id, resume_path, resume_filename, target_roles, needed_by, created_at, status, feedback, completed_at, reviewer_id")
       .order("created_at", { ascending: true });
 
-    const requesterIds = [...new Set((rows ?? []).map((r) => r.requester_id))];
+    // One lookup covers both sides: the requester on every card, and the exec
+    // who answered on completed ones.
+    const personIds = [
+      ...new Set((rows ?? []).flatMap((r) => [r.requester_id, r.reviewer_id]).filter(Boolean)),
+    ] as string[];
     const people = new Map<string, { name: string; avatarUrl: string | null }>();
-    if (requesterIds.length) {
+    if (personIds.length) {
       const { data: members } = await supabase
         .from("members")
         .select("user_id, preferred_firstname, lastname, avatar_url")
-        .in("user_id", requesterIds);
+        .in("user_id", personIds);
       for (const m of members ?? []) {
         people.set(m.user_id, {
           name: `${m.preferred_firstname ?? ""} ${m.lastname ?? ""}`.trim() || "Unknown",
@@ -68,6 +75,8 @@ export default function ManagerResumeReviewsPage() {
         ...r,
         requesterName: people.get(r.requester_id)?.name ?? "Unknown",
         requesterAvatarUrl: people.get(r.requester_id)?.avatarUrl ?? null,
+        reviewerName: r.reviewer_id ? people.get(r.reviewer_id)?.name ?? "Unknown" : null,
+        reviewerAvatarUrl: r.reviewer_id ? people.get(r.reviewer_id)?.avatarUrl ?? null : null,
       })) as QueueItem[],
     );
   }, []);
@@ -238,6 +247,35 @@ export default function ManagerResumeReviewsPage() {
                     <span className="text-xs text-muted-foreground">
                       · reviewed {formatDate(item.completed_at ?? item.created_at)}
                     </span>
+                    {/* The exec who answered, not the requester. reviewer_id goes
+                        null if that person's account is deleted. */}
+                    {item.reviewer_id && item.reviewerName ? (
+                      <span className="ml-auto inline-flex items-center gap-1.5 rounded-full border bg-background py-0.5 pl-0.5 pr-2.5 text-xs">
+                        {item.reviewerAvatarUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={item.reviewerAvatarUrl}
+                            alt=""
+                            className="h-5 w-5 rounded-full object-cover"
+                          />
+                        ) : (
+                          <span className="flex h-5 w-5 items-center justify-center rounded-full bg-foreground/10 text-[9px] font-semibold">
+                            {initials(item.reviewerName)}
+                          </span>
+                        )}
+                        <span className="text-muted-foreground">Reviewed by</span>
+                        <PersonName
+                          userId={item.reviewer_id}
+                          name={item.reviewerName}
+                          preloaded={{ avatar_url: item.reviewerAvatarUrl }}
+                          className="font-medium"
+                        />
+                      </span>
+                    ) : (
+                      <span className="ml-auto inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs text-muted-foreground">
+                        Reviewer no longer a member
+                      </span>
+                    )}
                   </div>
                   {item.feedback && (
                     <p className="whitespace-pre-wrap rounded-lg border bg-foreground/[0.03] px-3 py-2 text-sm">
