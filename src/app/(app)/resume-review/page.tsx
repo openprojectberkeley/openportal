@@ -13,7 +13,8 @@ import { uploadResume, resumeSignedUrl, MAX_RESUME_BYTES } from "@/lib/resume-up
 type Review = {
   id: string;
   status: "pending" | "completed" | "cancelled";
-  note: string | null;
+  target_roles: string | null;
+  needed_by: string | null;
   feedback: string | null;
   resume_path: string;
   resume_filename: string | null;
@@ -29,12 +30,21 @@ function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
+// `needed_by` is a bare DATE ("2026-10-03"). new Date() would read that as UTC
+// midnight and render the day before anywhere west of Greenwich, so build the
+// date in local time instead.
+function formatDateOnly(ymd: string): string {
+  const [y, m, d] = ymd.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
 export default function ResumeReviewPage() {
   const { isExec } = useRoleSim();
   const [userId, setUserId] = useState<string | null>(null);
   const [resume, setResume] = useState<Resume | null>(null);
   const [reviews, setReviews] = useState<Review[] | null>(null);
-  const [note, setNote] = useState("");
+  const [targetRoles, setTargetRoles] = useState("");
+  const [neededBy, setNeededBy] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -51,7 +61,7 @@ export default function ResumeReviewPage() {
       supabase.from("members").select("resume_path, resume_filename").eq("user_id", user.id).maybeSingle(),
       supabase
         .from("resume_reviews")
-        .select("id, status, note, feedback, resume_path, resume_filename, reviewer_id, created_at, completed_at")
+        .select("id, status, target_roles, needed_by, feedback, resume_path, resume_filename, reviewer_id, created_at, completed_at")
         .eq("requester_id", user.id)
         .order("created_at", { ascending: false }),
     ]);
@@ -123,7 +133,8 @@ export default function ResumeReviewPage() {
       requester_id: userId,
       resume_path: resume.path,
       resume_filename: resume.filename,
-      note: note.trim() || null,
+      target_roles: targetRoles.trim() || null,
+      needed_by: neededBy || null,
     });
     setSubmitting(false);
     if (insertError) {
@@ -134,7 +145,8 @@ export default function ResumeReviewPage() {
       );
       return;
     }
-    setNote("");
+    setTargetRoles("");
+    setNeededBy("");
     load();
   };
 
@@ -193,10 +205,25 @@ export default function ResumeReviewPage() {
               </p>
             </div>
           </div>
-          {pending.note && (
-            <p className="rounded-lg border bg-background px-3 py-2 text-sm text-muted-foreground">
-              {pending.note}
-            </p>
+          {(pending.target_roles || pending.needed_by) && (
+            <div className="flex flex-col gap-2 rounded-lg border bg-background px-3 py-2">
+              {pending.target_roles && (
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    Targeting
+                  </span>
+                  <p className="whitespace-pre-wrap text-sm text-muted-foreground">{pending.target_roles}</p>
+                </div>
+              )}
+              {pending.needed_by && (
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    Needed by
+                  </span>
+                  <p className="text-sm text-muted-foreground">{formatDateOnly(pending.needed_by)}</p>
+                </div>
+              )}
+            </div>
           )}
           <div className="flex items-center gap-2">
             <button
@@ -264,14 +291,39 @@ export default function ResumeReviewPage() {
             </span>
           </div>
 
-          <textarea
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            rows={3}
-            maxLength={500}
-            placeholder="Anything you'd like the reviewer to focus on? (optional)"
-            className="w-full resize-none rounded-lg border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:border-foreground/30"
-          />
+          {/* Both optional — a request with neither answered is still valid. */}
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="target-roles" className="text-sm font-medium">
+              Any specific companies/roles you are targeting with this resume?{" "}
+              <span className="font-normal text-muted-foreground">(optional)</span>
+            </label>
+            <p className="text-xs text-muted-foreground">
+              You can put the link to the job description, role title, company name, or anything
+              else that is relevant. If not, put N/A.
+            </p>
+            <textarea
+              id="target-roles"
+              value={targetRoles}
+              onChange={(e) => setTargetRoles(e.target.value)}
+              rows={3}
+              maxLength={1000}
+              className="w-full resize-none rounded-lg border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:border-foreground/30"
+            />
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="needed-by" className="text-sm font-medium">
+              When do you need feedback by?{" "}
+              <span className="font-normal text-muted-foreground">(optional)</span>
+            </label>
+            <input
+              id="needed-by"
+              type="date"
+              value={neededBy}
+              onChange={(e) => setNeededBy(e.target.value)}
+              className="w-fit rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:border-foreground/30"
+            />
+          </div>
 
           <button
             type="button"

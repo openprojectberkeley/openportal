@@ -24,8 +24,10 @@ create table if not exists public.resume_reviews (
   -- Snapshot of the resume as it stood when the review was requested.
   resume_path     text not null,
   resume_filename text,
-  -- Optional "here's what I'd like you to look at" from the requester.
-  note            text,
+  -- Two optional questions asked at request time. Both may be null: the
+  -- requester can ask for a look without a target role or a deadline.
+  target_roles    text,
+  needed_by       date,
   status          text not null default 'pending'
                     check (status in ('pending', 'completed', 'cancelled')),
   reviewer_id     uuid references auth.users (id) on delete set null,
@@ -44,6 +46,13 @@ create index if not exists resume_reviews_requester_created
 -- PARTIAL index is what expresses "you can ask again, but not queue up twice".
 create unique index if not exists resume_reviews_one_pending_per_requester
   on public.resume_reviews (requester_id) where status = 'pending';
+
+-- Additive, for a database where an earlier draft of this file already ran
+-- (the original shipped a single free-text `note` instead of the two
+-- questions above).
+alter table public.resume_reviews add column if not exists target_roles text;
+alter table public.resume_reviews add column if not exists needed_by date;
+alter table public.resume_reviews drop column if exists note;
 
 alter table public.resume_reviews enable row level security;
 

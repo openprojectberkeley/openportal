@@ -15,7 +15,8 @@ type QueueItem = {
   requesterAvatarUrl: string | null;
   resume_path: string;
   resume_filename: string | null;
-  note: string | null;
+  target_roles: string | null;
+  needed_by: string | null;
   created_at: string;
   status: "pending" | "completed" | "cancelled";
   feedback: string | null;
@@ -24,6 +25,14 @@ type QueueItem = {
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+// `needed_by` is a bare DATE ("2026-10-03"). new Date() would read that as UTC
+// midnight and render the day before anywhere west of Greenwich, so build the
+// date in local time instead.
+function formatDateOnly(ymd: string): string {
+  const [y, m, d] = ymd.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
 export default function ManagerResumeReviewsPage() {
@@ -36,7 +45,7 @@ export default function ManagerResumeReviewsPage() {
     const supabase = createClient();
     const { data: rows } = await supabase
       .from("resume_reviews")
-      .select("id, requester_id, resume_path, resume_filename, note, created_at, status, feedback, completed_at")
+      .select("id, requester_id, resume_path, resume_filename, target_roles, needed_by, created_at, status, feedback, completed_at")
       .order("created_at", { ascending: true });
 
     const requesterIds = [...new Set((rows ?? []).map((r) => r.requester_id))];
@@ -160,10 +169,25 @@ export default function ManagerResumeReviewsPage() {
                     </div>
                   </div>
 
-                  {item.note && (
-                    <p className="rounded-lg border bg-foreground/[0.03] px-3 py-2 text-sm text-muted-foreground">
-                      {item.note}
-                    </p>
+                  {(item.target_roles || item.needed_by) && (
+                    <div className="flex flex-col gap-2 rounded-lg border bg-foreground/[0.03] px-3 py-2">
+                      {item.target_roles && (
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                            Targeting
+                          </span>
+                          <p className="whitespace-pre-wrap text-sm">{item.target_roles}</p>
+                        </div>
+                      )}
+                      {item.needed_by && (
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                            Needed by
+                          </span>
+                          <p className="text-sm">{formatDateOnly(item.needed_by)}</p>
+                        </div>
+                      )}
+                    </div>
                   )}
 
                   <button
