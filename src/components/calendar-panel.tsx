@@ -52,6 +52,10 @@ type Props = {
   portalColor?: string | null;
 };
 
+// What a club-wide event is labelled with on a portal calendar, where it sits
+// next to events labelled with their portal's name.
+const CLUB_LABEL = "Open Project";
+
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -198,8 +202,9 @@ function EventCard({
 }
 
 // The dashboard's subscribe control, sitting inside the calendar card above the
-// month grid. Portal calendars don't get one — they're scoped to a portal,
-// while the Google feed is the club-wide schedule.
+// month grid. Portal calendars don't get one: they mirror the club feed's
+// events, but subscribing is a decision about the whole club's schedule, so it
+// belongs in the one place that is about exactly that.
 function SubscribeMenu() {
   const [copied, setCopied] = useState(false);
   const calendarId = publicCalendarId();
@@ -242,9 +247,9 @@ function SubscribeMenu() {
 
 // On a portal page, a second card tinted with the portal's accent sits BEHIND
 // the calendar and pokes out above it, so the portal's name reads as a tab on
-// the stack. That says "this calendar belongs to that portal" — which matters,
-// because club events deliberately don't appear here and the absence otherwise
-// looks like a bug.
+// the stack. That says "this calendar belongs to that portal" — which matters
+// now that club-wide events appear here too: the tab is what makes the mix read
+// as "this portal, plus the club" rather than an unscoped calendar.
 //
 // `mt-PEEK` on the wrapper reserves the space the backing card borrows with its
 // negative offset, so it never rides up over whatever sits above it.
@@ -336,7 +341,13 @@ export function CalendarPanel({ portalId, portalName, portalColor }: Props) {
       // attendance history survives — but they shouldn't show on the calendar.
       .is("cancelled_at", null)
       .order("start_time");
-    if (portalId) query = query.eq("portal_id", portalId);
+    // A portal calendar shows the portal's own events *and* the club-wide ones
+    // (portal_id null — the synced Google feed plus any hand-made club event).
+    // The club schedule is everyone's schedule, so a portal's members shouldn't
+    // have to go back to the dashboard to see when the next GM is. RLS already
+    // decides who may read a club event (board-only ones stay hidden), so this
+    // widens the query without widening access.
+    if (portalId) query = query.or(`portal_id.eq.${portalId},portal_id.is.null`);
     const { data } = await query;
     // `portals(name, color)` is a to-one FK embed (object at runtime); supabase-js
     // infers it as an array without generated types, so cast.
@@ -405,16 +416,19 @@ export function CalendarPanel({ portalId, portalName, portalColor }: Props) {
   // wins over the value embedded at fetch time.
   const resolve = useCallback(
     (ev: PortalEvent): { name: string | null; color: string | null } => {
-      // Club events have no portal, so nothing to label or tint them with —
-      // their category badge and color carry the identity instead.
-      if (ev.portal_id === null) return { name: null, color: null };
+      // Club events have no portal to tint them with — their category color
+      // carries that. On the dashboard the category badge is identity enough;
+      // inside a portal calendar, where every other card is labelled with the
+      // portal's name, they need a label of their own so a club-wide event
+      // doesn't read as one of this portal's.
+      if (ev.portal_id === null) return { name: portalId ? CLUB_LABEL : null, color: null };
       const o = overrides[ev.portal_id];
       return {
         name: o?.name ?? ev.portals?.name ?? null,
         color: (o ? o.color : ev.portals?.color) ?? null,
       };
     },
-    [overrides],
+    [overrides, portalId],
   );
 
   // On the aggregate (dashboard) calendar, hide events from portals the user
