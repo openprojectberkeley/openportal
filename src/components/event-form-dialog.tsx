@@ -42,7 +42,9 @@ export type EventFormValue = {
 export const EVENT_FORM_SELECT =
   "id, portal_id, title, description, location, start_time, end_time, all_day, " +
   "category, attendance_enabled, category_overridden, external_source, external_link, cancelled_at, " +
-  "portals(name, color)";
+  // Hinted: portal_imported_events (0102) is a second portal_events↔portals
+  // path, and an unhinted `portals(...)` embed fails as ambiguous.
+  "portals!portal_events_portal_id_fkey(name, color)";
 
 type PortalOption = { id: string; name: string };
 
