@@ -770,6 +770,8 @@ export function CalendarPanel({ portalId, portalName, portalColor }: Props) {
           onOpenChange={setAttendanceOpen}
           canManage={isBoardOrExec}
           canEditEvents={isExec}
+          // Exec see every member; PMs only the members of projects they PM.
+          fullAccess={isExec}
         />
       )}
 

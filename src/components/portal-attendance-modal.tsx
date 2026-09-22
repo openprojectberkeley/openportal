@@ -1,8 +1,9 @@
 "use client";
 
 import { createClient } from "@/lib/supabase/client";
-import { useEffect, useRef, useState } from "react";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Download, Pencil, Plus, Trash2, X } from "lucide-react";
+import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/overlay-scrollbar";
@@ -17,7 +18,11 @@ import {
 
 type Status = "present" | "absent" | "excused";
 
-type RosterRow = { user_id: string; name: string };
+// projectIds: the projects this person is on, for the club sheet's project
+// filter. Empty on a portal sheet, whose roster is already the portal's.
+type RosterRow = { user_id: string; name: string; projectIds: string[] };
+
+type ProjectOption = { id: string; name: string };
 
 // attendance keyed by `${event_id}:${user_id}` -> status, for O(1) lookups while
 // rendering the grid and updating optimistically.
@@ -36,7 +41,16 @@ type Props = {
    * exec creates or retags one (migration 0095).
    */
   canEditEvents?: boolean;
+  /**
+   * Club sheet only: whether the roster is every active member (exec) or just
+   * the members of the projects the viewer PMs. Either way a dropdown narrows
+   * it to one project.
+   */
+  fullAccess?: boolean;
 };
+
+const selectClass =
+  "h-8 min-w-0 rounded-md border border-input bg-transparent px-2 text-xs text-foreground shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
 
 const STATUSES: { value: Status; label: string; short: string }[] = [
   { value: "present", label: "Present", short: "P" },
@@ -76,13 +90,19 @@ function formatEventDate(iso: string): string {
 // edit/delete controls (top-right) on hover.
 function EventHeaderCell({
   ev,
+  imported,
   onEdit,
   onDelete,
+  onRemove,
 }: {
   ev: EventFormValue;
+  /** A club event pinned into this portal's sheet (migration 0102). */
+  imported?: boolean;
   /** Omitted when the viewer may mark attendance but not change the event. */
   onEdit?: () => void;
   onDelete?: () => void;
+  /** Un-imports a club event; its attendance is kept. */
+  onRemove?: () => void;
 }) {
   const titleRef = useRef<HTMLSpanElement>(null);
   const [truncated, setTruncated] = useState(false);
@@ -103,6 +123,7 @@ function EventHeaderCell({
       <div className="flex flex-col gap-0.5">
         <span className="text-[10px] font-normal text-muted-foreground uppercase tracking-wide">
           {formatEventDate(ev.start_time)}
+          {imported && <span className="ml-1 rounded bg-foreground/10 px-1 normal-case tracking-normal">Club</span>}
         </span>
         <span ref={titleRef} className="truncate max-w-[8rem]" title={ev.title}>
           {ev.title}
@@ -110,7 +131,7 @@ function EventHeaderCell({
       </div>
 
       {/* Edit / delete, revealed top-right on hover. */}
-      {(onEdit || onDelete) && (
+      {(onEdit || onDelete || onRemove) && (
         <div className="absolute top-1 right-1 z-50 hidden items-center gap-0.5 group-hover/evt:flex">
           {onEdit && (
             <button
@@ -130,6 +151,16 @@ function EventHeaderCell({
               className="rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-red-500"
             >
               <Trash2 size={12} />
+            </button>
+          )}
+          {onRemove && (
+            <button
+              onClick={onRemove}
+              aria-label={`Remove ${ev.title} from this sheet`}
+              title="Remove from this sheet (attendance is kept)"
+              className="rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <X size={12} />
             </button>
           )}
         </div>
@@ -154,21 +185,44 @@ function EventHeaderCell({
 // members × events grid and mark each cell present/absent/excused; ordinary
 // members see a read-only list of their own attendance. RLS enforces the same
 // split, via can_take_event_attendance().
-export function PortalAttendanceModal({ portalId, open, onOpenChange, canManage, canEditEvents }: Props) {
+export function PortalAttendanceModal({
+  portalId,
+  open,
+  onOpenChange,
+  canManage,
+  canEditEvents,
+  fullAccess = false,
+}: Props) {
   const canEdit = canEditEvents ?? canManage;
   const [events, setEvents] = useState<EventFormValue[]>([]);
   const [roster, setRoster] = useState<RosterRow[]>([]);
   const [attendance, setAttendance] = useState<AttendanceMap>({});
   const [loading, setLoading] = useState(true);
 
+  // Club events pinned into this portal's sheet (0102). Portal sheet only.
+  const [importedIds, setImportedIds] = useState<Set<string>>(new Set());
+  const canImport = canManage && !!portalId;
+
+  // Club sheet project filter. "" = everyone the viewer has access to.
+  const [projects, setProjects] = useState<ProjectOption[]>([]);
+  const [projectFilter, setProjectFilter] = useState("");
+
   // Event form (admins only). editingEvent null = creating a new event.
   const [formOpen, setFormOpen] = useState(false);
   const [editingEvent, setEditingEvent] = useState<EventFormValue | null>(null);
+
+  // Import picker (portal admins only), rendered inline like the form.
+  const [importOpen, setImportOpen] = useState(false);
+  const [clubEvents, setClubEvents] = useState<EventFormValue[] | null>(null);
+  const [importSearch, setImportSearch] = useState("");
+  const [importingId, setImportingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
     const supabase = createClient();
     setLoading(true);
+    setProjectFilter("");
+    setImportOpen(false);
 
     (async () => {
       const { data: { user } } = await supabase.auth.getUser();
@@ -176,32 +230,91 @@ export function PortalAttendanceModal({ portalId, open, onOpenChange, canManage,
       // Admins get a chronological grid (oldest → newest across columns);
       // members get a most-recent-first list.
       const eventQuery = supabase.from("portal_events").select(EVENT_FORM_SELECT);
-      const { data: eventRows } = await (portalId
-        ? eventQuery.eq("portal_id", portalId)
-        : eventQuery.is("portal_id", null))
-        // Only events that opted in — socials and info sessions would otherwise
-        // pad the grid with columns nobody ever marks.
-        .eq("attendance_enabled", true)
-        .is("cancelled_at", null)
-        .order("start_time", { ascending: canManage });
+      const [{ data: eventRows }, { data: importRows }] = await Promise.all([
+        (portalId ? eventQuery.eq("portal_id", portalId) : eventQuery.is("portal_id", null))
+          // Only events that opted in — socials and info sessions would otherwise
+          // pad the grid with columns nobody ever marks.
+          .eq("attendance_enabled", true)
+          .is("cancelled_at", null),
+        portalId
+          ? supabase.from("portal_imported_events").select("event_id").eq("portal_id", portalId)
+          : Promise.resolve({ data: [] as { event_id: string }[] }),
+      ]);
 
-      const evs = (eventRows ?? []) as unknown as EventFormValue[];
+      // Imported club events join the portal's own. They were picked by hand,
+      // so they show regardless of attendance_enabled.
+      const imported = new Set(((importRows ?? []) as { event_id: string }[]).map((r) => r.event_id));
+      const { data: importedEventRows } = imported.size
+        ? await supabase
+            .from("portal_events")
+            .select(EVENT_FORM_SELECT)
+            .in("id", [...imported])
+            .is("cancelled_at", null)
+        : { data: [] as unknown[] };
+
+      const evs = [...(eventRows ?? []), ...(importedEventRows ?? [])] as unknown as EventFormValue[];
+      evs.sort(canManage ? byStart : (a, b) => byStart(b, a));
       const eventIds = evs.map((e) => e.id);
 
       // Roster (admins only — members don't need other people's names).
-      // The club sheet has no portal roster, so it uses active members: you
-      // can't be marked absent from a club you aren't currently in.
-      const rosterPromise = !canManage
-        ? Promise.resolve({ data: [] as unknown[] })
-        : portalId
-          ? supabase
-              .from("portal_members")
-              .select("user_id, members(preferred_firstname, lastname)")
-              .eq("portal_id", portalId)
-          : supabase
-              .from("members")
-              .select("user_id, preferred_firstname, lastname")
-              .eq("status", "active");
+      // A portal sheet uses the portal roster. The club sheet has none: exec
+      // get every active member (you can't be marked absent from a club you
+      // aren't in), everyone else the members of the projects they PM.
+      type ProjectMemberRow = {
+        user_id: string;
+        project_id: string;
+        members?: { preferred_firstname: string | null; lastname: string | null } | null;
+      };
+      let projectOptions: ProjectOption[] = [];
+      let projectMembers: ProjectMemberRow[] = [];
+      let rosterPromise: PromiseLike<{ data: unknown[] | null }> = Promise.resolve({ data: [] });
+
+      if (canManage && portalId) {
+        rosterPromise = supabase
+          .from("portal_members")
+          .select("user_id, members(preferred_firstname, lastname)")
+          .eq("portal_id", portalId);
+      } else if (canManage && fullAccess) {
+        rosterPromise = supabase
+          .from("members")
+          .select("user_id, preferred_firstname, lastname")
+          .eq("status", "active");
+        const [{ data: projectRows }, { data: pmRows }] = await Promise.all([
+          supabase.from("projects").select("id, name").order("name"),
+          supabase.from("project_members").select("user_id, project_id"),
+        ]);
+        projectOptions = (projectRows ?? []) as ProjectOption[];
+        projectMembers = (pmRows ?? []) as ProjectMemberRow[];
+      } else if (canManage && user) {
+        const { data: myRows } = await supabase
+          .from("project_members")
+          .select("project_id, projects(name)")
+          .eq("user_id", user.id)
+          .eq("is_pm", true);
+        // `projects(name)` is a to-one embed (object at runtime).
+        projectOptions = ((myRows ?? []) as unknown as { project_id: string; projects: { name: string } | null }[])
+          .map((r) => ({ id: r.project_id, name: r.projects?.name ?? "Untitled project" }))
+          .sort(byName);
+        if (projectOptions.length) {
+          const { data: pmRows } = await supabase
+            .from("project_members")
+            .select("user_id, project_id, members(preferred_firstname, lastname)")
+            .in("project_id", projectOptions.map((p) => p.id));
+          projectMembers = (pmRows ?? []) as unknown as ProjectMemberRow[];
+        }
+        // One row per person, however many of the viewer's projects they're on.
+        const seen = new Set<string>();
+        rosterPromise = Promise.resolve({
+          data: projectMembers.filter((r) => !seen.has(r.user_id) && seen.add(r.user_id)),
+        });
+      }
+
+      const projectsByUser = new Map<string, string[]>();
+      for (const r of projectMembers) {
+        projectsByUser.set(r.user_id, [...(projectsByUser.get(r.user_id) ?? []), r.project_id]);
+      }
+      setProjects(projectOptions);
+      setImportedIds(imported);
 
       // Attendance rows. Admins get everything for the portal's events (RLS
       // permits it); members get only their own (RLS restricts it, the .eq is
@@ -236,7 +349,11 @@ export function PortalAttendanceModal({ portalId, open, onOpenChange, canManage,
         ((rosterRows ?? []) as RosterSource[])
           .map((row) => {
             const m = row.members ?? row;
-            return { user_id: row.user_id, name: fullName(m.preferred_firstname, m.lastname) };
+            return {
+              user_id: row.user_id,
+              name: fullName(m.preferred_firstname, m.lastname),
+              projectIds: projectsByUser.get(row.user_id) ?? [],
+            };
           })
           .sort(byName),
       );
@@ -248,7 +365,80 @@ export function PortalAttendanceModal({ portalId, open, onOpenChange, canManage,
       setAttendance(map);
       setLoading(false);
     })();
-  }, [open, portalId, canManage]);
+  }, [open, portalId, canManage, fullAccess]);
+
+  const visibleRoster = useMemo(
+    () => (projectFilter ? roster.filter((r) => r.projectIds.includes(projectFilter)) : roster),
+    [roster, projectFilter],
+  );
+
+  const openImport = async () => {
+    setImportSearch("");
+    setImportOpen(true);
+    setClubEvents(null);
+    const { data } = await createClient()
+      .from("portal_events")
+      .select(EVENT_FORM_SELECT)
+      .is("portal_id", null)
+      .is("cancelled_at", null)
+      // Board-only events can't be imported (0102): the portal's members
+      // couldn't see them.
+      .neq("category", "board")
+      .order("start_time", { ascending: false });
+    setClubEvents((data ?? []) as unknown as EventFormValue[]);
+  };
+
+  const importEvent = async (ev: EventFormValue) => {
+    if (!portalId) return;
+    setImportingId(ev.id);
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    const { error } = user
+      ? await supabase
+          .from("portal_imported_events")
+          .insert({ portal_id: portalId, event_id: ev.id, imported_by: user.id })
+      : { error: true };
+    setImportingId(null);
+    if (error) return;
+    setImportedIds((prev) => new Set(prev).add(ev.id));
+    setEvents((prev) => [...prev, ev].sort(byStart));
+
+    // Pull in any marks already made from the club sheet.
+    const { data: rows } = await supabase
+      .from("portal_event_attendance")
+      .select("event_id, user_id, status")
+      .eq("event_id", ev.id);
+    setAttendance((prev) => {
+      const next = { ...prev };
+      for (const row of (rows ?? []) as { event_id: string; user_id: string; status: Status }[]) {
+        next[key(row.event_id, row.user_id)] = row.status;
+      }
+      return next;
+    });
+  };
+
+  const removeImport = async (ev: EventFormValue) => {
+    if (!portalId) return;
+    if (!window.confirm(`Remove "${ev.title}" from this sheet? Attendance already taken is kept.`)) return;
+    const { error } = await createClient()
+      .from("portal_imported_events")
+      .delete()
+      .eq("portal_id", portalId)
+      .eq("event_id", ev.id);
+    if (error) return;
+    setImportedIds((prev) => {
+      const next = new Set(prev);
+      next.delete(ev.id);
+      return next;
+    });
+    setEvents((prev) => prev.filter((e) => e.id !== ev.id));
+  };
+
+  const importable = (clubEvents ?? []).filter(
+    (ev) =>
+      !importedIds.has(ev.id) &&
+      ev.title.toLowerCase().includes(importSearch.trim().toLowerCase()),
+  );
 
   const setStatus = async (eventId: string, userId: string, status: Status) => {
     const k = key(eventId, userId);
@@ -351,12 +541,14 @@ export function PortalAttendanceModal({ portalId, open, onOpenChange, canManage,
           <DialogTitle>
             {formOpen ? (
               editingEvent ? "Edit event" : "New event"
+            ) : importOpen ? (
+              "Import club event"
             ) : (
               <>
                 Attendance
                 {canManage && !loading && events.length > 0 && (
                   <span className="ml-1.5 text-sm font-normal text-muted-foreground/60">
-                    ({roster.length} {roster.length === 1 ? "member" : "members"} · {events.length}{" "}
+                    ({visibleRoster.length} {visibleRoster.length === 1 ? "member" : "members"} · {events.length}{" "}
                     {events.length === 1 ? "event" : "events"})
                   </span>
                 )}
@@ -378,21 +570,72 @@ export function PortalAttendanceModal({ portalId, open, onOpenChange, canManage,
               />
             </div>
           </ScrollArea>
+        ) : importOpen ? (
+          // Club events (GMs etc.) to pin into this portal's sheet. Marks made
+          // here and on the club sheet are the same attendance rows.
+          <div className="flex flex-col min-h-0 flex-1 gap-2">
+            <div className="flex-shrink-0 flex items-center gap-2">
+              <Input
+                autoFocus
+                placeholder="Search club events"
+                value={importSearch}
+                onChange={(e) => setImportSearch(e.target.value)}
+                className="h-8"
+              />
+              <Button size="sm" variant="outline" onClick={() => setImportOpen(false)}>
+                Done
+              </Button>
+            </div>
+            {clubEvents === null ? (
+              <MemberRosterSkeleton />
+            ) : importable.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-4 text-center">No club events to import.</p>
+            ) : (
+              <ScrollArea className="flex-1 min-h-0">
+                <div className="flex flex-col gap-1">
+                  {importable.map((ev) => (
+                    <div key={ev.id} className="flex items-center gap-2 text-sm py-1.5 border-b last:border-0">
+                      <div className="flex flex-col min-w-0 flex-1">
+                        <span className="truncate">{ev.title}</span>
+                        <span className="text-xs text-muted-foreground">{formatEventDate(ev.start_time)}</span>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={importingId === ev.id}
+                        onClick={() => importEvent(ev)}
+                      >
+                        {importingId === ev.id ? "Importing..." : "Import"}
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </ScrollArea>
+            )}
+          </div>
         ) : loading ? (
           <MemberRosterSkeleton />
         ) : events.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-3 py-8">
             <p className="text-sm text-muted-foreground">No events to take attendance for yet.</p>
-            {canEdit && (
-              <Button size="sm" variant="outline" onClick={openCreate}>
-                <Plus size={14} /> Add event
-              </Button>
-            )}
+            <div className="flex items-center gap-2">
+              {canEdit && (
+                <Button size="sm" variant="outline" onClick={openCreate}>
+                  <Plus size={14} /> Add event
+                </Button>
+              )}
+              {canImport && (
+                <Button size="sm" variant="outline" onClick={openImport}>
+                  <Download size={14} /> Import club event
+                </Button>
+              )}
+            </div>
           </div>
         ) : canManage ? (
           <div className="flex flex-col min-h-0 flex-1 gap-2">
-            {/* Legend for the single-letter status buttons. */}
-            <div className="flex-shrink-0 flex items-center gap-3 text-xs text-muted-foreground">
+            {/* Legend for the single-letter status buttons, plus the club
+                sheet's project filter and the portal sheet's import button. */}
+            <div className="flex-shrink-0 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
               {STATUSES.map((s) => (
                 <span key={s.value} className="flex items-center gap-1">
                   <span
@@ -403,10 +646,36 @@ export function PortalAttendanceModal({ portalId, open, onOpenChange, canManage,
                   {s.label}
                 </span>
               ))}
+              <div className="ml-auto flex items-center gap-2">
+                {!portalId && projects.length > 0 && (
+                  <select
+                    aria-label="Filter by project"
+                    className={selectClass}
+                    value={projectFilter}
+                    onChange={(e) => setProjectFilter(e.target.value)}
+                  >
+                    <option value="">{fullAccess ? "All members" : "All my projects"}</option>
+                    {projects.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                {canImport && (
+                  <Button size="sm" variant="outline" className="h-8" onClick={openImport}>
+                    <Download size={14} /> Import club event
+                  </Button>
+                )}
+              </div>
             </div>
 
-            {roster.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-4 text-center">No members yet.</p>
+            {visibleRoster.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-4 text-center">
+                {!portalId && !fullAccess && projects.length === 0
+                  ? "You don't PM any projects."
+                  : "No members yet."}
+              </p>
             ) : (
               <ScrollArea orientation="both" className="flex-1 min-h-0 border rounded-lg">
                 {/* border-separate + per-cell borders so sticky header/first-column
@@ -421,8 +690,12 @@ export function PortalAttendanceModal({ portalId, open, onOpenChange, canManage,
                         <EventHeaderCell
                           key={ev.id}
                           ev={ev}
-                          onEdit={canEdit ? () => openEdit(ev) : undefined}
-                          onDelete={canEdit ? () => deleteEvent(ev) : undefined}
+                          imported={importedIds.has(ev.id)}
+                          // An imported club event belongs to the club sheet:
+                          // here it can only be un-imported, not edited.
+                          onEdit={canEdit && !importedIds.has(ev.id) ? () => openEdit(ev) : undefined}
+                          onDelete={canEdit && !importedIds.has(ev.id) ? () => deleteEvent(ev) : undefined}
+                          onRemove={canImport && importedIds.has(ev.id) ? () => removeImport(ev) : undefined}
                         />
                       ))}
                       {/* Add-event column: a "+" to the right of the most recent event. */}
@@ -441,7 +714,7 @@ export function PortalAttendanceModal({ portalId, open, onOpenChange, canManage,
                     </tr>
                   </thead>
                   <tbody>
-                    {roster.map((r) => (
+                    {visibleRoster.map((r) => (
                       <tr key={r.user_id}>
                         <td className="sticky left-0 z-10 bg-background border-b border-r px-3 py-1.5 min-w-[10rem]">
                           <PersonName userId={r.user_id} name={r.name} className="block truncate" />
