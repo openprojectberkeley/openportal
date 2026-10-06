@@ -56,12 +56,13 @@ export function PortalCard({ portal }: { portal: PortalSummary }) {
         <div className="relative z-10 pointer-events-none flex flex-col gap-3 group-hover:text-[var(--hover-fg)] transition-colors">
           <div className="flex items-center gap-3">
             {iconUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={iconUrl}
-                alt=""
-                className="h-10 w-10 flex-shrink-0 rounded-lg object-cover"
-              />
+              <span
+                className="flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg bg-foreground/5"
+                style={{ backgroundColor: color || undefined }}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={iconUrl} alt="" className="h-full w-full object-cover" />
+              </span>
             ) : icon ? (
               <span
                 className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg text-xl bg-foreground/5"

@@ -74,3 +74,40 @@ export function useFamilies() {
 
   return { families, projects, projectsByFamily, unassigned, error, reload };
 }
+
+/**
+ * Just the family list, for the pickers in the project create/edit dialogs.
+ *
+ * Separate from useFamilies, which also pulls every project in order to bucket
+ * them — the project dialogs already have the project in hand and only need
+ * somewhere to assign it to. Returns [] rather than null on failure so a picker
+ * degrades to "No family" instead of hanging on a skeleton.
+ */
+export function useFamilyOptions() {
+  const [families, setFamilies] = useState<Family[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const supabase = createClient();
+    supabase
+      .from("families")
+      .select(FAMILY_SELECT)
+      .order("name")
+      .then(({ data }) => {
+        if (!cancelled) setFamilies((data ?? []) as Family[]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return families;
+}
+
+/** Name for a family id, or "No family" — the label every picker shows. */
+export function familyLabel(families: Family[], id: string | null | undefined): string {
+  if (!id) return NO_FAMILY_LABEL;
+  return families.find((f) => f.id === id)?.name ?? NO_FAMILY_LABEL;
+}
+
+export const NO_FAMILY_LABEL = "No family";

@@ -4,21 +4,28 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Cropper from "react-easy-crop";
 import { Button } from "@/components/ui/button";
-import { getCroppedSquareJpeg, type PixelCrop } from "@/lib/avatar-image";
+import { getCroppedSquareImage, type PixelCrop } from "@/lib/avatar-image";
 
 const MAX_FILE_BYTES = 8 * 1024 * 1024; // 8 MB input cap
 
 type RenderState = { saving: boolean; error: string | null };
 
 type Props = {
-  /** Output edge length of the produced square JPEG (e.g. 128 avatar, 512 icon). */
+  /** Output edge length of the produced square image (e.g. 128 avatar, 256 icon). */
   size: number;
+  /**
+   * Keep the source's transparency instead of flattening it onto white. Icons
+   * want this so the accent behind them shows through; avatars don't (they're
+   * photos, and there's no accent behind them to reveal).
+   */
+  preserveAlpha?: boolean;
   cropShape?: "round" | "rect";
   title?: string;
   /**
-   * Called with the cropped, resized square JPEG blob. May be async (e.g. it
-   * uploads); while it runs the modal shows "Saving…", and it stays open if the
-   * promise rejects so the error is visible.
+   * Called with the cropped, resized square blob. Read its `type` for the actual
+   * format — with `preserveAlpha` it may be WebP/PNG rather than JPEG. May be
+   * async (e.g. it uploads); while it runs the modal shows "Saving…", and it
+   * stays open if the promise rejects so the error is visible.
    */
   onCropped: (blob: Blob) => void | Promise<void>;
   /**
@@ -31,7 +38,14 @@ type Props = {
 // Shared image pick → crop → square-JPEG flow, extracted so avatars and portal
 // icons share one cropper. The caller owns the trigger UI and decides what to do
 // with the resulting blob (upload now, or stash for later).
-export function ImageCropField({ size, cropShape = "rect", title = "Crop image", onCropped, children }: Props) {
+export function ImageCropField({
+  size,
+  cropShape = "rect",
+  title = "Crop image",
+  preserveAlpha = false,
+  onCropped,
+  children,
+}: Props) {
   const [mounted, setMounted] = useState(false);
   const [src, setSrc] = useState<string | null>(null); // object URL being cropped
   const [crop, setCrop] = useState({ x: 0, y: 0 });
@@ -89,8 +103,10 @@ export function ImageCropField({ size, cropShape = "rect", title = "Crop image",
     try {
       // Fetch the object URL back into a Blob to crop from.
       const original = await fetch(src).then((r) => r.blob());
-      const jpeg = await getCroppedSquareJpeg(original, croppedPixels, size);
-      await onCropped(jpeg);
+      const cropped = await getCroppedSquareImage(original, croppedPixels, size, {
+        preserveAlpha,
+      });
+      await onCropped(cropped);
       closeCropper();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed.");

@@ -193,7 +193,10 @@ export function PortalSettingsModal({ portalId, open, onOpenChange, initial, onM
           {isProject ? (
             <div className="flex flex-col gap-3">
               <div className="flex items-start gap-3">
-                <div className="h-12 w-12 flex-shrink-0 rounded-md border flex items-center justify-center overflow-hidden bg-muted/30">
+                <div
+                  className="h-12 w-12 flex-shrink-0 rounded-md border flex items-center justify-center overflow-hidden bg-muted/30"
+                  style={{ backgroundColor: meta.color || undefined }}
+                >
                   {meta.iconUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={meta.iconUrl} alt="" className="h-full w-full object-cover" />
@@ -335,6 +338,7 @@ export function PortalSettingsModal({ portalId, open, onOpenChange, initial, onM
             open={projectEditOpen}
             onOpenChange={setProjectEditOpen}
             canEditType={isExec}
+            canEditFamily={isExec}
             onSaved={handleProjectSaved}
           />
         )}

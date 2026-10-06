@@ -22,6 +22,7 @@ import { ProjectEditDialog } from "@/components/project-edit-dialog";
 import { AdminCrown } from "@/components/admin-crown";
 import { PortalDefaultIcon } from "@/components/portal-default-icon";
 import { AddMemberPicker, useAddMemberFilters } from "@/components/add-member-picker";
+import { Chip, ChipList } from "@/components/ui/chip";
 
 export type MemberOption = { user_id: string; name: string };
 export type RoleOption = { id: string; role_name: string };
@@ -254,6 +255,8 @@ export function PortalsPanel({ members, allRoles }: Props) {
         {portals.map((p, i) => {
           const isOpen = expanded.has(p.id);
           const availableMembers = members.filter((m) => !p.members.some((pm) => pm.user_id === m.user_id));
+          // Admins of a project portal are its PMs (0013 maps is_pm -> is_admin).
+          const adminNames = p.members.filter((m) => m.is_admin).map((m) => m.name);
           const availableRoles = allRoles.filter((r) => !p.roles.some((pr) => pr.id === r.id));
           return (
             <div key={p.id} className={i > 0 ? "border-t" : ""}>
@@ -265,8 +268,13 @@ export function PortalsPanel({ members, allRoles }: Props) {
                   {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                 </span>
                 {p.icon_url ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={p.icon_url} alt="" className="h-6 w-6 flex-shrink-0 rounded object-cover" />
+                  <span
+                    className="flex h-6 w-6 flex-shrink-0 items-center justify-center overflow-hidden rounded bg-foreground/5"
+                    style={{ backgroundColor: p.color || undefined }}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={p.icon_url} alt="" className="h-full w-full object-cover" />
+                  </span>
                 ) : p.icon ? (
                   <span className="flex-shrink-0 text-lg leading-none">{p.icon}</span>
                 ) : (
@@ -279,12 +287,19 @@ export function PortalsPanel({ members, allRoles }: Props) {
                   <span className="font-medium text-sm">{p.name}</span>
                   <span className="px-2 py-0.5 rounded-full bg-foreground/10 text-foreground text-xs font-medium">
                     {TYPE_LABELS[p.type]}
-                    {p.type === "project" && p.project_name ? ` · ${p.project_name}` : ""}
                   </span>
                   <span className="text-xs text-muted-foreground">
                     {p.members.length} member{p.members.length === 1 ? "" : "s"}
                   </span>
                 </div>
+                {adminNames.length > 0 && (
+                  <span
+                    className="hidden sm:block min-w-0 max-w-[45%] truncate text-right text-[11px] text-muted-foreground/60"
+                    title={adminNames.join(", ")}
+                  >
+                    {adminNames.join(", ")}
+                  </span>
+                )}
                 <button
                   onClick={(e) => { e.stopPropagation(); openEdit(p); }}
                   className="text-muted-foreground hover:text-foreground transition-colors flex-shrink-0"
@@ -322,38 +337,29 @@ export function PortalsPanel({ members, allRoles }: Props) {
                         }
                       />
                     </div>
-                    {p.members.length === 0 ? (
-                      <p className="text-xs text-muted-foreground">No members yet.</p>
-                    ) : (
-                      <div className="flex flex-col gap-1">
-                        {p.members.map((m) => (
-                          <div key={m.user_id} className="flex items-center gap-2 text-sm">
-                            <PersonName userId={m.user_id} name={m.name} className="flex-1" />
-                            {m.locked && (
-                              <span className="text-[10px] text-muted-foreground/70 italic">
-                                {m.owner ? "owner" : "via project"}
-                              </span>
-                            )}
-                            <AdminCrown
-                              active={m.is_admin}
-                              owner={m.owner}
-                              locked={m.locked}
-                              onToggle={m.locked ? undefined : () => toggleAdmin(p, m)}
-                            />
-                            {m.locked ? (
-                              <span className="w-4 flex-shrink-0" aria-hidden />
-                            ) : (
-                              <button
-                                onClick={() => removeMember(p, m)}
-                                className="w-4 flex-shrink-0 flex justify-center text-muted-foreground hover:text-red-500 transition-colors"
-                              >
-                                <X size={13} />
-                              </button>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                    <ChipList empty="No members yet.">
+                      {p.members.map((m) => (
+                        <Chip
+                          key={m.user_id}
+                          onRemove={m.locked ? undefined : () => removeMember(p, m)}
+                          removeLabel={`Remove ${m.name} from ${p.name}`}
+                        >
+                          <PersonName userId={m.user_id} name={m.name} />
+                          {m.locked && (
+                            <span className="text-[10px] text-muted-foreground/70 italic">
+                              {m.owner ? "owner" : "via project"}
+                            </span>
+                          )}
+                          <AdminCrown
+                            active={m.is_admin}
+                            owner={m.owner}
+                            locked={m.locked}
+                            onToggle={m.locked ? undefined : () => toggleAdmin(p, m)}
+                            size={13}
+                          />
+                        </Chip>
+                      ))}
+                    </ChipList>
                   </div>
 
                   {/* Auto-assigned roles: everyone with the role joins the portal;
@@ -389,20 +395,18 @@ export function PortalsPanel({ members, allRoles }: Props) {
                         No roles. Anyone with a mapped role is auto-added to this portal at the chosen tier.
                       </p>
                     ) : (
-                      <div className="flex flex-col gap-1">
+                      <ChipList>
                         {p.roles.map((r) => (
-                          <div key={r.id} className="flex items-center gap-2 text-sm">
-                            <span className="flex-1">{r.role_name}</span>
-                            <AdminCrown active={r.is_admin} onToggle={() => toggleRoleAdmin(p, r)} />
-                            <button
-                              onClick={() => removeRole(p, r)}
-                              className="w-4 flex-shrink-0 flex justify-center text-muted-foreground hover:text-red-500 transition-colors"
-                            >
-                              <X size={13} />
-                            </button>
-                          </div>
+                          <Chip
+                            key={r.id}
+                            onRemove={() => removeRole(p, r)}
+                            removeLabel={`Remove ${r.role_name} from ${p.name}`}
+                          >
+                            <span>{r.role_name}</span>
+                            <AdminCrown active={r.is_admin} onToggle={() => toggleRoleAdmin(p, r)} size={13} />
+                          </Chip>
                         ))}
-                      </div>
+                      </ChipList>
                     )}
                   </div>
                 </div>
@@ -424,7 +428,10 @@ export function PortalsPanel({ members, allRoles }: Props) {
             {editingIsProject ? (
               <div className="flex flex-col gap-3">
                 <div className="flex items-start gap-3">
-                  <div className="h-12 w-12 flex-shrink-0 rounded-md border flex items-center justify-center overflow-hidden bg-muted/30">
+                  <div
+                    className="h-12 w-12 flex-shrink-0 rounded-md border flex items-center justify-center overflow-hidden bg-muted/30"
+                    style={{ backgroundColor: fields.color || undefined }}
+                  >
                     {fields.iconUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={fields.iconUrl} alt="" className="h-full w-full object-cover" />

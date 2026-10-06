@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/client";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { Trophy } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -24,7 +25,7 @@ type MemberInfo = {
 
 export function AppNavbar() {
   const router = useRouter();
-  const { isExec } = useRoleSim();
+  const { isExec, isBoardOrExec } = useRoleSim();
   const [member, setMember] = useState<MemberInfo | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
 
@@ -75,6 +76,14 @@ export function AppNavbar() {
           </div>
           {member && (
             <div className="flex items-center gap-1.5">
+            <Link
+              href="/scoreboard"
+              aria-label="Scoreboard"
+              title="Scoreboard"
+              className="flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <Trophy size={18} />
+            </Link>
             <NotificationBell />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -92,23 +101,25 @@ export function AppNavbar() {
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
+                <DropdownMenuItem onSelect={() => router.push("/")}>
+                  Home
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => setProfileOpen(true)}>
+                  Profile
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => router.push("/resume-review")}>
+                  Resume Review
+                </DropdownMenuItem>
+                {isBoardOrExec && (
+                  <DropdownMenuItem onSelect={() => router.push("/manager")}>
+                    Application Manager
+                  </DropdownMenuItem>
+                )}
                 {isExec && (
                   <DropdownMenuItem onSelect={() => router.push("/admin")}>
                     Admin
                   </DropdownMenuItem>
                 )}
-                <DropdownMenuItem onSelect={() => router.push("/")}>
-                  Home
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => router.push("/resume-review")}>
-                  Resume Review
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => router.push("/scoreboard")}>
-                  Scoreboard
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => setProfileOpen(true)}>
-                  Profile
-                </DropdownMenuItem>
                 <DropdownMenuItem onSelect={logout} className="text-red-500 focus:text-red-500">
                   Logout
                 </DropdownMenuItem>

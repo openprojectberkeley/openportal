@@ -19,6 +19,7 @@ import { ColorPicker } from "@/components/color-picker";
 import { uploadFamilyIcon } from "@/lib/family-icon-upload";
 import { PanelListSkeleton } from "@/components/skeletons";
 import { FamilyMark } from "@/components/family-mark";
+import { Chip, ChipList } from "@/components/ui/chip";
 import { useFamilies, type FamilyProject } from "@/lib/use-families";
 import { countLabel, type Family } from "@/lib/scoring";
 
@@ -184,17 +185,14 @@ export function FamiliesPanel() {
 
   if (families === null) return <PanelListSkeleton rows={4} />;
 
-  const renderProjectRow = (p: FamilyProject) => (
-    <div key={p.id} className="flex items-center gap-2 text-sm">
-      <span className="flex-1 truncate">{p.name}</span>
-      <button
-        onClick={() => setProjectFamily(p.id, null)}
-        className="text-muted-foreground hover:text-red-500 transition-colors"
-        aria-label={`Remove ${p.name} from this family`}
-      >
-        <X size={13} />
-      </button>
-    </div>
+  const renderProjectChip = (p: FamilyProject, familyName: string) => (
+    <Chip
+      key={p.id}
+      onRemove={() => setProjectFamily(p.id, null)}
+      removeLabel={`Remove ${p.name} from ${familyName}`}
+    >
+      <span className="truncate">{p.name}</span>
+    </Chip>
   );
 
   const renderRow = (f: Family, i: number) => {
@@ -269,11 +267,9 @@ export function FamiliesPanel() {
               <p className="text-[11px] text-muted-foreground/80">
                 Moving a project moves its points with it.
               </p>
-              {mine.length === 0 ? (
-                <p className="text-xs text-muted-foreground">No projects yet.</p>
-              ) : (
-                <div className="flex flex-col gap-1">{mine.map(renderProjectRow)}</div>
-              )}
+              <ChipList empty="No projects yet.">
+                {mine.map((p) => renderProjectChip(p, f.name))}
+              </ChipList>
             </div>
           </div>
         )}
@@ -311,14 +307,14 @@ export function FamiliesPanel() {
             </h2>
             <span className="text-[10px] font-normal text-muted-foreground/60">({unassigned.length})</span>
           </div>
-          <div className="border rounded-lg divide-y">
+          <ChipList>
             {unassigned.map((p) => (
-              <div key={p.id} className="flex items-center gap-2 px-4 py-2 text-sm">
-                <span className="flex-1 truncate">{p.name}</span>
+              <Chip key={p.id}>
+                <span className="truncate">{p.name}</span>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <button
-                      className="text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40"
+                      className="text-[10px] font-semibold text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
                       disabled={families.length === 0}
                     >
                       Assign
@@ -332,9 +328,9 @@ export function FamiliesPanel() {
                     ))}
                   </DropdownMenuContent>
                 </DropdownMenu>
-              </div>
+              </Chip>
             ))}
-          </div>
+          </ChipList>
           <p className="text-xs text-muted-foreground">
             Points awarded to an unassigned project don&apos;t count for any family.
           </p>

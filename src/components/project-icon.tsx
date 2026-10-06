@@ -11,8 +11,15 @@ export type ProjectIconData = {
 
 export function ProjectIcon({ project, className = "h-8 w-8" }: { project: ProjectIconData; className?: string }) {
   if (project.icon_url) {
-    // eslint-disable-next-line @next/next/no-img-element
-    return <img src={project.icon_url} alt="" className={`${className} flex-shrink-0 rounded-lg object-cover`} />;
+    return (
+      <span
+        className={`${className} flex flex-shrink-0 items-center justify-center overflow-hidden rounded-lg bg-foreground/5`}
+        style={{ backgroundColor: project.color || undefined }}
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={project.icon_url} alt="" className="h-full w-full object-cover" />
+      </span>
+    );
   }
   if (project.icon) {
     return (

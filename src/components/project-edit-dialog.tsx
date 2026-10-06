@@ -18,6 +18,7 @@ import { IconPicker } from "@/components/icon-picker";
 import { ColorPicker } from "@/components/color-picker";
 import { ProjectQuestionsDialog } from "@/components/project-questions-dialog";
 import { type Difficulty, DIFFICULTIES, DIFFICULTY_LABELS } from "@/lib/projects";
+import { familyLabel, NO_FAMILY_LABEL, useFamilyOptions } from "@/lib/use-families";
 
 type ProjectType = "studio" | "launch";
 
@@ -39,6 +40,7 @@ type Fields = {
   iconUrl: string | null;
   color: string;
   coffeeChatRequired: boolean;
+  familyId: string; // "" means no family
 };
 
 const toIntOrNull = (s: string) => {
@@ -54,16 +56,28 @@ type Props = {
   // When false, the Studio/Launch track is shown read-only (only exec may change
   // it; the DB also enforces this — see migration 0019).
   canEditType?: boolean;
+  // Same deal for the scoreboard family: exec-only, enforced by the
+  // projects_guard_family_change trigger in 0103. A PM saving the dialog never
+  // sends family_id at all, so the guard can't fire on an unrelated edit.
+  canEditFamily?: boolean;
 };
 
 // Edit the underlying project's details. Writable by exec or the project's PMs
 // (RLS enforces; see migration 0017). Reused from the project portal settings.
-export function ProjectEditDialog({ projectId, open, onOpenChange, onSaved, canEditType = true }: Props) {
+export function ProjectEditDialog({
+  projectId,
+  open,
+  onOpenChange,
+  onSaved,
+  canEditType = true,
+  canEditFamily = true,
+}: Props) {
   const [fields, setFields] = useState<Fields | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [questionsOpen, setQuestionsOpen] = useState(false);
+  const families = useFamilyOptions();
 
   useEffect(() => {
     if (!open) return;
@@ -72,7 +86,7 @@ export function ProjectEditDialog({ projectId, open, onOpenChange, onSaved, canE
     const supabase = createClient();
     supabase
       .from("projects")
-      .select("name, client, description, type, difficulty, estimated_members, num_subteams, icon, icon_url, color, coffee_chat_required")
+      .select("name, client, description, type, difficulty, estimated_members, num_subteams, icon, icon_url, color, coffee_chat_required, family_id")
       .eq("id", projectId)
       .maybeSingle()
       .then(({ data }) => {
@@ -89,6 +103,7 @@ export function ProjectEditDialog({ projectId, open, onOpenChange, onSaved, canE
             iconUrl: (data.icon_url as string | null) ?? null,
             color: data.color ?? "",
             coffeeChatRequired: (data.coffee_chat_required as boolean | null) ?? true,
+            familyId: (data.family_id as string | null) ?? "",
           });
         }
         setLoading(false);
@@ -110,6 +125,7 @@ export function ProjectEditDialog({ projectId, open, onOpenChange, onSaved, canE
     const { error: updateError } = await supabase
       .from("projects")
       .update({
+        ...(canEditFamily ? { family_id: fields.familyId || null } : {}),
         name,
         client: client || null,
         description: fields.description.trim() || null,
@@ -186,6 +202,37 @@ export function ProjectEditDialog({ projectId, open, onOpenChange, onSaved, canE
                 <div className="flex items-center justify-between gap-2 border rounded-md px-3 py-2 text-sm bg-muted/40 text-muted-foreground">
                   <span>{TYPE_LABELS[fields.type]}</span>
                   <span className="text-[11px]">Only exec can change the track</span>
+                </div>
+              )}
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label>Family</Label>
+              {canEditFamily ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button className="flex items-center justify-between gap-2 border rounded-md px-3 py-2 text-sm bg-background hover:bg-accent transition-colors">
+                      {familyLabel(families, fields.familyId)}
+                      <ChevronDown size={14} className="text-muted-foreground" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="w-[--radix-dropdown-menu-trigger-width] max-h-72 overflow-y-auto">
+                    <DropdownMenuItem onSelect={() => setFields((f) => (f ? { ...f, familyId: "" } : f))}>
+                      {NO_FAMILY_LABEL}
+                    </DropdownMenuItem>
+                    {families.map((fam) => (
+                      <DropdownMenuItem
+                        key={fam.id}
+                        onSelect={() => setFields((f) => (f ? { ...f, familyId: fam.id } : f))}
+                      >
+                        {fam.name}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : (
+                <div className="flex items-center justify-between gap-2 border rounded-md px-3 py-2 text-sm bg-muted/40 text-muted-foreground">
+                  <span>{familyLabel(families, fields.familyId)}</span>
+                  <span className="text-[11px]">Only exec can change the family</span>
                 </div>
               )}
             </div>

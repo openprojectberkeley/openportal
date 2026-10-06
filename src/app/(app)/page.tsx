@@ -56,6 +56,10 @@ export default function HomePage() {
   const [reapply, setReapply] = useState<{ periodName: string; infosessionDone: boolean; applicationDone: boolean } | null>(null);
   // Past coffee chats this host hasn't confirmed yet (board/exec/PM only).
   const [pendingChats, setPendingChats] = useState<PendingChat[] | null>(null);
+  // Whether recruiting is live. Decides only whether the Application Manager
+  // shortcut appears on the dashboard — staff can always reach it from the
+  // profile menu. Plain status read; RLS allows it for everyone (0022).
+  const [periodOpen, setPeriodOpen] = useState(false);
   const [completed, setCompleted] = useState<CompletionState>({
     coffeeChat: false,
     infosession: false,
@@ -174,6 +178,14 @@ export default function HomePage() {
       // Reset first: this effect reruns on every persona switch (isBoardOrExec
       // changes), and without clearing, a banner shown while simulating
       // "member" would otherwise persist after switching back to PM/exec.
+      const { data: openPeriod } = await supabase
+        .from("application_periods")
+        .select("id")
+        .eq("status", "open")
+        .limit(1)
+        .maybeSingle();
+      setPeriodOpen(!!openPeriod);
+
       setReapply(null);
       if (shouldShowReapplyBanner(member.status, isBoardOrExec)) {
         // Grant-aware, mirroring /application (my_open_application_period):
@@ -292,10 +304,11 @@ export default function HomePage() {
   if (view === "dashboard") {
     return (
       <div className="w-full max-w-6xl mx-auto p-5 flex flex-col gap-6">
-        {/* Board/exec get a shortcut into the application manager. A dark-gray
-            pill; on hover white swipes in from the left (like the portal cards),
-            the text inverts, and it scales up a hair. */}
-        {isBoardOrExec && (
+        {/* Board/exec shortcut into the application manager, shown only while a
+            period is open; the profile menu carries it the rest of the year. A
+            dark-gray pill; on hover white swipes in from the left (like the
+            portal cards), the text inverts, and it scales up a hair. */}
+        {isBoardOrExec && periodOpen && (
           <Link
             href="/manager"
             aria-label="Application Manager"
@@ -426,12 +439,19 @@ export default function HomePage() {
           </div>
 
           <div className="w-full lg:w-80 lg:flex-shrink-0 order-first lg:order-none flex flex-col gap-6">
-            {/* On narrow screens the calendar moves above the content (below the
-                title); CalendarPanel reads the current date, so a Suspense
-                boundary keeps it out of the static shell (cacheComponents). */}
-            <Suspense fallback={<CalendarSkeleton />}>
-              <CalendarPanel />
-            </Suspense>
+            <div className="flex flex-col">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+                  Calendar
+                </h2>
+              </div>
+              {/* On narrow screens the calendar moves above the content (below the
+                  title); CalendarPanel reads the current date, so a Suspense
+                  boundary keeps it out of the static shell (cacheComponents). */}
+              <Suspense fallback={<CalendarSkeleton />}>
+                <CalendarPanel />
+              </Suspense>
+            </div>
             {/* Renders nothing until there's an active semester and at least one
                 family, so the sidebar doesn't grow an empty box before scoring
                 is set up. */}
@@ -451,7 +471,10 @@ export default function HomePage() {
           <PortalGridSkeleton />
         </div>
         <div className="w-full lg:w-80 lg:flex-shrink-0 flex flex-col gap-6">
-          <CalendarSkeleton />
+          <div className="flex flex-col gap-3">
+            <Skeleton className="h-3 w-20" />
+            <CalendarSkeleton />
+          </div>
           <ScoreboardCompactSkeleton />
         </div>
       </div>

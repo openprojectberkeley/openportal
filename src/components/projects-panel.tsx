@@ -21,6 +21,9 @@ import { PersonName } from "@/components/person-profile-provider";
 import { ProjectQuestionsDialog } from "@/components/project-questions-dialog";
 import { type Difficulty, DIFFICULTIES, DIFFICULTY_LABELS } from "@/lib/projects";
 import { AddMemberPicker, useAddMemberFilters } from "@/components/add-member-picker";
+import { familyLabel, NO_FAMILY_LABEL, useFamilyOptions } from "@/lib/use-families";
+import { accentStyle } from "@/lib/portal-color";
+import { Chip, ChipList } from "@/components/ui/chip";
 
 type ProjectMember = { user_id: string; name: string; is_pm: boolean };
 
@@ -43,6 +46,7 @@ type Project = {
   icon: string | null;
   icon_url: string | null;
   color: string | null;
+  family_id: string | null;
   members: ProjectMember[];
 };
 
@@ -60,6 +64,9 @@ type ProjectFields = {
   icon: string;
   iconUrl: string | null;
   color: string;
+  // "" means no family. Only exec can change this — the 0103 trigger rejects it
+  // for anyone else — and this panel is exec-only, so there's no gate here.
+  familyId: string;
 };
 const EMPTY_FIELDS: ProjectFields = {
   name: "",
@@ -72,6 +79,7 @@ const EMPTY_FIELDS: ProjectFields = {
   icon: "",
   iconUrl: null,
   color: "",
+  familyId: "",
 };
 
 const toIntOrNull = (s: string) => {
@@ -97,6 +105,7 @@ export function ProjectsPanel({ members }: Props) {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [questionsOpen, setQuestionsOpen] = useState(false);
+  const families = useFamilyOptions();
 
   useEffect(() => {
     fetch("/api/admin/projects")
@@ -137,6 +146,7 @@ export function ProjectsPanel({ members }: Props) {
       icon: p.icon ?? "",
       iconUrl: p.icon_url,
       color: p.color ?? "",
+      familyId: p.family_id ?? "",
     });
     setIconBlob(null);
     setFormError(null);
@@ -165,9 +175,10 @@ export function ProjectsPanel({ members }: Props) {
       num_subteams: toIntOrNull(fields.num_subteams),
       icon: fields.icon.trim() || null,
       color: fields.color.trim() || null,
+      family_id: fields.familyId || null,
     };
     const SELECT =
-      "id, name, client, description, type, difficulty, estimated_members, num_subteams, icon, icon_url, color";
+      "id, name, client, description, type, difficulty, estimated_members, num_subteams, icon, icon_url, color, family_id";
 
     if (editingId) {
       // Edit uses immediate icon upload, so fields.iconUrl is already a real URL.
@@ -292,6 +303,14 @@ export function ProjectsPanel({ members }: Props) {
                 {p.client}
               </span>
             )}
+            {p.family_id && (
+              <span
+                className="px-2 py-0.5 rounded-full text-xs font-medium border"
+                style={accentStyle(families.find((f) => f.id === p.family_id)?.color ?? null)}
+              >
+                {familyLabel(families, p.family_id)}
+              </span>
+            )}
             <span className="text-xs text-muted-foreground">
               {p.members.length} member{p.members.length === 1 ? "" : "s"}
             </span>
@@ -333,33 +352,28 @@ export function ProjectsPanel({ members }: Props) {
                   }
                 />
               </div>
-              {p.members.length === 0 ? (
-                <p className="text-xs text-muted-foreground">No members yet.</p>
-              ) : (
-                <div className="flex flex-col gap-1">
-                  {p.members.map((m) => (
-                    <div key={m.user_id} className="flex items-center gap-2 text-sm">
-                      <PersonName userId={m.user_id} name={m.name} className="flex-1" />
-                      <button
-                        onClick={() => togglePm(p, m)}
-                        className={`px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${
-                          m.is_pm
-                            ? "bg-foreground text-background"
-                            : "bg-foreground/10 text-foreground hover:bg-foreground/20"
-                        }`}
-                      >
-                        PM
-                      </button>
-                      <button
-                        onClick={() => removeMember(p, m)}
-                        className="text-muted-foreground hover:text-red-500 transition-colors"
-                      >
-                        <X size={13} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
+              <ChipList empty="No members yet.">
+                {p.members.map((m) => (
+                  <Chip
+                    key={m.user_id}
+                    onRemove={() => removeMember(p, m)}
+                    removeLabel={`Remove ${m.name} from ${p.name}`}
+                  >
+                    <PersonName userId={m.user_id} name={m.name} />
+                    <button
+                      onClick={() => togglePm(p, m)}
+                      aria-pressed={m.is_pm}
+                      className={`rounded-full px-1.5 text-[10px] font-semibold leading-4 transition-colors ${
+                        m.is_pm
+                          ? "bg-foreground text-background"
+                          : "bg-foreground/10 text-muted-foreground hover:bg-foreground/20"
+                      }`}
+                    >
+                      PM
+                    </button>
+                  </Chip>
+                ))}
+              </ChipList>
             </div>
           </div>
         )}
@@ -444,6 +458,41 @@ export function ProjectsPanel({ members }: Props) {
                   ))}
                 </DropdownMenuContent>
               </DropdownMenu>
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label>Family</Label>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button className="flex items-center justify-between gap-2 border rounded-md px-3 py-2 text-sm bg-background hover:bg-accent transition-colors">
+                    {familyLabel(families, fields.familyId)}
+                    <ChevronDown size={14} className="text-muted-foreground" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-[--radix-dropdown-menu-trigger-width] max-h-72 overflow-y-auto">
+                  <DropdownMenuItem onSelect={() => setFields((f) => ({ ...f, familyId: "" }))}>
+                    {NO_FAMILY_LABEL}
+                  </DropdownMenuItem>
+                  {families.map((fam) => (
+                    <DropdownMenuItem
+                      key={fam.id}
+                      onSelect={() => setFields((f) => ({ ...f, familyId: fam.id }))}
+                    >
+                      {fam.name}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+              {families.length === 0 && (
+                <p className="text-xs text-muted-foreground">
+                  No families yet — create them in the Families tab.
+                </p>
+              )}
+              {fields.familyId && (
+                <p className="text-xs text-muted-foreground">
+                  Scoreboard points for this project count toward{" "}
+                  {familyLabel(families, fields.familyId)}.
+                </p>
+              )}
             </div>
             <div className="flex flex-col gap-1">
               <Label htmlFor="project-client">Client{fields.type === "studio" && <span className="text-red-500"> *</span>}</Label>

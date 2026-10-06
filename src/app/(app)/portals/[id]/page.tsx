@@ -120,12 +120,13 @@ function PortalDetail() {
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
           {portal.icon_url ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={portal.icon_url}
-              alt=""
-              className="h-9 w-9 flex-shrink-0 rounded-lg object-cover"
-            />
+            <span
+              className="flex h-9 w-9 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg bg-foreground/5"
+              style={{ backgroundColor: portal.color || undefined }}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={portal.icon_url} alt="" className="h-full w-full object-cover" />
+            </span>
           ) : portal.icon ? (
             <span className="text-2xl leading-none">{portal.icon}</span>
           ) : (

@@ -149,7 +149,13 @@ export function IconPicker({
   };
 
   return (
-    <ImageCropField size={PORTAL_ICON_SIZE} cropShape="rect" title="Crop icon" onCropped={handleCropped}>
+    <ImageCropField
+      size={PORTAL_ICON_SIZE}
+      cropShape="rect"
+      title="Crop icon"
+      preserveAlpha
+      onCropped={handleCropped}
+    >
       {(openFilePicker, { saving, error }) => (
         <div ref={containerRef} className="relative">
           <button
