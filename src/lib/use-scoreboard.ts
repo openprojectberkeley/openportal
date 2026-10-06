@@ -9,7 +9,7 @@ import { useRefreshOnReturn } from "@/lib/use-refresh-on-return";
  * The member-facing scoreboard: family standings plus the per-project
  * breakdown, for one semester.
  *
- * Both RPCs resolve `null` to the active semester server-side (0100), so
+ * Both RPCs resolve `null` to the active semester server-side (0103), so
  * passing null is the normal case and not a loading state — the hook is
  * `standings === null` until the first load lands.
  *

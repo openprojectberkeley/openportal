@@ -410,7 +410,7 @@ export function FamilyScoreboard({
  * What the dashboard sidebar mounts. Renders nothing at all when there's no
  * active semester or no families, so a fresh database doesn't grow an empty box
  * under the calendar — which is also what keeps the dashboard intact before
- * migration 0100 has been applied.
+ * migration 0103 has been applied.
  */
 export function FamilyScoreboardCard() {
   const { active } = useSemesters();

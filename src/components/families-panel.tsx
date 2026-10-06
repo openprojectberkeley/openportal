@@ -16,24 +16,32 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { IconPicker } from "@/components/icon-picker";
 import { ColorPicker } from "@/components/color-picker";
+import { uploadFamilyIcon } from "@/lib/family-icon-upload";
 import { PanelListSkeleton } from "@/components/skeletons";
 import { FamilyMark } from "@/components/family-mark";
 import { useFamilies, type FamilyProject } from "@/lib/use-families";
 import { countLabel, type Family } from "@/lib/scoring";
 
-// Families carry an emoji + accent color, not an uploaded image: IconPicker
-// routes uploads by `projectId ?? portalId` into those two Storage buckets, so a
-// third would mean a third bucket and its policies. The `families.icon_url`
-// column exists either way, so adding it later needs no migration — until then
-// IconPicker is used without an id, which keeps it in emoji-only mode.
+// `iconUrl` is a real public URL when editing (IconPicker uploads immediately,
+// keyed by the family id) and a local preview URL when creating — a new family
+// has no id to key the Storage path on yet, so the picker hands the blob back
+// through onImageBlob and saveFamily uploads it once the row exists. Same
+// two-mode dance as projects-panel.
 type FamilyFields = {
   name: string;
   description: string;
   icon: string;
   color: string;
+  iconUrl: string | null;
 };
 
-const EMPTY_FIELDS: FamilyFields = { name: "", description: "", icon: "", color: "" };
+const EMPTY_FIELDS: FamilyFields = {
+  name: "",
+  description: "",
+  icon: "",
+  color: "",
+  iconUrl: null,
+};
 
 export function FamiliesPanel() {
   const { families, projectsByFamily, unassigned, error, reload } = useFamilies();
@@ -41,6 +49,8 @@ export function FamiliesPanel() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [fields, setFields] = useState<FamilyFields>(EMPTY_FIELDS);
+  // Create flow only: held until the family row (and so its id) exists.
+  const [iconBlob, setIconBlob] = useState<Blob | null>(null);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<Family | null>(null);
@@ -57,6 +67,7 @@ export function FamiliesPanel() {
   const openCreate = () => {
     setEditingId(null);
     setFields(EMPTY_FIELDS);
+    setIconBlob(null);
     setFormError(null);
     setDialogOpen(true);
   };
@@ -68,7 +79,9 @@ export function FamiliesPanel() {
       description: f.description ?? "",
       icon: f.icon ?? "",
       color: f.color ?? "",
+      iconUrl: f.icon_url,
     });
+    setIconBlob(null);
     setFormError(null);
     setDialogOpen(true);
   };
@@ -90,21 +103,52 @@ export function FamiliesPanel() {
       color: fields.color.trim() || null,
     };
 
-    const { error: writeError } = editingId
-      ? await supabase
-          .from("families")
-          .update({ ...payload, updated_at: new Date().toISOString() })
-          .eq("id", editingId)
-      : await supabase.from("families").insert(payload);
-
-    setSaving(false);
-    if (writeError) {
+    const fail = (e: { code?: string; message: string }) => {
       // The unique index on lower(name) is the one a human will hit.
       setFormError(
-        writeError.code === "23505" ? "A family with that name already exists." : writeError.message,
+        e.code === "23505" ? "A family with that name already exists." : e.message,
       );
-      return;
+      setSaving(false);
+    };
+
+    if (editingId) {
+      // Edit uses immediate icon upload, so fields.iconUrl is already a real URL.
+      const { error: updateError } = await supabase
+        .from("families")
+        .update({
+          ...payload,
+          icon_url: fields.iconUrl || null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", editingId);
+      if (updateError) return fail(updateError);
+    } else {
+      const { data: created, error: insertError } = await supabase
+        .from("families")
+        .insert(payload)
+        .select("id")
+        .single();
+      if (insertError) return fail(insertError);
+
+      // Deferred icon image: upload now that the family (and its id) exists.
+      if (iconBlob && created) {
+        try {
+          const url = await uploadFamilyIcon(supabase, created.id, iconBlob);
+          await supabase.from("families").update({ icon_url: url }).eq("id", created.id);
+        } catch (uploadErr) {
+          setFormError(
+            uploadErr instanceof Error ? uploadErr.message : "Icon upload failed. Try again.",
+          );
+          setSaving(false);
+          // The family itself saved; only its image didn't. Show it either way
+          // so the row isn't invisible while the dialog reports the failure.
+          await reload();
+          return;
+        }
+      }
     }
+
+    setSaving(false);
     setDialogOpen(false);
     await reload();
   };
@@ -121,7 +165,7 @@ export function FamiliesPanel() {
     return true;
   };
 
-  // Assignment is a plain `projects` update; the 0100 trigger rejects it for
+  // Assignment is a plain `projects` update; the 0103 trigger rejects it for
   // anyone who isn't exec, so there is no RPC to go through.
   const setProjectFamily = async (projectId: string, familyId: string | null) => {
     const supabase = createClient();
@@ -317,6 +361,10 @@ export function FamiliesPanel() {
                 <IconPicker
                   value={fields.icon}
                   onChange={(v) => setFields((f) => ({ ...f, icon: v }))}
+                  imageUrl={fields.iconUrl}
+                  onImageChange={(url) => setFields((f) => ({ ...f, iconUrl: url }))}
+                  onImageBlob={setIconBlob}
+                  familyId={editingId ?? undefined}
                 />
               </div>
               <div className="flex flex-col gap-1 flex-1">

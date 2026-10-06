@@ -19,7 +19,7 @@ import { ScoreboardSkeleton } from "@/components/skeletons";
  *
  * No guard of its own: src/proxy.ts bounces unauthenticated requests to the
  * login page, and everything rendered here is readable by any member under RLS
- * (0100) — the standings and the points log are deliberately public to the club,
+ * (0103) — the standings and the points log are deliberately public to the club,
  * since an audit trail anyone can read is what makes the scoreboard credible.
  * No Suspense boundary either: nothing here reads request-time state, so the
  * client component's own null-to-skeleton state satisfies cacheComponents.

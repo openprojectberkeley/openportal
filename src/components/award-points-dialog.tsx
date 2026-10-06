@@ -27,7 +27,7 @@ function todayLocal(): string {
  * Award (or deduct) points for one project.
  *
  * Points are awarded to a *project*, never to a family — a family's total is
- * the sum over its projects (0100) — so the picker is a project list annotated
+ * the sum over its projects (0103) — so the picker is a project list annotated
  * with where the points will land. The write goes through the `award_score` RPC
  * because `score_entries` has no insert policy at all: the ledger is
  * append-only by schema, not by convention.

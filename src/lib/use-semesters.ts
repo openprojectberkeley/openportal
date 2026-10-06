@@ -10,7 +10,7 @@ export const SEMESTER_SELECT = "id, name, starts_on, ends_on, is_active";
  * Every scoring semester, newest first, plus whichever one is active.
  *
  * At most one semester can be active — enforced by a partial unique index
- * (0100), not by this hook — so `active` is either that row or null on a fresh
+ * (0103), not by this hook — so `active` is either that row or null on a fresh
  * database, which the scoreboard renders an empty state for.
  */
 export function useSemesters() {

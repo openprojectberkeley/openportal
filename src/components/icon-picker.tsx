@@ -11,6 +11,7 @@ import { PortalDefaultIcon } from "@/components/portal-default-icon";
 import { PORTAL_ICON_SIZE } from "@/lib/avatar-image";
 import { uploadPortalIcon } from "@/lib/portal-icon-upload";
 import { uploadProjectIcon } from "@/lib/project-icon-upload";
+import { uploadFamilyIcon } from "@/lib/family-icon-upload";
 
 // Curated emoji set for portal icons — no emoji library needed.
 const PORTAL_EMOJIS = [
@@ -45,9 +46,23 @@ type Props = {
    * id (project edit flow). Takes precedence over `portalId` when set.
    */
   projectId?: string;
+  /**
+   * Like `portalId`, but uploads to the `families` bucket keyed by this family
+   * id (family edit flow). Takes precedence over both of the above when set.
+   */
+  familyId?: string;
 };
 
-export function IconPicker({ value, onChange, imageUrl, onImageChange, onImageBlob, portalId, projectId }: Props) {
+export function IconPicker({
+  value,
+  onChange,
+  imageUrl,
+  onImageChange,
+  onImageBlob,
+  portalId,
+  projectId,
+  familyId,
+}: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [adding, setAdding] = useState(false);
   const [custom, setCustom] = useState("");
@@ -116,12 +131,14 @@ export function IconPicker({ value, onChange, imageUrl, onImageChange, onImageBl
   };
 
   const handleCropped = async (jpeg: Blob) => {
-    if (projectId || portalId) {
+    if (familyId || projectId || portalId) {
       // Immediate mode: upload now and hand back the public URL.
       const supabase = createClient();
-      const url = projectId
-        ? await uploadProjectIcon(supabase, projectId, jpeg)
-        : await uploadPortalIcon(supabase, portalId!, jpeg);
+      const url = familyId
+        ? await uploadFamilyIcon(supabase, familyId, jpeg)
+        : projectId
+          ? await uploadProjectIcon(supabase, projectId, jpeg)
+          : await uploadPortalIcon(supabase, portalId!, jpeg);
       onImageChange?.(url);
     } else {
       // Deferred mode: preview locally now, upload after the row is created.

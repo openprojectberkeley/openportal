@@ -10,7 +10,7 @@ import type { LedgerEntry } from "@/lib/scoring";
  * One RPC rather than a PostgREST join: the awarder's display name lives in
  * `members` behind its own RLS and the family comes through `projects`, so the
  * client-side version is two or three extra round trips plus a join to
- * assemble (0100).
+ * assemble (0103).
  *
  * Voided rows are included — the point of an audit view is that a void stays
  * visible — and the UI filters them behind a toggle.

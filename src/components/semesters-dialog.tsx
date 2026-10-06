@@ -14,7 +14,7 @@ import type { Semester } from "@/lib/scoring";
  * active. Exec-only — every write here is gated by RLS or by an RPC.
  *
  * Activation goes through `set_active_semester` rather than two client updates:
- * at most one semester may be active (a partial unique index, 0100), so
+ * at most one semester may be active (a partial unique index, 0103), so
  * clearing and setting from the browser would transiently violate it depending
  * on statement order, and could leave none active if the second call failed.
  */

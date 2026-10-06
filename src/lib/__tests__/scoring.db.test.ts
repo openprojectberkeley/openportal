@@ -14,7 +14,7 @@
 //   SUPABASE_SERVICE_ROLE_KEY=<service_role key> \
 //   npx vitest run src/lib/__tests__/scoring.db.test.ts
 //
-// Migration 0100 must already be applied. The exec scenarios need a `roles` row
+// Migration 0103 must already be applied. The exec scenarios need a `roles` row
 // whose access_level is 'exec' to exist in that environment (roles are
 // dashboard-managed, not seeded by any migration) — if none is found, those
 // assertions are skipped with a console.warn rather than failing the suite.
@@ -140,7 +140,7 @@ async function standings(semesterId: string): Promise<Map<string, Standing>> {
   return new Map((data as Standing[]).map((r) => [r.family_id, r]));
 }
 
-describe.skipIf(!RUN)("families + scoring (0100)", () => {
+describe.skipIf(!RUN)("families + scoring (0103)", () => {
   beforeAll(async () => {
     [pm, plain] = await Promise.all([makeUser("pm"), makeUser("plain")]);
 
