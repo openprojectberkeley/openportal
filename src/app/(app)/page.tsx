@@ -11,7 +11,8 @@ import { PortalCard, type PortalSummary } from "@/components/portal-card";
 import { CalendarPanel } from "@/components/calendar-panel";
 import { ResumeReviewPanel } from "@/components/resume-review-panel";
 import { Skeleton } from "@/components/ui/skeleton";
-import { PortalGridSkeleton, CalendarSkeleton } from "@/components/skeletons";
+import { PortalGridSkeleton, CalendarSkeleton, ScoreboardCompactSkeleton } from "@/components/skeletons";
+import { FamilyScoreboardCard } from "@/components/family-scoreboard";
 import { getHomeView, shouldShowReapplyBanner } from "@/lib/member-status";
 
 type CompletionState = {
@@ -424,13 +425,17 @@ export default function HomePage() {
             )}
           </div>
 
-          <div className="w-full lg:w-80 lg:flex-shrink-0 order-first lg:order-none">
+          <div className="w-full lg:w-80 lg:flex-shrink-0 order-first lg:order-none flex flex-col gap-6">
             {/* On narrow screens the calendar moves above the content (below the
                 title); CalendarPanel reads the current date, so a Suspense
                 boundary keeps it out of the static shell (cacheComponents). */}
             <Suspense fallback={<CalendarSkeleton />}>
               <CalendarPanel />
             </Suspense>
+            {/* Renders nothing until there's an active semester and at least one
+                family, so the sidebar doesn't grow an empty box before scoring
+                is set up. */}
+            <FamilyScoreboardCard />
           </div>
         </div>
       </div>
@@ -445,8 +450,9 @@ export default function HomePage() {
           <Skeleton className="h-3 w-20" />
           <PortalGridSkeleton />
         </div>
-        <div className="w-full lg:w-80 lg:flex-shrink-0">
+        <div className="w-full lg:w-80 lg:flex-shrink-0 flex flex-col gap-6">
           <CalendarSkeleton />
+          <ScoreboardCompactSkeleton />
         </div>
       </div>
     </div>

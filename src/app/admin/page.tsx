@@ -14,11 +14,13 @@ import { Input } from "@/components/ui/input";
 import { useRoleSim } from "@/components/role-simulation-provider";
 import { ProjectsPanel } from "@/components/projects-panel";
 import { PortalsPanel } from "@/components/portals-panel";
+import { FamiliesPanel } from "@/components/families-panel";
+import { ScoringPanel } from "@/components/scoring-panel";
 import { AdminPageSkeleton } from "@/components/skeletons";
 import { PersonName } from "@/components/person-profile-provider";
 import { MEMBER_STATUS_LABEL, MEMBER_STATUS_VALUES, type MemberStatus } from "@/lib/member-status";
 
-type Tab = "members" | "projects" | "portals";
+type Tab = "members" | "projects" | "families" | "portals" | "scoring";
 
 type Role = { id: string; role_name: string };
 
@@ -57,6 +59,7 @@ export default function AdminPage() {
   const [statusFilter, setStatusFilter] = useState<Set<MemberStatus>>(new Set());
   const [projectCount, setProjectCount] = useState<number | null>(null);
   const [portalCount, setPortalCount] = useState<number | null>(null);
+  const [familyCount, setFamilyCount] = useState<number | null>(null);
 
   // Guard: redirect out once we know the effective role isn't exec (honors the
   // "view as" simulation).
@@ -84,6 +87,8 @@ export default function AdminPage() {
       .then(({ count }) => setProjectCount(count ?? 0));
     supabase.from("portals").select("id", { count: "exact", head: true })
       .then(({ count }) => setPortalCount(count ?? 0));
+    supabase.from("families").select("id", { count: "exact", head: true })
+      .then(({ count }) => setFamilyCount(count ?? 0));
   }, [ready, isExec]);
 
   const toggle = (id: string) =>
@@ -173,7 +178,7 @@ export default function AdminPage() {
       <h1 className="text-2xl font-bold mb-6">Admin</h1>
 
       <div className="flex gap-1 mb-6 border-b">
-        {(["members", "projects", "portals"] as Tab[]).map((t) => (
+        {(["members", "projects", "families", "portals", "scoring"] as Tab[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -193,12 +198,19 @@ export default function AdminPage() {
             {t === "portals" && portalCount !== null && (
               <span className="ml-1 text-[10px] font-normal text-muted-foreground/60">({portalCount})</span>
             )}
+            {t === "families" && familyCount !== null && (
+              <span className="ml-1 text-[10px] font-normal text-muted-foreground/60">({familyCount})</span>
+            )}
           </button>
         ))}
       </div>
 
       {tab === "projects" ? (
         <ProjectsPanel members={memberOptions} />
+      ) : tab === "families" ? (
+        <FamiliesPanel />
+      ) : tab === "scoring" ? (
+        <ScoringPanel />
       ) : tab === "portals" ? (
         <PortalsPanel members={memberOptions} allRoles={allRoles} />
       ) : (

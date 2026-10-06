@@ -139,7 +139,7 @@ export function AdminPageSkeleton() {
     <div className="p-8 w-full max-w-5xl mx-auto">
       <Skeleton className="h-7 w-28 mb-6" />
       <div className="flex gap-4 mb-6 border-b pb-2">
-        {["members", "projects", "portals"].map((t) => (
+        {["members", "projects", "families", "portals", "scoring"].map((t) => (
           <Skeleton key={t} className="h-4 w-16" />
         ))}
       </div>
@@ -443,5 +443,86 @@ export function AvailabilitySkeleton({ days = 2, slots = 5 }: { days?: number; s
         </div>
       ))}
     </>
+  );
+}
+
+// Mirrors PointsLedger: a header row plus body rows of the points table.
+export function LedgerSkeleton({ rows = 6 }: { rows?: number }) {
+  return (
+    <div className="overflow-x-auto border rounded-lg">
+      <div className="flex items-center gap-4 border-b px-3 py-2">
+        <Skeleton className="h-2.5 w-10" />
+        <Skeleton className="h-2.5 w-24" />
+        <Skeleton className="h-2.5 w-16" />
+        <Skeleton className="h-2.5 w-12" />
+        <Skeleton className="h-2.5 w-32" />
+      </div>
+      {Array.from({ length: rows }, (_, i) => (
+        <div
+          key={i}
+          className={`flex items-center gap-4 px-3 py-2.5 ${i < rows - 1 ? "border-b" : ""}`}
+        >
+          <Skeleton className="h-3.5 w-12" />
+          <Skeleton className="h-3.5 w-28" />
+          <Skeleton className="h-3.5 w-20" />
+          <Skeleton className="h-3.5 w-8" />
+          <Skeleton className="h-3.5 w-40" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Mirrors the /scoreboard page: a 2-1-3 podium of uneven cards, then the
+// ranked rows with their bars.
+export function ScoreboardSkeleton({ rows = 4 }: { rows?: number }) {
+  return (
+    <div className="flex flex-col gap-6">
+      <div className="grid grid-cols-3 gap-3 items-end">
+        <Skeleton className="h-36 rounded-xl" />
+        <Skeleton className="h-44 rounded-xl" />
+        <Skeleton className="h-36 rounded-xl" />
+      </div>
+      <div className="border rounded-xl">
+        {Array.from({ length: rows }, (_, i) => (
+          <div
+            key={i}
+            className={`px-4 py-3 flex flex-col gap-2 ${i < rows - 1 ? "border-b" : ""}`}
+          >
+            <div className="flex items-center gap-3">
+              <Skeleton className="h-4 w-4" />
+              <Skeleton className="h-8 w-8 rounded-lg" />
+              <Skeleton className="h-3.5 w-32" />
+              <Skeleton className="ml-auto h-5 w-12" />
+            </div>
+            <Skeleton className="h-2 w-full rounded-full" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Mirrors FamilyScoreboardCard in the dashboard sidebar: label, then compact
+// ranked rows each over a thin bar.
+export function ScoreboardCompactSkeleton({ rows = 4 }: { rows?: number }) {
+  return (
+    <div className="border rounded-xl p-4 flex flex-col gap-3">
+      <div className="flex items-center justify-between">
+        <Skeleton className="h-3 w-20" />
+        <Skeleton className="h-3 w-12" />
+      </div>
+      {Array.from({ length: rows }, (_, i) => (
+        <div key={i} className="flex flex-col gap-1.5">
+          <div className="flex items-center gap-2">
+            <Skeleton className="h-2.5 w-2" />
+            <Skeleton className="h-4 w-4 rounded-md" />
+            <Skeleton className="h-3 w-24" />
+            <Skeleton className="ml-auto h-3 w-8" />
+          </div>
+          <Skeleton className="h-1.5 w-full rounded-full" />
+        </div>
+      ))}
+    </div>
   );
 }
