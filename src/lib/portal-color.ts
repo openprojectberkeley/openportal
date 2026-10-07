@@ -9,9 +9,13 @@ export const DEFAULT_ACCENT = "#c2c5cf";
 // background so it stays legible in light and dark mode. Returns a CSS
 // `color-mix(...)` string for an inline `style`, or undefined when there's no
 // color set. Higher `pct` = more saturated.
-export function accentTint(color: string | null | undefined, pct = 14): string | undefined {
+export function accentTint(
+  color: string | null | undefined,
+  pct = 14,
+  base = "hsl(var(--background))",
+): string | undefined {
   if (!color) return undefined;
-  return `color-mix(in srgb, ${color} ${pct}%, hsl(var(--background)))`;
+  return `color-mix(in srgb, ${color} ${pct}%, ${base})`;
 }
 
 // A light diagonal sheen for a surface painted with an accent: a white lift at
@@ -47,13 +51,52 @@ export function accentSheen(strength: "card" | "accent" = "card", angle = "145de
   );
 }
 
-// Border + background for a card painted with a project's accent. Inline rather
-// than a Tailwind class because the color is per-project data, not a theme token.
+// Background for a card painted with a project's accent. Inline rather than a
+// Tailwind class because the color is per-project data, not a theme token.
 // The sheen rides on top of the flat tint rather than replacing it, so a caller
 // whose class list sets no background still has an opaque fill.
-export function accentStyle(accent: string | null | undefined, pct = 14): CSSProperties | undefined {
+//
+// Deliberately sets no border colour: a saturated accent outline around a dark
+// tinted fill reads as a warning box and fights every other card on the page.
+// Callers keep their own `border` class, which resolves to the theme's own
+// subtle border, so the accent shows up as fill alone.
+//
+// The tint mixes toward --muted, not --background, so an accent-painted tile
+// sits at the same brightness as the plain `bg-muted` cards it shares a page
+// with. Mixed toward --background it came out markedly darker than them in dark
+// mode (3.9% vs 14.9% lightness), which read as a different kind of surface
+// rather than the same card wearing a colour. In light mode the two bases are
+// 94% and 97%, so the base swap is a dark-mode fix.
+//
+// Everything whose job is to SHOUT a colour uses accentFill instead, so what is
+// left here is small, dense, text-heavy surfaces — applicant cards, a family
+// badge on a project row. Those want the accent clearly present rather than
+// barely there, hence 22%: enough that the colour is the first thing you read
+// off the card, while ordinary foreground text still sits on it legibly.
+// Full-strength accent fill: the raw colour under the same sheen a portal
+// card's hover swipe uses, with text set to whichever of black/white survives
+// on top. This is the loud sibling of accentStyle's tint — for surfaces whose
+// whole job is to carry a project's or family's colour (the scoreboard cards,
+// the draft board's column heads).
+//
+// It sets `color`, so descendants inherit a legible foreground. Anything inside
+// that pins its own colour — a semantic badge, muted meta text — keeps it, and
+// needs checking against the fill before a surface is switched over.
+export function accentFill(accent: string | null | undefined): CSSProperties | undefined {
+  if (!accent) return undefined;
+  return {
+    backgroundColor: accent,
+    backgroundImage: accentSheen("accent"),
+    color: readableTextColor(accent),
+  };
+}
+
+export function accentStyle(accent: string | null | undefined, pct = 22): CSSProperties | undefined {
   return accent
-    ? { borderColor: accent, backgroundColor: accentTint(accent, pct), backgroundImage: accentSheen() }
+    ? {
+        backgroundColor: accentTint(accent, pct, "hsl(var(--muted))"),
+        backgroundImage: accentSheen(),
+      }
     : undefined;
 }
 

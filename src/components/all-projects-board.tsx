@@ -40,7 +40,7 @@ import { InvalidIndicator, LateBadge } from "@/components/applicant-indicators";
 import { ApplicantPickerDialog } from "@/components/applicant-picker-dialog";
 import { ApplicationListSkeleton } from "@/components/skeletons";
 import { createClient } from "@/lib/supabase/client";
-import { DEFAULT_ACCENT, accentStyle, readableTextColor } from "@/lib/portal-color";
+import { DEFAULT_ACCENT, accentFill, readableTextColor } from "@/lib/portal-color";
 import {
   useAllProjectsBoard,
   usePeriodApplicants,
@@ -66,9 +66,28 @@ const OUTCOME_LABEL: Record<Outcome, string> = {
   rejected: "Rejected",
 };
 
-function outcomeOf(card: BoardCard, projectId: string): Outcome {
+// What the chip says, read off MEMBERSHIP rather than applications.status:
+// "accepted" means they are actually on this column's project (0106).
+//
+// The two used to be able to disagree. Removing someone from a project
+// portal's member list deletes their project_members row (and the managed
+// portal_members row with it) without touching their application, so a card
+// could sit here green and "Accepted" while the person had no project, no
+// project portal, and no project-coloured banner anywhere in the app. The
+// application is a record of a decision; membership is the thing that decision
+// was supposed to produce. Report the latter, so what the board claims and
+// what the member experiences cannot come apart.
+//
+// Rejection has no membership equivalent -- nothing is created by it -- so it
+// still comes from the application, and only once membership has ruled
+// "accepted" out. 0106 makes the menu's other two outcomes clear this column's
+// membership, so a stale row can't outrank a later click.
+//
+// No project id: a BoardCard is already a per-column projection, and `isMember`
+// was resolved against that column when the card was built.
+function outcomeOf(card: BoardCard): Outcome {
+  if (card.isMember) return "accepted";
   if (card.app.status === "rejected") return "rejected";
-  if (card.app.status === "accepted" && card.acceptedProjectId === projectId) return "accepted";
   return "drafted";
 }
 
@@ -94,6 +113,11 @@ function withPendingOutcomes(
         // undecided, and only an accept carries a placement.
         app: { ...card.app, status: outcome === "drafted" ? "submitted" : outcome },
         acceptedProjectId: outcome === "accepted" ? column.project.id : null,
+        // And what it writes to project_members: an accept creates this
+        // column's membership, the other two clear it (0106). This is the field
+        // outcomeOf actually reads, so without it the chip would wait for the
+        // reload -- the one thing the optimistic patch exists to avoid.
+        isMember: outcome === "accepted",
       };
     }),
   }));
@@ -125,7 +149,7 @@ function CardMenu({
   onOutcome: (outcome: Outcome) => void;
   onMove: (toProjectId: string) => void;
 }) {
-  const outcome = outcomeOf(card, project.id);
+  const outcome = outcomeOf(card);
   // Accepted, but onto some other project: the card's own green "Accepted"
   // badge is the application's global status, while this column's outcome is
   // still just "Drafted". Say so on the chip rather than letting the two read
@@ -143,8 +167,8 @@ function CardMenu({
           <Badge
             variant={outcome === "drafted" ? "outline" : undefined}
             className={`inline-flex shrink-0 cursor-pointer items-center gap-1 ${
-              outcome === "accepted" ? "bg-green-600 hover:bg-green-600"
-              : outcome === "rejected" ? "bg-destructive hover:bg-destructive"
+              outcome === "accepted" ? "bg-green-600 text-white hover:bg-green-600"
+              : outcome === "rejected" ? "bg-red-500 text-white hover:bg-red-500"
               : ""
             } ${busy ? "opacity-50" : ""}`}
             title={elsewhere ? "Accepted onto another project" : explain[outcome]}
@@ -203,12 +227,18 @@ function EmptySection({ children }: { children: React.ReactNode }) {
 // ProjectIcon renders nothing for a project with neither an emoji nor an
 // uploaded image; the columns want a placeholder either way so every head card
 // lines up, so fall back to the project's initial on its accent.
+// The head card is painted in `accent` now, so the icon can't also be that
+// colour or it disappears into it — both branches use a scrim of the card's
+// readable foreground instead.
 function ColumnIcon({ project, accent }: { project: BoardProject; accent: string }) {
-  if (project.icon || project.icon_url) return <ProjectIcon project={project} className="h-9 w-9" />;
+  if (project.icon || project.icon_url) {
+    return <ProjectIcon project={project} className="h-9 w-9" onAccent />;
+  }
+  const fg = readableTextColor(accent);
   return (
     <span
       className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg text-sm font-semibold"
-      style={{ backgroundColor: accent, color: readableTextColor(accent) }}
+      style={{ backgroundColor: `color-mix(in srgb, ${fg} 18%, transparent)`, color: fg }}
       aria-hidden
     >
       {project.name.trim().charAt(0).toUpperCase() || "?"}
@@ -245,11 +275,14 @@ function ProjectColumn({
   return (
     <div className="flex w-[300px] shrink-0 flex-col gap-4">
       {/* Head card: the project's identity, painted with its own accent. */}
-      <div className="flex items-center gap-2.5 rounded-xl border px-3 py-2.5" style={accentStyle(accent)}>
+      <div className="flex items-center gap-2.5 rounded-xl px-3 py-2.5" style={accentFill(accent)}>
         <ColumnIcon project={project} accent={accent} />
         <div className="flex min-w-0 flex-col">
           <span className="truncate text-sm font-semibold" title={project.name}>{project.name}</span>
-          <span className="text-xs text-muted-foreground">
+          {/* opacity rather than text-muted-foreground: the head card is painted
+              in the project's accent now, and a theme-fixed muted grey is
+              unreadable on an arbitrary colour. */}
+          <span className="text-xs opacity-70">
             {picks.length} drafted
           </span>
         </div>
@@ -267,7 +300,7 @@ function ProjectColumn({
             // the chip says the same word in the same colour. Still "drafted"
             // (including accepted onto some OTHER project, which outcomeOf reads
             // as drafted here) keeps both the hover-only chip and the badge.
-            const decided = outcomeOf(card, project.id) !== "drafted";
+            const decided = outcomeOf(card) !== "drafted";
             return (
               <StaticApplicantCard
                 key={card.pickId}
@@ -595,9 +628,12 @@ export function AllProjectsBoard({
       stagedByAppId.set(card.app.id, names);
     }
   }
-  // Anyone accepted outside the draft is already placed, so they don't belong
-  // on the list even though they have no pick.
-  const undrafted = (roster ?? []).filter((r) => !confirmedAppIds.has(r.app.id) && !r.acceptedProjectId);
+  // Anyone accepted outside the draft AND actually on that project is already
+  // placed, so they don't belong on the list even though they have no pick.
+  // `placed`, not `acceptedProjectId`: an acceptance whose roster row was later
+  // removed has left them unplaced, and the point of this list is who still
+  // needs placing (0106).
+  const undrafted = (roster ?? []).filter((r) => !confirmedAppIds.has(r.app.id) && !r.placed);
   // The roster is lazy, so the button falls back to the head count's own
   // arithmetic until someone opens the list -- the two agree except for anyone
   // accepted outside the draft.

@@ -121,7 +121,11 @@ export function CalendarPanel({ portalId, portalName, portalColor }: Props) {
   // attendance sheet and its Google sync have no portal settings page to live
   // on — they belong here, next to the events they act on.
   const [attendanceOpen, setAttendanceOpen] = useState(false);
-  const showClubTools = !portalId && isBoardOrExec;
+  // The club attendance sheet opens for everyone: board/exec get the marking
+  // grid, an ordinary member the read-only list of their own status (the same
+  // split the portal sheet already makes, and the one RLS enforces — a member
+  // can only select rows where user_id = auth.uid()).
+  const showClubAttendance = !portalId;
 
   const [formOpen, setFormOpen] = useState(false);
   const [editingEvent, setEditingEvent] = useState<PortalEvent | null>(null);
@@ -355,14 +359,14 @@ export function CalendarPanel({ portalId, portalName, portalColor }: Props) {
         </div>
       </div>
 
-      {showClubTools && (
+      {showClubAttendance && (
         <div className="flex flex-col gap-1.5 border-t mt-3 pt-3">
           <div className="flex items-center gap-3">
             <button
               onClick={() => setAttendanceOpen(true)}
               className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
             >
-              <ClipboardCheck size={13} /> Club attendance
+              <ClipboardCheck size={13} /> {isBoardOrExec ? "Club attendance" : "My attendance"}
             </button>
             {isExec && (
               <button
@@ -379,7 +383,7 @@ export function CalendarPanel({ portalId, portalName, portalColor }: Props) {
         </div>
       )}
 
-      {showClubTools && (
+      {showClubAttendance && (
         <PortalAttendanceModal
           open={attendanceOpen}
           onOpenChange={setAttendanceOpen}

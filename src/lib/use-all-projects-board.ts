@@ -35,14 +35,21 @@ export type BoardProject = {
 // draft-ordered list -- the board shows who a project drafted, not which round
 // each pick came from -- so `submitted` is what tells the two apart. The pick
 // id and the applicant's accepted project ride along because the board's own
-// actions need them: move_draft_pick takes a pick id, and the outcome menu has
-// to know whether "Accepted" means accepted onto *this* column.
+// actions need them: move_draft_pick takes a pick id, and the card's status
+// badge has to say whether this application was accepted somewhere else.
 export type BoardCard = {
   app: AppRow;
   pickId: string;
   roundProjectId: string;
   submitted: boolean;
   acceptedProjectId: string | null;
+  // Whether they are actually ON this column's project -- a non-PM
+  // project_members row. This, not applications.status, is what the card's
+  // outcome chip reads: membership is the state with consequences (the project
+  // portal, its roster, the project-coloured banner), and the two can diverge
+  // when a roster edit removes someone without touching their application.
+  // PM rows are excluded: being a project's PM is not an acceptance.
+  isMember: boolean;
 };
 
 export type BoardColumn = {
@@ -139,9 +146,20 @@ export function useAllProjectsBoard(periodId: string | null, enabled: boolean, r
     const appIds = [...appIdSet];
     const rowById = new Map<string, AppRow>();
     const rankByAppProject: Record<string, number> = {};
-    // Which project (if any) already accepted them -- not part of AppRow, since
-    // only this board's outcome menu needs it.
+    // Which project (if any) the application says accepted them -- not part of
+    // AppRow, since only this board needs it.
     const acceptedByAppId: Record<string, string | null> = {};
+    // The applicant behind each application, so a card can be matched against
+    // project_members (which is keyed by auth user, not by application).
+    const userByAppId: Record<string, string | null> = {};
+    // `${applicantId}:${projectId}` for every non-PM project_members row these
+    // applicants hold -- the board's source of truth for "accepted onto this
+    // column". Readable in full here: the ?project=all view is gated on
+    // canReviewAllProjects (VP Tech / President / VP Projects), all of which
+    // are access_level 'exec', so project_members_select's is_exec() branch
+    // returns every row. A simulated lower persona loses the view itself
+    // rather than seeing a partial board.
+    const memberKeys = new Set<string>();
     if (appIds.length) {
       const [apps, rankings] = await Promise.all([
         selectInChunks<{
@@ -162,7 +180,11 @@ export function useAllProjectsBoard(periodId: string | null, enabled: boolean, r
         ),
       ]);
       for (const r of rankings) rankByAppProject[`${r.application_id}:${r.project_id}`] = r.rank;
-      for (const a of apps) acceptedByAppId[a.id] = a.accepted_project_id;
+      for (const a of apps) {
+        acceptedByAppId[a.id] = a.accepted_project_id;
+        userByAppId[a.id] = a.applicant_id;
+      }
+
       const base: BaseAppRow[] = apps.map((a) => ({
         id: a.id,
         status: a.status,
@@ -171,9 +193,33 @@ export function useAllProjectsBoard(periodId: string | null, enabled: boolean, r
         rank: 0,
         exec_added: a.exec_added,
       }));
-      for (const row of await enrichAppRows(supabase, base)) rowById.set(row.id, row);
+      // Memberships for the picked applicants, keyed by auth user id rather
+      // than application id -- project_members knows nothing about
+      // applications. Every project, not just the drafting ones: a card has to
+      // be able to say "they're on this column" wherever that column sits.
+      // Alongside the enrichment rather than after it: neither feeds the other,
+      // and this board already costs two awaited round trips.
+      const userIds = [...new Set(apps.map((a) => a.applicant_id).filter((id): id is string => !!id))];
+      const [enriched, memberships] = await Promise.all([
+        enrichAppRows(supabase, base),
+        selectInChunks<{ project_id: string; user_id: string; is_pm: boolean | null }>(userIds, (chunk) =>
+          supabase.from("project_members").select("project_id, user_id, is_pm").in("user_id", chunk),
+        ),
+      ]);
+      for (const row of enriched) rowById.set(row.id, row);
+      for (const pm of memberships) {
+        if (!pm.is_pm) memberKeys.add(`${pm.user_id}:${pm.project_id}`);
+      }
       if (gen !== genRef.current) return;
     }
+
+    // Are they on this project? An exec-added card with no member row behind it
+    // has no auth user to match, so it can never be a member -- which is
+    // right: there is nothing to place.
+    const isMemberOf = (appId: string, projectId: string) => {
+      const userId = userByAppId[appId];
+      return !!userId && memberKeys.has(`${userId}:${projectId}`);
+    };
 
     // A card in project X's column shows X's rank and drops X from the
     // "also wishlisted by" chips -- that column already speaks for X.
@@ -190,6 +236,7 @@ export function useAllProjectsBoard(periodId: string | null, enabled: boolean, r
         roundProjectId: slot.roundProjectId,
         submitted: slot.submitted,
         acceptedProjectId: acceptedByAppId[slot.appId] ?? null,
+        isMember: isMemberOf(slot.appId, projectId),
       };
     };
     const bySequence = (a: Slot, b: Slot) =>
@@ -295,6 +342,14 @@ export type RosterRow = {
   // Set when someone was accepted onto a project outside the draft
   // (accept_application places them without creating a pick).
   acceptedProjectId: string | null;
+  // Accepted onto that project AND actually on it -- a non-PM project_members
+  // row for it. What takes someone off the "not drafted" list, for the same
+  // reason the columns read membership: an acceptance whose roster row was
+  // later removed has left them unplaced, so they belong back on the list of
+  // people still to place. Deliberately narrower than "a member of anything":
+  // a returning applicant already sits on last cycle's project and is still
+  // waiting to be placed on this one.
+  placed: boolean;
 };
 
 export function usePeriodRoster(periodId: string | null) {
@@ -342,6 +397,27 @@ export function usePeriodRoster(periodId: string | null) {
     }[];
     const acceptedByAppId: Record<string, string | null> = {};
     for (const r of rows) acceptedByAppId[r.id] = r.accepted_project_id;
+
+    // One membership read for everyone who has an acceptance to confirm. Only
+    // those: the rest are unplaced by definition, so there is nothing to check.
+    const placedAppIds = new Set<string>();
+    const acceptedPairs = rows.filter(
+      (r): r is typeof r & { applicant_id: string; accepted_project_id: string } =>
+        !!r.applicant_id && !!r.accepted_project_id,
+    );
+    if (acceptedPairs.length) {
+      const memberships = await selectInChunks<{ project_id: string; user_id: string; is_pm: boolean | null }>(
+        [...new Set(acceptedPairs.map((r) => r.applicant_id))],
+        (chunk) => supabase.from("project_members").select("project_id, user_id, is_pm").in("user_id", chunk),
+      );
+      const keys = new Set(
+        memberships.filter((pm) => !pm.is_pm).map((pm) => `${pm.user_id}:${pm.project_id}`),
+      );
+      for (const r of acceptedPairs) {
+        if (keys.has(`${r.applicant_id}:${r.accepted_project_id}`)) placedAppIds.add(r.id);
+      }
+      if (gen !== rosterGenRef.current) return;
+    }
     // `rank` is per project and this list belongs to no column, so it stays 0.
     const enriched = await enrichAppRows(
       supabase,
@@ -358,7 +434,11 @@ export function usePeriodRoster(periodId: string | null) {
 
     setRoster(
       enriched
-        .map((app) => ({ app, acceptedProjectId: acceptedByAppId[app.id] ?? null }))
+        .map((app) => ({
+          app,
+          acceptedProjectId: acceptedByAppId[app.id] ?? null,
+          placed: placedAppIds.has(app.id),
+        }))
         .sort((a, b) => applicantName(a.app).localeCompare(applicantName(b.app))),
     );
   }, [periodId]);

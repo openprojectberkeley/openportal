@@ -9,6 +9,7 @@ import {
   DEFAULT_ACCENT,
   accentSheen,
   accentStyle,
+  accentFill,
   accentTint,
   hoverForeground,
   readableTextColor,
@@ -106,19 +107,36 @@ describe("accentSheen", () => {
   });
 });
 
+describe("accentFill", () => {
+  it("paints the raw accent under the sheen, with text that survives on it", () => {
+    expect(accentFill("#6366f1")).toEqual({
+      backgroundColor: "#6366f1",
+      backgroundImage: accentSheen("accent"),
+      color: readableTextColor("#6366f1"),
+    });
+  });
+
+  it("picks dark text on a light accent", () => {
+    expect(accentFill("#EAB308")?.color).toBe("#000000");
+  });
+
+  it("returns undefined with no accent, so callers fall back to their own class", () => {
+    expect(accentFill(null)).toBeUndefined();
+  });
+});
+
 describe("accentStyle", () => {
-  it("layers the sheen over the flat tint, which stays the opaque fill", () => {
+  it("tints toward --muted so it matches the plain cards, with no accent border", () => {
     expect(accentStyle("#6366f1")).toEqual({
-      borderColor: "#6366f1",
-      backgroundColor: accentTint("#6366f1", 14),
+      // 22%, not accentTint's own 14% default — see the note on accentStyle.
+      backgroundColor: accentTint("#6366f1", 22, "hsl(var(--muted))"),
       backgroundImage: accentSheen(),
     });
   });
 
   it("passes a caller's pct through to the flat tint beneath", () => {
     expect(accentStyle("#6366f1", 24)).toEqual({
-      borderColor: "#6366f1",
-      backgroundColor: accentTint("#6366f1", 24),
+      backgroundColor: accentTint("#6366f1", 24, "hsl(var(--muted))"),
       backgroundImage: accentSheen(),
     });
   });

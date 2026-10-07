@@ -30,10 +30,10 @@
     /* Sheen laid over accent-painted surfaces — see accentSheen() in
        lib/portal-color.ts. A white lift at one corner, a shade at the other.
 
-       The card pair is theme-split: it sits on a tint mixed toward --background,
-       so the same alpha reads very differently on the two bases. White over a
-       near-black dark-mode surface goes a long way, while on a light tinted card
-       the base is already near-white and the drop does most of the work.
+       The card pair is theme-split: it sits on a tint mixed toward --muted, so
+       the same alpha reads very differently on the two bases. White over a dark
+       dark-mode surface goes a long way, while on a light tinted card the base
+       is already near-white and the drop does most of the work.
 
        --sheen-lift-accent paints surfaces showing the RAW accent — the dashboard
        card's hover swipe, the calendar's portal tab. Three things make it its

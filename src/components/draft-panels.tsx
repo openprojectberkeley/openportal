@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useDroppable } from "@dnd-kit/core";
 import { Lock } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { accentStyle } from "@/lib/portal-color";
+import { accentFill } from "@/lib/portal-color";
 import { Button } from "@/components/ui/button";
 import { StaticApplicantCard, applicantName, type AppRow } from "@/components/applicant-meta";
 import type { PickRow, DraftPhase, CurrentTurn, MyPosition } from "@/lib/use-draft-picks";
@@ -212,11 +212,15 @@ export function DraftWindowPanel({
                 // so confirming glides the card up into this row (globals.css).
                 <div
                   key={p.id}
-                  style={{ viewTransitionName: `pick-${p.id}`, ...accentStyle(accent) }}
-                  className="flex items-center gap-2 border rounded-lg px-3 py-2"
+                  style={{ viewTransitionName: `pick-${p.id}`, ...accentFill(accent) }}
+                  className="flex items-center gap-2 rounded-lg px-3 py-2"
                 >
                   <span className="flex-1 min-w-0 truncate text-sm font-medium">{app ? applicantName(app) : "Applicant"}</span>
-                  <Badge variant="outline">Round {p.round.round_number}</Badge>
+                  {/* text-current/border-current so the badge rides the accent's
+                      readable foreground instead of the theme's fixed one. */}
+                  <Badge variant="outline" className="border-current/40 text-current">
+                    Round {p.round.round_number}
+                  </Badge>
                 </div>
               );
             })}

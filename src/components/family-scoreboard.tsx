@@ -5,7 +5,7 @@ import Link from "next/link";
 import { ArrowRight, ChevronDown, ChevronRight, Trophy } from "lucide-react";
 import { FamilyMark } from "@/components/family-mark";
 import { ScoreboardCompactSkeleton, ScoreboardSkeleton } from "@/components/skeletons";
-import { accentStyle, accentTint, DEFAULT_ACCENT } from "@/lib/portal-color";
+import { accentFill, accentTint, DEFAULT_ACCENT } from "@/lib/portal-color";
 import { useScoreboard } from "@/lib/use-scoreboard";
 import { useSemesters } from "@/lib/use-semesters";
 import {
@@ -16,12 +16,53 @@ import {
   type ProjectScore,
 } from "@/lib/scoring";
 
-// Podium card heights. The grid is items-end, so a taller first card plus these
-// two produces the podium silhouette with no absolute positioning.
-const PODIUM_HEIGHT = ["min-h-44", "min-h-36", "min-h-36"];
-// Visual order 2nd · 1st · 3rd from sm up, while DOM order stays 1-2-3 so
-// screen readers and the mobile stack read it as a ranked list.
-const PODIUM_ORDER = ["order-1 sm:order-2", "order-2 sm:order-1", "order-3"];
+// Every family gets a card, in rank order — there are only ever a handful, so
+// showing all of them beats a top-three podium that hides the rest. Plain
+// left-to-right order: the trophy marks the leader, so the 2nd-1st-3rd staging
+// a three-card podium needed would only confuse a row of five.
+//
+// Card height is the score, drawn as a column. The floor has to clear the
+// contents' own natural height (mark, name, total, project count — about
+// 170px), or every card below that score collapses to the same size and the
+// bottom of the range stops meaning anything. The grid aligns to the bottom so
+// they read as bars standing on one baseline.
+const CARD_MIN_H = 176;
+const CARD_MAX_H = 264;
+
+function cardHeight(points: number, leader: number): number {
+  return CARD_MIN_H + (barPct(points, leader) / 100) * (CARD_MAX_H - CARD_MIN_H);
+}
+
+// Leader mark. Lucide's Trophy can't do this: filling it solidifies the two
+// handles, which are meant to read as open loops, and its bottom path is a
+// ground line we don't want. Cup and base are filled, handles stay outlines.
+function TrophyMark({ size = 28, className = "" }: { size?: number; className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.75}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden
+    >
+      {/* Handles: outline only, so they stay open loops either side of the cup. */}
+      <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6" />
+      <path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18" />
+      {/* Cup. */}
+      <path d="M18 2H6v7a6 6 0 0 0 12 0V2Z" fill="currentColor" />
+      {/* Stem flaring into a solid plinth — no separate ground line beneath. */}
+      <path
+        d="M10.5 14.5h3V18h2.5a1 1 0 0 1 1 1v1.5h-10V19a1 1 0 0 1 1-1h2.5z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
 
 // A project's segment color: its own accent when it has one, else a stepped
 // tint of the family's so segments stay distinguishable but still read as that
@@ -31,33 +72,59 @@ function segmentColor(project: ProjectScore, familyColor: string | null, i: numb
   return accentTint(familyColor || DEFAULT_ACCENT, Math.max(30, 100 - i * 14)) ?? DEFAULT_ACCENT;
 }
 
-function PodiumCard({ s, slot }: { s: FamilyStanding; slot: number }) {
-  const accent = s.color || DEFAULT_ACCENT;
+function PodiumCard({
+  s,
+  leader,
+  leading,
+}: {
+  s: FamilyStanding;
+  leader: number;
+  leading: boolean;
+}) {
+  // Painted in the raw accent under the same sheen as a portal card's hover
+  // swipe, rather than a tint of it — these cards are the page's one big
+  // expression of a family's colour, so they wear it at full strength and let
+  // readableTextColor pick the text that survives on top.
   return (
-    <div
-      className={`relative overflow-hidden rounded-xl border p-4 flex flex-col items-center justify-end gap-2 text-center ${PODIUM_HEIGHT[slot]} ${PODIUM_ORDER[slot]}`}
-      style={{
-        ...accentStyle(s.color),
-        ...(slot === 0 ? { boxShadow: `inset 0 0 0 1px ${accent}` } : {}),
-      }}
-    >
-      <span
-        className="absolute right-2 top-1 text-4xl font-black tabular-nums text-foreground/10 select-none"
-        aria-hidden
+    // The trophy sits in flow ABOVE the card rather than straddling its edge, so
+    // it never overlaps the accent and only ever has the page behind it. That
+    // makes the row a touch taller for the leader; the grid is items-end, so
+    // every card still stands on the same baseline.
+    <div className="flex flex-col">
+      {leading && (
+        // Family accent at full opacity — same colour as the card beneath, so
+        // the mark reads as belonging to the leader without stroke/fill seams.
+        <span
+          className="mx-auto mb-2"
+          role="img"
+          aria-label="Leading"
+          style={{ color: s.color || DEFAULT_ACCENT }}
+        >
+          <TrophyMark size={28} />
+        </span>
+      )}
+      <div
+        className="relative overflow-hidden rounded-xl p-4 pt-5 flex flex-col items-center justify-end gap-2 text-center"
+        style={{ minHeight: cardHeight(s.points, leader), ...accentFill(s.color || DEFAULT_ACCENT) }}
       >
-        {s.rank}
-      </span>
-      {slot === 0 && <Trophy size={14} style={{ color: accent }} aria-hidden />}
-      <FamilyMark
-        icon={s.icon}
-        iconUrl={s.icon_url}
-        color={s.color}
-        name={s.family_name}
-        size={slot === 0 ? 56 : 44}
-      />
-      <p className="text-sm font-semibold leading-tight line-clamp-2">{s.family_name}</p>
-      <p className={`font-bold tabular-nums ${slot === 0 ? "text-3xl" : "text-2xl"}`}>{s.points}</p>
-      <p className="text-[11px] text-muted-foreground">{countLabel(s.project_count, "project")}</p>
+        <span
+          className="absolute left-2.5 top-1 text-4xl font-black tabular-nums select-none opacity-30"
+          aria-hidden
+        >
+          {s.rank}
+        </span>
+        <FamilyMark
+          icon={s.icon}
+          iconUrl={s.icon_url}
+          color={s.color}
+          name={s.family_name}
+          size={44}
+          onAccent
+        />
+        <p className="text-sm font-semibold leading-tight line-clamp-2">{s.family_name}</p>
+        <p className="text-2xl font-bold tabular-nums">{s.points}</p>
+        <p className="text-[11px] opacity-70">{countLabel(s.project_count, "project")}</p>
+      </div>
     </div>
   );
 }
@@ -140,61 +207,39 @@ function FamilyRow({
           {projects.length === 0 ? (
             <p className="text-sm text-muted-foreground">No projects in this family yet.</p>
           ) : (
-            <>
-              {scoring.length > 0 && familyBarPct > 0 && (
-                <div
-                  className="flex h-2 overflow-hidden rounded-full"
-                  style={{ width: `${familyBarPct}%` }}
-                  role="img"
-                  aria-label={`How ${s.family_name}'s points break down by project`}
-                >
-                  {scoring.map((p, i) => (
+            <div className="flex flex-col gap-1.5">
+              {scoring.map((p, i) => (
+                <div key={p.project_id} className="flex items-center gap-2 text-sm">
+                  <span className="flex-1 truncate">{p.project_name}</span>
+                  <div className="w-24 h-1.5 rounded-full bg-foreground/10 overflow-hidden flex-shrink-0">
                     <div
-                      key={p.project_id}
-                      title={`${p.project_name}: ${p.points}`}
+                      className="h-full rounded-full"
                       style={{
-                        flexGrow: p.points,
-                        flexBasis: 0,
+                        width: `${barPct(p.points, familyBest)}%`,
                         backgroundColor: segmentColor(p, s.color, i),
                       }}
                     />
-                  ))}
+                  </div>
+                  <span className="w-12 text-right tabular-nums font-medium flex-shrink-0">
+                    {p.points}
+                  </span>
                 </div>
-              )}
-              <div className="flex flex-col gap-1.5">
-                {scoring.map((p, i) => (
-                  <div key={p.project_id} className="flex items-center gap-2 text-sm">
-                    <span className="flex-1 truncate">{p.project_name}</span>
-                    <div className="w-24 h-1.5 rounded-full bg-foreground/10 overflow-hidden flex-shrink-0">
-                      <div
-                        className="h-full rounded-full"
-                        style={{
-                          width: `${barPct(p.points, familyBest)}%`,
-                          backgroundColor: segmentColor(p, s.color, i),
-                        }}
-                      />
-                    </div>
-                    <span className="w-12 text-right tabular-nums font-medium flex-shrink-0">
-                      {p.points}
-                    </span>
-                  </div>
-                ))}
-                {idle.map((p) => (
-                  <div
-                    key={p.project_id}
-                    className="flex items-center gap-2 text-sm text-muted-foreground"
-                  >
-                    <span className="flex-1 truncate">{p.project_name}</span>
-                    <span className="text-xs">
-                      {p.points < 0 ? "" : "no points yet"}
-                    </span>
-                    <span className="w-12 text-right tabular-nums flex-shrink-0">
-                      {p.points < 0 ? p.points : ""}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </>
+              ))}
+              {idle.map((p) => (
+                <div
+                  key={p.project_id}
+                  className="flex items-center gap-2 text-sm text-muted-foreground"
+                >
+                  <span className="flex-1 truncate">{p.project_name}</span>
+                  <span className="text-xs">
+                    {p.points < 0 ? "" : "no points yet"}
+                  </span>
+                  <span className="w-12 text-right tabular-nums flex-shrink-0">
+                    {p.points < 0 ? p.points : ""}
+                  </span>
+                </div>
+              ))}
+            </div>
           )}
         </div>
       )}
@@ -269,10 +314,20 @@ export function FamilyStandingsView({
         <EmptyCard>No points awarded yet this semester.</EmptyCard>
       )}
 
-      {scoringStarted && standings.length >= 3 && leader > 0 && (
-        <div className="grid grid-cols-3 gap-3 items-end">
-          {standings.slice(0, 3).map((s, i) => (
-            <PodiumCard key={s.family_id} s={s} slot={i} />
+      {scoringStarted && leader > 0 && (
+        <div
+          className="grid items-end gap-3"
+          // auto-fit rather than a fixed column count: four families shouldn't
+          // leave a hole where a fifth would go, and they wrap on narrow screens.
+          style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}
+        >
+          {standings.map((s) => (
+            <PodiumCard
+              key={s.family_id}
+              s={s}
+              leader={leader}
+              leading={s.rank === 1 && s.points > 0}
+            />
           ))}
         </div>
       )}
@@ -349,7 +404,7 @@ export function FamilyStandingsCompact({
                 {s.family_name}
               </span>
               {i === 0 && leader > 0 && (
-                <Trophy size={11} className="text-muted-foreground flex-shrink-0" aria-hidden />
+                <Trophy size={11} className="text-muted-foreground flex-shrink-0" aria-hidden/>
               )}
               <span
                 className={`text-xs font-bold tabular-nums flex-shrink-0 ${

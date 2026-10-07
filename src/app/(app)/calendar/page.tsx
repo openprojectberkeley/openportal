@@ -380,41 +380,40 @@ function CalendarPageBody() {
       )}
 
       {/* Club-wide tools. The club calendar has no portal, so its attendance
-          sheet and its Google sync have no portal settings page to live on. */}
-      {isBoardOrExec && (
-        <div className="flex flex-col gap-1.5 border-t pt-3">
-          <div className="flex items-center gap-3">
+          sheet and its Google sync have no portal settings page to live on.
+          The sheet is open to all; the sync stays exec-only. */}
+      <div className="flex flex-col gap-1.5 border-t pt-3">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setAttendanceOpen(true)}
+            className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <ClipboardCheck size={13} /> {isBoardOrExec ? "Club attendance" : "My attendance"}
+          </button>
+          {isExec && (
             <button
-              onClick={() => setAttendanceOpen(true)}
-              className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+              onClick={syncGoogleCalendar}
+              disabled={syncing}
+              className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
             >
-              <ClipboardCheck size={13} /> Club attendance
+              <RefreshCw size={13} className={syncing ? "animate-spin" : undefined} />
+              {syncing ? "Syncing..." : "Sync Google Calendar"}
             </button>
-            {isExec && (
-              <button
-                onClick={syncGoogleCalendar}
-                disabled={syncing}
-                className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
-              >
-                <RefreshCw size={13} className={syncing ? "animate-spin" : undefined} />
-                {syncing ? "Syncing..." : "Sync Google Calendar"}
-              </button>
-            )}
-          </div>
-          {syncResult && <p className="text-[11px] text-muted-foreground">{syncResult}</p>}
+          )}
         </div>
-      )}
+        {syncResult && <p className="text-[11px] text-muted-foreground">{syncResult}</p>}
+      </div>
 
-      {isBoardOrExec && (
-        <PortalAttendanceModal
-          open={attendanceOpen}
-          onOpenChange={setAttendanceOpen}
-          canManage={isBoardOrExec}
-          canEditEvents={isExec}
-          // Exec see every member; PMs only the members of projects they PM.
-          fullAccess={isExec}
-        />
-      )}
+      {/* Open to everyone: board/exec get the marking grid, an ordinary member
+          the read-only list of their own status. RLS enforces the same split. */}
+      <PortalAttendanceModal
+        open={attendanceOpen}
+        onOpenChange={setAttendanceOpen}
+        canManage={isBoardOrExec}
+        canEditEvents={isExec}
+        // Exec see every member; PMs only the members of projects they PM.
+        fullAccess={isExec}
+      />
 
       <EventFormDialog
         open={formOpen}

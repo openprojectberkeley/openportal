@@ -102,7 +102,7 @@ export default function ScoreboardPage() {
       </div>
 
       {unassignedWithPoints.length > 0 && (
-        <div className="border rounded-lg px-4 py-3 border-amber-500/40 bg-amber-500/5">
+        <div className="rounded-lg px-4 py-3 bg-amber-500/10">
           <p className="text-sm font-medium">Points that aren&apos;t counting</p>
           <p className="text-xs text-muted-foreground">
             {unassignedWithPoints.length} award

@@ -60,12 +60,11 @@ export function PortalCard({ portal }: { portal: PortalSummary }) {
         <div className="relative z-10 pointer-events-none flex flex-col gap-3 group-hover:text-[var(--hover-fg)] transition-colors">
           <div className="flex items-center gap-3">
             {iconUrl ? (
-              <span
-                className="flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg bg-foreground/5"
-                style={{ backgroundColor: color || undefined }}
-              >
+              // No backing colour: uploaded icons are usually transparent PNGs,
+              // so a tile would box them in and hide the accent swipe behind.
+              <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={iconUrl} alt="" className="h-full w-full object-cover" />
+                <img src={iconUrl} alt="" className="h-full w-full object-contain" />
               </span>
             ) : icon ? (
               <span

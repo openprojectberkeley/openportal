@@ -617,7 +617,9 @@ export function PortalAttendanceModal({
           <MemberRosterSkeleton />
         ) : events.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-3 py-8">
-            <p className="text-sm text-muted-foreground">No events to take attendance for yet.</p>
+            <p className="text-sm text-muted-foreground">
+              {canManage ? "No events to take attendance for yet." : "No attendance has been taken yet."}
+            </p>
             <div className="flex items-center gap-2">
               {canEdit && (
                 <Button size="sm" variant="outline" onClick={openCreate}>

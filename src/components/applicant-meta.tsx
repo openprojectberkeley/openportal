@@ -51,8 +51,17 @@ function invalidReasons(app: AppRow): string[] {
 }
 
 function StatusBadge({ status }: { status: ReviewStatus }) {
-  if (status === "accepted") return <Badge className="shrink-0 bg-green-600 hover:bg-green-600">Accepted</Badge>;
-  if (status === "rejected") return <Badge variant="destructive" className="shrink-0">Rejected</Badge>;
+  // text-white on both: Badge's default variant sets text-primary-foreground,
+  // which is near-black in dark mode and vanishes on these fills. Rejected uses
+  // an explicit red rather than variant="destructive" because --destructive is
+  // only 30.6% lightness in dark mode — dark enough that even white text on it
+  // reads as muddy next to the green.
+  if (status === "accepted") {
+    return <Badge className="shrink-0 bg-green-600 text-white hover:bg-green-600">Accepted</Badge>;
+  }
+  if (status === "rejected") {
+    return <Badge className="shrink-0 bg-red-500 text-white hover:bg-red-500">Rejected</Badge>;
+  }
   return null;
 }
 
@@ -60,10 +69,11 @@ function StatusBadge({ status }: { status: ReviewStatus }) {
 export function ReturningIndicator({ returning }: { returning: boolean }) {
   if (!returning) return null;
   return (
-    <Badge className="shrink-0 gap-1 bg-indigo-600 text-white hover:bg-indigo-600" title="Returning member">
-      <RotateCcw size={11} />
-      Returning
-    </Badge>
+    <RotateCcw
+      size={13}
+      className="shrink-0 text-violet-500 dark:text-violet-400"
+      aria-label="Returning member"
+    />
   );
 }
 
