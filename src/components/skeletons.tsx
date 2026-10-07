@@ -172,7 +172,7 @@ export function AdminPageSkeleton() {
     <div className="p-8 w-full max-w-5xl mx-auto">
       <Skeleton className="h-7 w-28 mb-6" />
       <div className="flex gap-4 mb-6 border-b pb-2">
-        {["members", "projects", "families", "portals", "scoring"].map((t) => (
+        {["members", "projects", "families", "portals"].map((t) => (
           <Skeleton key={t} className="h-4 w-16" />
         ))}
       </div>

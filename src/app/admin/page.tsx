@@ -15,12 +15,11 @@ import { useRoleSim } from "@/components/role-simulation-provider";
 import { ProjectsPanel } from "@/components/projects-panel";
 import { PortalsPanel } from "@/components/portals-panel";
 import { FamiliesPanel } from "@/components/families-panel";
-import { ScoringPanel } from "@/components/scoring-panel";
 import { AdminPageSkeleton } from "@/components/skeletons";
 import { PersonName } from "@/components/person-profile-provider";
 import { MEMBER_STATUS_LABEL, MEMBER_STATUS_VALUES, type MemberStatus } from "@/lib/member-status";
 
-type Tab = "members" | "projects" | "families" | "portals" | "scoring";
+type Tab = "members" | "projects" | "families" | "portals";
 
 type Role = { id: string; role_name: string };
 
@@ -178,7 +177,7 @@ export default function AdminPage() {
       <h1 className="text-2xl font-bold mb-6">Admin</h1>
 
       <div className="flex gap-1 mb-6 border-b">
-        {(["members", "projects", "families", "portals", "scoring"] as Tab[]).map((t) => (
+        {(["members", "projects", "families", "portals"] as Tab[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -209,8 +208,6 @@ export default function AdminPage() {
         <ProjectsPanel members={memberOptions} />
       ) : tab === "families" ? (
         <FamiliesPanel />
-      ) : tab === "scoring" ? (
-        <ScoringPanel />
       ) : tab === "portals" ? (
         <PortalsPanel members={memberOptions} allRoles={allRoles} />
       ) : (

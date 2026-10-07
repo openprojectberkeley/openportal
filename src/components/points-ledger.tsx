@@ -29,11 +29,17 @@ function formatDay(iso: string): string {
  */
 export function PointsLedger({
   entries,
+  title,
   readOnly = false,
   onVoided,
   emptyLabel = "No points awarded yet.",
 }: {
   entries: LedgerEntry[] | null;
+  /**
+   * Section heading, rendered inline with the "show voided" toggle. Owned here
+   * rather than by the caller so the two share a row instead of stacking.
+   */
+  title?: string;
   readOnly?: boolean;
   onVoided?: (id: string) => void;
   emptyLabel?: string;
@@ -42,9 +48,38 @@ export function PointsLedger({
   const [voiding, setVoiding] = useState<LedgerEntry | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  if (entries === null) return <LedgerSkeleton />;
+  const voidedCount = entries?.filter((e) => e.voided_at !== null).length ?? 0;
+  const showToggle = !readOnly && voidedCount > 0;
 
-  const voidedCount = entries.filter((e) => e.voided_at !== null).length;
+  const header = (title || showToggle) && (
+    <div className="flex items-center justify-between gap-3">
+      {title ? (
+        <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+          {title}
+        </h2>
+      ) : (
+        <span />
+      )}
+      {showToggle && (
+        <div className="flex items-center gap-2">
+          <Label htmlFor="show-voided" className="text-xs text-muted-foreground">
+            Show voided ({voidedCount})
+          </Label>
+          <Switch id="show-voided" checked={showVoided} onCheckedChange={setShowVoided} />
+        </div>
+      )}
+    </div>
+  );
+
+  if (entries === null) {
+    return (
+      <div className="flex flex-col gap-2">
+        {header}
+        <LedgerSkeleton />
+      </div>
+    );
+  }
+
   const visible = showVoided ? entries : entries.filter((e) => e.voided_at === null);
 
   const voidEntry = async (entry: LedgerEntry) => {
@@ -61,14 +96,7 @@ export function PointsLedger({
 
   return (
     <div className="flex flex-col gap-2">
-      {!readOnly && voidedCount > 0 && (
-        <div className="flex items-center gap-2 self-end">
-          <Label htmlFor="show-voided" className="text-xs text-muted-foreground">
-            Show voided ({voidedCount})
-          </Label>
-          <Switch id="show-voided" checked={showVoided} onCheckedChange={setShowVoided} />
-        </div>
-      )}
+      {header}
 
       {error && <p className="text-sm text-red-500">{error}</p>}
 

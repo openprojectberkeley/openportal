@@ -51,7 +51,12 @@ export function AwardPointsDialog({
   const [magnitude, setMagnitude] = useState("");
   const [negative, setNegative] = useState(false);
   const [reason, setReason] = useState("");
-  const [awardedOn, setAwardedOn] = useState(todayLocal());
+  // Empty until the dialog opens, not todayLocal(): cacheComponents prerenders
+  // client components on the server, and reading the clock during that render
+  // is an error (and would bake a build-time date into the markup). The open
+  // effect below fills it in on the client, which is the only place "today"
+  // means the user's today anyway.
+  const [awardedOn, setAwardedOn] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 

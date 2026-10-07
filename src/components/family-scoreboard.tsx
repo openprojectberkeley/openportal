@@ -382,12 +382,15 @@ export function FamilyStandingsCompact({
 export function FamilyScoreboard({
   semesterId,
   semesterName,
+  reloadToken = 0,
 }: {
   semesterId: string | null;
   semesterName: string | null;
+  /** Bump to refetch — how exec's award/void controls refresh the board. */
+  reloadToken?: number;
 }) {
   const { standings, byFamily, leader, totalPoints, totalAwards, error } =
-    useScoreboard(semesterId);
+    useScoreboard(semesterId, reloadToken);
 
   if (standings === null) return <ScoreboardSkeleton />;
   if (error) return <EmptyCard>{error}</EmptyCard>;
