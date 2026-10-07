@@ -7,7 +7,7 @@ export default function OnboardingLayout({
 }) {
   return (
     <main className="flex min-h-svh flex-col">
-      <AppNavbar />
+      <AppNavbar tabs={false} />
       <div className="flex w-full flex-1 flex-col">{children}</div>
     </main>
   );

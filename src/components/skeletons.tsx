@@ -60,6 +60,39 @@ export function CalendarSkeleton() {
   );
 }
 
+// Mirrors the /calendar page: title + toolbar, the period/switcher row, and
+// the 6x7 month grid.
+export function CalendarPageSkeleton() {
+  return (
+    <div className="w-full max-w-6xl mx-auto p-5 flex flex-col gap-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Skeleton className="h-9 w-40" />
+        <div className="flex items-center gap-2">
+          <Skeleton className="h-9 w-28 rounded-lg" />
+          <Skeleton className="h-9 w-28 rounded-md" />
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-1">
+          <Skeleton className="h-7 w-14 rounded-md" />
+          <Skeleton className="h-7 w-7 rounded-md" />
+          <Skeleton className="h-7 w-7 rounded-md" />
+          <Skeleton className="ml-1 h-4 w-36" />
+        </div>
+        <Skeleton className="h-9 w-56 rounded-lg" />
+      </div>
+      <div className="grid grid-cols-7 gap-px rounded-xl border p-px">
+        {Array.from({ length: 7 }, (_, i) => (
+          <Skeleton key={`w${i}`} className="h-6 rounded-sm" />
+        ))}
+        {Array.from({ length: 42 }, (_, i) => (
+          <Skeleton key={`d${i}`} className="h-[6.5rem] rounded-sm sm:h-[7.5rem]" />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // Mirrors the CalendarPanel selected-day event rows (bg-accent/40 pills).
 export function EventListSkeleton({ count = 2 }: { count?: number }) {
   return (

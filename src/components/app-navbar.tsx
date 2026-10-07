@@ -3,8 +3,8 @@
 import { createClient } from "@/lib/supabase/client";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
-import { Trophy } from "lucide-react";
+import { Suspense, useEffect, useState } from "react";
+import { CalendarDays, LayoutDashboard, Trophy } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -15,6 +15,15 @@ import { ProfileDialog } from "@/components/profile-dialog";
 import { useRoleSim } from "@/components/role-simulation-provider";
 import { NotificationBell } from "@/components/notification-bell";
 import { OpenPortalBrandIcon } from "@/components/open-portal-brand-icon";
+import { NavTabs, NavTabsFallback, type NavTabSpec } from "@/components/nav-tab";
+
+// The header's primary navigation. Adding a destination is one line here; the
+// swipe hover and the active-route styling come with NavTab.
+const TABS: NavTabSpec[] = [
+  { href: "/", icon: LayoutDashboard, label: "Dashboard" }, // "exact" by default
+  { href: "/calendar", icon: CalendarDays, label: "Calendar" },
+  { href: "/scoreboard", icon: Trophy, label: "Scoreboard" },
+];
 
 type MemberInfo = {
   userId: string;
@@ -23,7 +32,12 @@ type MemberInfo = {
   avatarUrl: string | null;
 };
 
-export function AppNavbar() {
+/**
+ * `tabs`: onboarding mounts this navbar too, and three tabs inviting the user
+ * out of that funnel mid-flow is wrong — so the decision is the layout's, by
+ * route, not something derived from loading state.
+ */
+export function AppNavbar({ tabs = true }: { tabs?: boolean } = {}) {
   const router = useRouter();
   const { isExec, isBoardOrExec } = useRoleSim();
   const [member, setMember] = useState<MemberInfo | null>(null);
@@ -68,22 +82,25 @@ export function AppNavbar() {
         className="sticky top-0 z-40 w-full flex justify-center border-b border-b-foreground/10 h-16 bg-background"
       >
         <div className="w-full max-w-6xl flex justify-between items-center p-3 px-5 text-sm">
-          <div className="flex gap-5 items-center font-semibold">
-            <Link href="/" className="flex items-center gap-2">
+          <div className="flex items-center gap-2 sm:gap-4">
+            <Link href="/" className="flex items-center gap-2 font-semibold" aria-label="Open Portal">
               <OpenPortalBrandIcon className="h-7 w-auto" aria-hidden />
-              Open Portal
+              {/* The brand text drops below sm so three labelled tabs fit. */}
+              <span className="hidden sm:inline">Open Portal</span>
             </Link>
+            {/* Not gated on `member`: the tabs need only the pathname, and
+                gating primary navigation behind two round trips would leave the
+                sticky header empty for a few hundred ms on every hard load.
+                Unauthenticated requests never reach these routes — src/proxy.ts
+                redirects them to the login page. */}
+            {tabs && (
+              <Suspense fallback={<NavTabsFallback tabs={TABS} />}>
+                <NavTabs tabs={TABS} />
+              </Suspense>
+            )}
           </div>
           {member && (
             <div className="flex items-center gap-1.5">
-            <Link
-              href="/scoreboard"
-              aria-label="Scoreboard"
-              title="Scoreboard"
-              className="flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            >
-              <Trophy size={18} />
-            </Link>
             <NotificationBell />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>

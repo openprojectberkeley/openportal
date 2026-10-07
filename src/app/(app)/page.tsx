@@ -442,7 +442,17 @@ export default function HomePage() {
             <div className="flex flex-col">
               <div className="flex items-center justify-between mb-3">
                 <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-                  Calendar
+                  <Link
+                    href="/calendar"
+                    className="group flex items-center gap-1 transition-colors hover:text-foreground"
+                  >
+                    Calendar
+                    <ArrowRight
+                      size={12}
+                      className="transition-transform group-hover:translate-x-0.5"
+                      aria-hidden
+                    />
+                  </Link>
                 </h2>
               </div>
               {/* On narrow screens the calendar moves above the content (below the
