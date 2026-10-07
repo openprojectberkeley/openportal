@@ -26,6 +26,25 @@
     --border: 255 14% 88%;
     --input: 255 14% 88%;
     --ring: 255 12% 40%;
+
+    /* Sheen laid over accent-painted surfaces — see accentSheen() in
+       lib/portal-color.ts. A white lift at one corner, a shade at the other.
+
+       The card pair is theme-split: it sits on a tint mixed toward --background,
+       so the same alpha reads very differently on the two bases. White over a
+       near-black dark-mode surface goes a long way, while on a light tinted card
+       the base is already near-white and the drop does most of the work.
+
+       --sheen-lift-accent paints surfaces showing the RAW accent — the dashboard
+       card's hover swipe, the calendar's portal tab. Three things make it its
+       own value. That colour is the portal's own hex in BOTH themes, so it is
+       not theme-split. Those surfaces are large, so the corner-to-corner delta
+       is spread over a long diagonal and needs more range to read at all. And
+       they carry readableTextColor() text directly, which is why there is no
+       matching drop: see the comment on accentSheen(). */
+    --sheen-lift: 0.26;
+    --sheen-drop: 0.11;
+    --sheen-lift-accent: 0.34;
     --chart-1: 12 76% 61%;
     --chart-2: 173 58% 39%;
     --chart-3: 197 37% 24%;
@@ -53,6 +72,10 @@
     --border: 0 0% 14.9%;
     --input: 0 0% 14.9%;
     --ring: 0 0% 83.1%;
+
+    /* Card pair only — the -accent pair is theme-independent, see :root. */
+    --sheen-lift: 0.12;
+    --sheen-drop: 0.20;
     --chart-1: 220 70% 50%;
     --chart-2: 160 60% 45%;
     --chart-3: 30 80% 55%;

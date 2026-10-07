@@ -25,6 +25,7 @@ type ContextValue = {
   refresh: () => void;
   markAllRead: () => void;
   markRead: (id: string) => void;
+  dismiss: (id: string) => void;
 };
 
 const NotificationsContext = createContext<ContextValue | null>(null);
@@ -40,6 +41,7 @@ const NOOP: ContextValue = {
   refresh: () => {},
   markAllRead: () => {},
   markRead: () => {},
+  dismiss: () => {},
 };
 
 export function useNotifications(): ContextValue {
@@ -48,6 +50,15 @@ export function useNotifications(): ContextValue {
 
 const HORIZON_MS = 24 * 60 * 60 * 1000;
 const POLL_MS = 60 * 1000;
+// Notifications are kept for 30 days. The panel only ever shows this window,
+// and anything older is deleted outright (RLS lets a user delete their own
+// rows). Static hosting has no cron, so the owner's browser prunes on mount —
+// the same self-service pattern as reminder generation above.
+const RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+
+function retentionCutoffIso(): string {
+  return new Date(Date.now() - RETENTION_MS).toISOString();
+}
 
 function whenLabel(iso: string): string {
   return new Date(iso).toLocaleString("en-US", {
@@ -129,15 +140,29 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
   const [userId, setUserId] = useState<string | null>(null);
   const userIdRef = useRef<string | null>(null);
   const refreshingRef = useRef(false);
+  const prunedRef = useRef(false);
 
   const fetchItems = useCallback(async (supabase: ReturnType<typeof createClient>, userId: string) => {
     const { data } = await supabase
       .from("notifications")
       .select("*")
       .eq("user_id", userId)
+      .gte("created_at", retentionCutoffIso())
       .order("created_at", { ascending: false })
       .limit(50);
     return (data ?? []) as AppNotification[];
+  }, []);
+
+  // Drop anything past the retention window. Once per mount: the rows are gone
+  // after the first pass, so the 60s poll doesn't need to repeat it.
+  const prune = useCallback(async (supabase: ReturnType<typeof createClient>, userId: string) => {
+    if (prunedRef.current) return;
+    prunedRef.current = true;
+    await supabase
+      .from("notifications")
+      .delete()
+      .eq("user_id", userId)
+      .lt("created_at", retentionCutoffIso());
   }, []);
 
   const refresh = useCallback(async () => {
@@ -154,6 +179,8 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
         setUserId(userId);
       }
 
+      await prune(supabase, userId);
+
       let list = await fetchItems(supabase, userId);
       const existingReminderTimes = new Set(
         list.filter((n) => n.type === "reminder" && n.meeting_time).map((n) => new Date(n.meeting_time!).toISOString()),
@@ -164,7 +191,7 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
     } finally {
       refreshingRef.current = false;
     }
-  }, [fetchItems]);
+  }, [fetchItems, prune]);
 
   // Refresh on mount, on tab focus, and on a slow interval (no realtime).
   useEffect(() => {
@@ -193,10 +220,19 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
     await supabase.from("notifications").update({ read: true }).eq("id", id);
   }, []);
 
+  // Clear a single notification. Deleted rather than just marked read: opening
+  // the panel already marks everything read, so dismissing is the only action
+  // that meaningfully removes an item. RLS allows deleting own rows.
+  const dismiss = useCallback(async (id: string) => {
+    setItems((prev) => prev.filter((n) => n.id !== id)); // optimistic
+    const supabase = createClient();
+    await supabase.from("notifications").delete().eq("id", id);
+  }, []);
+
   const unreadCount = items.reduce((n, item) => n + (item.read ? 0 : 1), 0);
 
   return (
-    <NotificationsContext.Provider value={{ items, unreadCount, userId, open, setOpen, refresh, markAllRead, markRead }}>
+    <NotificationsContext.Provider value={{ items, unreadCount, userId, open, setOpen, refresh, markAllRead, markRead, dismiss }}>
       {children}
     </NotificationsContext.Provider>
   );

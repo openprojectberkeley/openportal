@@ -28,6 +28,11 @@ export function eventTintColor(category: EventCategory, portalColor: string | nu
  *
  * `pct`: 18 for cards, 24 for month chips, 26 for week blocks — a smaller mark
  * needs more saturation to read as the same colour.
+ *
+ * This stays a FLAT colour: the event card splices the value into a
+ * `linear-gradient(...)` of its own for the hover wash, so a gradient here
+ * would nest. The sheen every event surface wears on top is accentSheen(),
+ * which is colour-agnostic and layers over this as a backgroundImage.
  */
 export function eventSurface(category: EventCategory, portalColor: string | null, pct = 18): string {
   const tint = eventTintColor(category, portalColor);

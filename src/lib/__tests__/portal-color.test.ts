@@ -7,6 +7,8 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_ACCENT,
+  accentSheen,
+  accentStyle,
   accentTint,
   hoverForeground,
   readableTextColor,
@@ -76,5 +78,52 @@ describe("accentTint", () => {
     expect(accentTint(null)).toBeUndefined();
     expect(accentTint(undefined)).toBeUndefined();
     expect(accentTint("")).toBeUndefined();
+  });
+});
+
+describe("accentSheen", () => {
+  it("is colour-agnostic, so one gradient works over any accent in either theme", () => {
+    expect(accentSheen()).toBe(
+      "linear-gradient(145deg, rgb(255 255 255 / var(--sheen-lift)) 0%," +
+        " rgb(255 255 255 / 0) 48%, rgb(0 0 0 / var(--sheen-drop)) 100%)",
+    );
+  });
+
+  it("never nests color-mix inside the gradient — engines drop that outright", () => {
+    expect(accentSheen()).not.toContain("color-mix");
+  });
+
+  it("only ever lifts over a raw accent, since darkening is what breaks its text", () => {
+    expect(accentSheen("accent")).toBe(
+      "linear-gradient(145deg, rgb(255 255 255 / var(--sheen-lift-accent)) 0%," +
+        " rgb(255 255 255 / 0) 100%)",
+    );
+    expect(accentSheen("accent")).not.toContain("rgb(0 0 0");
+  });
+
+  it("honours a custom angle, for a surface only partly on screen", () => {
+    expect(accentSheen("accent", "to right")).toContain("linear-gradient(to right,");
+  });
+});
+
+describe("accentStyle", () => {
+  it("layers the sheen over the flat tint, which stays the opaque fill", () => {
+    expect(accentStyle("#6366f1")).toEqual({
+      borderColor: "#6366f1",
+      backgroundColor: accentTint("#6366f1", 14),
+      backgroundImage: accentSheen(),
+    });
+  });
+
+  it("passes a caller's pct through to the flat tint beneath", () => {
+    expect(accentStyle("#6366f1", 24)).toEqual({
+      borderColor: "#6366f1",
+      backgroundColor: accentTint("#6366f1", 24),
+      backgroundImage: accentSheen(),
+    });
+  });
+
+  it("returns undefined with no accent", () => {
+    expect(accentStyle(null)).toBeUndefined();
   });
 });

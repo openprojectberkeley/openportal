@@ -3,6 +3,7 @@
 import { MapPin, Pencil, Trash2, CalendarPlus, ExternalLink } from "lucide-react";
 import { CATEGORY_META, isRoleGated } from "@/lib/event-category";
 import { eventSurface } from "@/lib/event-tint";
+import { accentSheen } from "@/lib/portal-color";
 import { formatEventDate, formatEventTime } from "@/lib/dates";
 import { downloadEventIcs } from "@/lib/ics";
 import { cn } from "@/lib/utils";
@@ -35,7 +36,9 @@ export function EventCard({
   actions?: boolean;
 }) {
   // Opaque card color, reused for the hover overlay's gradient so it washes out
-  // the content beneath the buttons in the card's own colour.
+  // the content beneath the buttons in the card's own colour. Flat on purpose —
+  // the sheen is a separate backgroundImage, since this one gets spliced into a
+  // linear-gradient() below.
   const cardBg = eventSurface(ev.category, color, 18);
   return (
     <div
@@ -43,7 +46,7 @@ export function EventCard({
         "group/event relative overflow-hidden rounded-md px-2.5 py-2 flex flex-col gap-1",
         onClick && "cursor-pointer",
       )}
-      style={{ backgroundColor: cardBg }}
+      style={{ backgroundColor: cardBg, backgroundImage: accentSheen() }}
       onClick={onClick}
     >
       <div className="flex items-start gap-2">

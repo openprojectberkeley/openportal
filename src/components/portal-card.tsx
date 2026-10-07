@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { ClipboardCheck, Cog, Users } from "lucide-react";
-import { accentTint, hoverForeground, readableTextColor, DEFAULT_ACCENT } from "@/lib/portal-color";
+import { accentSheen, accentTint, hoverForeground, readableTextColor, DEFAULT_ACCENT } from "@/lib/portal-color";
 import { PortalSettingsModal } from "@/components/portal-settings-modal";
 import { PortalMembersModal } from "@/components/portal-members-modal";
 import { PortalAttendanceModal } from "@/components/portal-attendance-modal";
@@ -46,10 +46,14 @@ export function PortalCard({ portal }: { portal: PortalSummary }) {
         {/* Full-card click target (a button can't nest in an <a>, so the link is
             an overlay and the controls sit above it). */}
         <Link href={`/portals/${portal.id}`} aria-label={`Open ${name}`} className="absolute inset-0 z-0" />
-        {/* Accent swipe: the chosen color wipes in from left to right on hover. */}
+        {/* Accent swipe: the chosen color wipes in from left to right on hover,
+            under a very light diagonal sheen so the fill isn't a flat slab. */}
         <div
           className="absolute inset-0 z-0 origin-left scale-x-0 group-hover:scale-x-100 pointer-events-none transition-transform duration-300 ease-out"
-          style={{ backgroundColor: color || DEFAULT_ACCENT }}
+          style={{
+            backgroundColor: color || DEFAULT_ACCENT,
+            backgroundImage: accentSheen("accent"),
+          }}
           aria-hidden
         />
 

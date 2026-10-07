@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { ScrollArea } from "@/components/overlay-scrollbar";
 import { dayKey, formatEventTime, formatHour, shortTime, WEEKDAYS_SHORT } from "@/lib/dates";
 import { eventSurface } from "@/lib/event-tint";
+import { accentSheen } from "@/lib/portal-color";
 import { isBandEvent, layoutDay } from "@/lib/week-layout";
 import { cn } from "@/lib/utils";
 import type { PortalEvent } from "@/lib/use-calendar-events";
@@ -116,7 +117,10 @@ export function CalendarWeekGrid({
                     type="button"
                     onClick={() => onOpenEvent(ev, key)}
                     title={ev.title}
-                    style={{ backgroundColor: eventSurface(ev.category, color, 26) }}
+                    style={{
+                      backgroundColor: eventSurface(ev.category, color, 26),
+                      backgroundImage: accentSheen(),
+                    }}
                     className="w-full truncate rounded px-1 py-0.5 text-left text-[11px] font-medium leading-tight transition-opacity hover:opacity-85 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                   >
                     {ev.title}
@@ -174,6 +178,7 @@ export function CalendarWeekGrid({
                         left: `${(lane / lanes) * 100}%`,
                         width: `${100 / lanes}%`,
                         backgroundColor: eventSurface(ev.category, color, 26),
+                        backgroundImage: accentSheen(),
                       }}
                       // focus-visible:z-20 so a focused block in a narrow lane
                       // isn't occluded by its neighbour.

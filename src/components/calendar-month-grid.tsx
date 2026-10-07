@@ -2,6 +2,7 @@
 
 import { dayKey, formatEventTime, shortTime, weekdayLabels } from "@/lib/dates";
 import { eventSurface } from "@/lib/event-tint";
+import { accentSheen } from "@/lib/portal-color";
 import { cn } from "@/lib/utils";
 import type { PortalEvent } from "@/lib/use-calendar-events";
 
@@ -97,7 +98,10 @@ export function CalendarMonthGrid({
                       title={`${ev.title} — ${ev.all_day ? "All day" : formatEventTime(ev.start_time)}`}
                       // Text stays currentColor: eventSurface mixes toward the
                       // theme background, so the foreground reads in both themes.
-                      style={{ backgroundColor: eventSurface(ev.category, color, 24) }}
+                      style={{
+                        backgroundColor: eventSurface(ev.category, color, 24),
+                        backgroundImage: accentSheen(),
+                      }}
                       className="flex w-full min-w-0 items-center gap-1 overflow-hidden rounded px-1 py-0.5 text-left text-[11px] leading-tight transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                     >
                       <span className="min-w-0 flex-1 truncate font-medium">{ev.title}</span>

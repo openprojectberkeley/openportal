@@ -1,6 +1,6 @@
 "use client";
 
-import { Bell } from "lucide-react";
+import { Bell, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import {
   DropdownMenu,
@@ -34,7 +34,7 @@ function hrefFor(n: AppNotification, selfId: string | null): string {
 
 export function NotificationBell() {
   const router = useRouter();
-  const { items, unreadCount, userId, markAllRead, markRead } = useNotifications();
+  const { items, unreadCount, userId, markAllRead, markRead, dismiss } = useNotifications();
 
   return (
     <DropdownMenu onOpenChange={(o) => { if (o) markAllRead(); }}>
@@ -61,18 +61,30 @@ export function NotificationBell() {
           ) : (
             <ScrollArea className="max-h-96">
               {items.map((n) => (
-                <button
-                  key={n.id}
-                  onClick={() => { markRead(n.id); router.push(hrefFor(n, userId)); }}
-                  className="w-full text-left px-3 py-2.5 border-b last:border-b-0 hover:bg-accent transition-colors flex gap-2"
-                >
-                  <span className={`mt-1.5 h-1.5 w-1.5 rounded-full flex-shrink-0 ${n.read ? "bg-transparent" : "bg-blue-500"}`} />
-                  <span className="flex flex-col gap-0.5 min-w-0">
-                    <span className="text-sm font-medium">{n.title}</span>
-                    {n.body && <span className="text-xs text-muted-foreground leading-snug">{n.body}</span>}
-                    <span className="text-[11px] text-muted-foreground/70">{relativeTime(n.created_at)}</span>
-                  </span>
-                </button>
+                /* The dismiss control is a SIBLING of the row button, not a
+                   child: nesting a button inside a button is invalid HTML and
+                   the inner click wouldn't be isolable from the navigation. */
+                <div key={n.id} className="relative group border-b last:border-b-0">
+                  <button
+                    onClick={() => { markRead(n.id); router.push(hrefFor(n, userId)); }}
+                    className="w-full text-left pl-3 pr-9 py-2.5 hover:bg-accent transition-colors flex gap-2"
+                  >
+                    <span className={`mt-1.5 h-1.5 w-1.5 rounded-full flex-shrink-0 ${n.read ? "bg-transparent" : "bg-blue-500"}`} />
+                    <span className="flex flex-col gap-0.5 min-w-0">
+                      <span className="text-sm font-medium">{n.title}</span>
+                      {n.body && <span className="text-xs text-muted-foreground leading-snug">{n.body}</span>}
+                      <span className="text-[11px] text-muted-foreground/70">{relativeTime(n.created_at)}</span>
+                    </span>
+                  </button>
+                  <button
+                    aria-label="Dismiss notification"
+                    title="Dismiss"
+                    onClick={(e) => { e.stopPropagation(); dismiss(n.id); }}
+                    className="absolute top-2 right-2 h-6 w-6 rounded-md flex items-center justify-center text-muted-foreground/60 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-accent hover:text-foreground transition-opacity focus:outline-none"
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
               ))}
             </ScrollArea>
           )}

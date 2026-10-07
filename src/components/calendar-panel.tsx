@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Plus, RefreshCw, ClipboardCheck } from "lucide-react";
 import { EventListSkeleton } from "@/components/skeletons";
-import { hoverForeground, DEFAULT_ACCENT } from "@/lib/portal-color";
+import { accentSheen, hoverForeground, DEFAULT_ACCENT } from "@/lib/portal-color";
 import { dayKey, dateFromKey, MONTHS, WEEKDAYS_SHORT } from "@/lib/dates";
 import { useRoleSim } from "@/components/role-simulation-provider";
 import { CATEGORY_META, type EventCategory } from "@/lib/event-category";
@@ -59,8 +59,11 @@ function PortalBackingCard({
           // hover swipe — so a portal reads the same color here as on the
           // dashboard. DEFAULT_ACCENT keeps a colorless portal intentional
           // rather than transparent. Border matches the fill so the peek is one
-          // solid shape instead of a rimmed box.
+          // solid shape instead of a rimmed box. The sheen runs left-to-right
+          // rather than diagonally: only the PEEK strip is ever visible, so a
+          // vertical component would clip to the gradient's lightest end.
           backgroundColor: color || DEFAULT_ACCENT,
+          backgroundImage: accentSheen("accent", "to right"),
           borderColor: color || DEFAULT_ACCENT,
         }}
       >
