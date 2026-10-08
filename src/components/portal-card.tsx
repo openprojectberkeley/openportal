@@ -47,9 +47,13 @@ export function PortalCard({ portal }: { portal: PortalSummary }) {
             an overlay and the controls sit above it). */}
         <Link href={`/portals/${portal.id}`} aria-label={`Open ${name}`} className="absolute inset-0 z-0" />
         {/* Accent swipe: the chosen color wipes in from left to right on hover,
-            under a very light diagonal sheen so the fill isn't a flat slab. */}
+            under a very light diagonal sheen so the fill isn't a flat slab.
+            At rest it stays revealed as a thin strip down the left edge, so the
+            card carries its accent without hover and the swipe reads as that
+            strip widening. Clipped rather than scaled so the strip keeps a fixed
+            width at any card size and the sheen gradient isn't squashed into it. */}
         <div
-          className="absolute inset-0 z-0 origin-left scale-x-0 group-hover:scale-x-100 pointer-events-none transition-transform duration-300 ease-out"
+          className="absolute inset-0 z-0 pointer-events-none transition-[clip-path] duration-300 ease-out [clip-path:inset(0_calc(100%_-_4px)_0_0)] group-hover:[clip-path:inset(0)] motion-reduce:transition-none"
           style={{
             backgroundColor: color || DEFAULT_ACCENT,
             backgroundImage: accentSheen("accent"),
