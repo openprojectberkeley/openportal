@@ -41,10 +41,13 @@ export default function ScoreboardPage() {
 
   const semesterId = picked ?? active?.id ?? null;
   const semester = semesters?.find((s) => s.id === semesterId) ?? null;
-  // Exec is auditing, not skimming, so they get the deeper slice of the log.
+  // Both roles page and search the log in the browser, so the limit is just how
+  // far back it reaches: members read the recent window, exec is auditing and
+  // gets the lot. 500 is score_ledger's own server-side ceiling — a semester
+  // past that would need a cursor on the RPC rather than a bigger number here.
   const { entries, reload: reloadLedger, markVoided } = useScoreLedger(
     semesterId,
-    isExec ? 50 : 15,
+    isExec ? 500 : 50,
   );
 
   const refresh = useCallback(async () => {
@@ -58,7 +61,8 @@ export default function ScoreboardPage() {
   }, [reloadSemesters]);
 
   // Awards against a project with no family count for nobody — worth saying
-  // out loud, but only to the person who can fix it.
+  // out loud, but only to the person who can fix it. Counted over exec's full
+  // slice of the log, so this is every such award in the semester.
   const unassignedWithPoints = isExec
     ? (entries ?? []).filter((e) => e.family_id === null && e.voided_at === null)
     : [];
@@ -66,7 +70,7 @@ export default function ScoreboardPage() {
   return (
     <div className="w-full max-w-6xl mx-auto p-5 flex flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-3xl font-bold">Family Scoreboard</h1>
+        <h1 className="text-3xl font-bold">Scoreboard</h1>
         <div className="flex flex-wrap items-center gap-2">
           {semesters !== null && semesters.length > 1 && (
             <DropdownMenu>

@@ -1,14 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { LedgerSkeleton } from "@/components/skeletons";
 import { PersonName } from "@/components/person-profile-provider";
 import { DEFAULT_ACCENT } from "@/lib/portal-color";
-import { formatPoints, type LedgerEntry } from "@/lib/scoring";
+import { formatPoints, ledgerMatches, type LedgerEntry } from "@/lib/scoring";
 
 function formatDay(iso: string): string {
   // `awarded_on` is a DATE, so parse the parts rather than letting Date treat
@@ -26,7 +28,15 @@ function formatDay(iso: string): string {
  * mechanism, and the whole point of it over an offsetting row is that the
  * original amount, reason and awarder remain readable. `readOnly` drops the
  * void column so the member-facing scoreboard can render the same feed.
+ *
+ * Search and paging are both client-side over whatever the caller loaded: the
+ * score_ledger RPC takes no offset or query, and a semester's log is small
+ * enough (tens of rows, 500 at the RPC's ceiling) that one fetch beats a round
+ * trip per page — which also keeps a search over every page instant.
  */
+// Enough to scan in one screenful without turning the log into a scroll.
+const PAGE_SIZE = 20;
+
 export function PointsLedger({
   entries,
   title,
@@ -47,12 +57,25 @@ export function PointsLedger({
   const [showVoided, setShowVoided] = useState(false);
   const [voiding, setVoiding] = useState<LedgerEntry | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [page, setPage] = useState(0);
 
+  // Counted over every entry, not the current page or the search hits, so the
+  // toggle keeps meaning "voided in this log".
   const voidedCount = entries?.filter((e) => e.voided_at !== null).length ?? 0;
   const showToggle = !readOnly && voidedCount > 0;
+  const showSearch = (entries?.length ?? 0) > 0;
 
-  const header = (title || showToggle) && (
-    <div className="flex items-center justify-between gap-3">
+  // Back to the first page when the reader changes what they're looking at.
+  // Deliberately NOT on `entries`: markVoided hands back a new array on every
+  // void, which would throw an exec voiding a row on page 3 back to page 1.
+  // The clamp below already covers the list shrinking under them.
+  useEffect(() => {
+    setPage(0);
+  }, [query, showVoided]);
+
+  const header = (title || showToggle || showSearch) && (
+    <div className="flex flex-wrap items-center justify-between gap-3">
       {title ? (
         <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
           {title}
@@ -60,14 +83,31 @@ export function PointsLedger({
       ) : (
         <span />
       )}
-      {showToggle && (
-        <div className="flex items-center gap-2">
-          <Label htmlFor="show-voided" className="text-xs text-muted-foreground">
-            Show voided ({voidedCount})
-          </Label>
-          <Switch id="show-voided" checked={showVoided} onCheckedChange={setShowVoided} />
-        </div>
-      )}
+      <div className="flex flex-wrap items-center gap-3">
+        {showSearch && (
+          <>
+            <Label htmlFor="points-log-search" className="sr-only">
+              Search the points log
+            </Label>
+            <Input
+              id="points-log-search"
+              type="search"
+              placeholder="Search project, family, reason…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              className="h-8 w-56 text-xs"
+            />
+          </>
+        )}
+        {showToggle && (
+          <div className="flex items-center gap-2">
+            <Label htmlFor="show-voided" className="text-xs text-muted-foreground">
+              Show voided ({voidedCount})
+            </Label>
+            <Switch id="show-voided" checked={showVoided} onCheckedChange={setShowVoided} />
+          </div>
+        )}
+      </div>
     </div>
   );
 
@@ -80,7 +120,24 @@ export function PointsLedger({
     );
   }
 
+  // Voided filter first (that's what the toggle has always meant), then the
+  // search, then the slice.
   const visible = showVoided ? entries : entries.filter((e) => e.voided_at === null);
+  const searching = query.trim().length > 0;
+  const filtered = searching ? visible.filter((e) => ledgerMatches(e, query)) : visible;
+
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  // Clamped rather than reset, so a void or a semester switch that shortens the
+  // list lands the reader on the last page instead of an empty one.
+  const safePage = Math.min(page, pageCount - 1);
+  const start = safePage * PAGE_SIZE;
+  const pageRows = filtered.slice(start, start + PAGE_SIZE);
+
+  const emptyMessage = searching
+    ? `No entries match “${query.trim()}”.`
+    : showToggle && visible.length === 0
+      ? "Every entry in this log is voided. Turn on “Show voided” to see them."
+      : emptyLabel;
 
   const voidEntry = async (entry: LedgerEntry) => {
     const supabase = createClient();
@@ -114,7 +171,7 @@ export function PointsLedger({
             </tr>
           </thead>
           <tbody>
-            {visible.map((e) => {
+            {pageRows.map((e) => {
               const isVoid = e.voided_at !== null;
               return (
                 <tr key={e.id} className={isVoid ? "line-through opacity-50" : undefined}>
@@ -168,19 +225,55 @@ export function PointsLedger({
                 </tr>
               );
             })}
-            {visible.length === 0 && (
+            {pageRows.length === 0 && (
               <tr>
                 <td
                   colSpan={readOnly ? 6 : 7}
                   className="px-3 py-8 text-center text-sm text-muted-foreground"
                 >
-                  {emptyLabel}
+                  {emptyMessage}
                 </td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
+
+      {filtered.length > PAGE_SIZE && (
+        <nav
+          className="flex items-center justify-between gap-3 text-xs text-muted-foreground"
+          aria-label="Points log pages"
+        >
+          <span className="tabular-nums" aria-live="polite">
+            Showing {start + 1}–{start + pageRows.length} of {filtered.length}
+          </span>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              disabled={safePage === 0}
+              aria-label="Previous page"
+              onClick={() => setPage(safePage - 1)}
+            >
+              Previous
+            </Button>
+            <span className="tabular-nums">
+              {safePage + 1} / {pageCount}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              disabled={safePage >= pageCount - 1}
+              aria-label="Next page"
+              onClick={() => setPage(safePage + 1)}
+            >
+              Next
+            </Button>
+          </div>
+        </nav>
+      )}
 
       <ConfirmDialog
         open={voiding !== null}

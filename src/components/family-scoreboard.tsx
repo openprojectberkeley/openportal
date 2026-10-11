@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { ArrowRight, ChevronDown, ChevronRight, Trophy } from "lucide-react";
 import { FamilyMark } from "@/components/family-mark";
@@ -12,6 +12,7 @@ import {
   barPct,
   countLabel,
   rankLabel,
+  rankProjects,
   type FamilyStanding,
   type ProjectScore,
 } from "@/lib/scoring";
@@ -31,6 +32,27 @@ const CARD_MAX_H = 264;
 
 function cardHeight(points: number, leader: number): number {
   return CARD_MIN_H + (barPct(points, leader) / 100) * (CARD_MAX_H - CARD_MIN_H);
+}
+
+// The Projects list is the same idea on its side: a bar per project, long
+// enough to carry its own label. Same floor problem as the cards, so the same
+// answer — the bar can't be shorter than the rank, mark, name and total sitting
+// inside it, or every project below that score renders identically and the
+// bottom of the range says nothing. 44% leaves room on the page's narrowest
+// column; BAR_MIN_W is the pixel backstop for phone widths, where 44% of the
+// viewport isn't enough for the text either.
+const BAR_MIN_PCT = 44;
+const BAR_MIN_W = "min(100%, 18rem)";
+// A project in the red gets a bar too — it earned its position the same way the
+// rest did. It sits below the positive floor so it's visibly the shortest thing
+// on the chart, and that's as far as the length goes: barPct's reasoning holds
+// here, there's no sensible direction to draw a negative in on a chart anchored
+// at the left, so the signed number inside the bar carries the rest.
+const BAR_NEG_PCT = 36;
+
+function barWidth(points: number, top: number): string {
+  if (points < 0) return `${BAR_NEG_PCT}%`;
+  return `${BAR_MIN_PCT + (barPct(points, top) / 100) * (100 - BAR_MIN_PCT)}%`;
 }
 
 // Leader mark. Lucide's Trophy can't do this: filling it solidifies the two
@@ -70,6 +92,16 @@ function TrophyMark({ size = 28, className = "" }: { size?: number; className?: 
 function segmentColor(project: ProjectScore, familyColor: string | null, i: number): string {
   if (project.color) return project.color;
   return accentTint(familyColor || DEFAULT_ACCENT, Math.max(30, 100 - i * 14)) ?? DEFAULT_ACCENT;
+}
+
+// A project's bar in the cross-family Projects list: its own accent, else its
+// family's flat. Deliberately NOT segmentColor — that steps the tint down by
+// position to separate siblings inside one family's breakdown, which across a
+// global list of twenty would fade the tail to nothing. Two projects of the
+// same family sharing a colour is fine here, because every row names its
+// family next to the bar.
+function projectBarColor(p: ProjectScore, familyColor: string | null | undefined): string {
+  return p.color || familyColor || DEFAULT_ACCENT;
 }
 
 function PodiumCard({
@@ -255,6 +287,75 @@ function EmptyCard({ children }: { children: React.ReactNode }) {
   );
 }
 
+const TABS = [
+  { id: "families", label: "Families" },
+  { id: "projects", label: "Projects" },
+] as const;
+
+type ScoreboardTab = (typeof TABS)[number]["id"];
+
+/**
+ * The Families / Projects switch above the board.
+ *
+ * Same underline strip as the Admin page's tabs, but with the ARIA that one
+ * never grew: a real tablist with roving tabindex and arrow-key movement, so
+ * the two views are reachable without a mouse. Local to this file rather than a
+ * ui/ primitive — there's one consumer, and the admin strip's per-tab counts
+ * and lack of panels make a shared component a worse fit than a copy.
+ *
+ * No ?view= search param: the page's own note is that nothing there reads
+ * request-time state, which is what lets it skip a Suspense boundary under
+ * cacheComponents. useSearchParams would take that away for a toggle nobody
+ * needs to link to.
+ */
+function ScoreboardTabs({
+  tab,
+  onTab,
+  counts,
+}: {
+  tab: ScoreboardTab;
+  onTab: (t: ScoreboardTab) => void;
+  counts: Partial<Record<ScoreboardTab, number>>;
+}) {
+  return (
+    <div role="tablist" aria-label="Scoreboard view" className="flex gap-1 border-b">
+      {TABS.map((t, i) => (
+        <button
+          key={t.id}
+          type="button"
+          role="tab"
+          id={`scoreboard-tab-${t.id}`}
+          aria-selected={tab === t.id}
+          aria-controls={`scoreboard-panel-${t.id}`}
+          // Roving tabindex: one stop for the whole strip, then arrows within it.
+          tabIndex={tab === t.id ? 0 : -1}
+          onClick={() => onTab(t.id)}
+          onKeyDown={(e) => {
+            const step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+            if (!step) return;
+            e.preventDefault();
+            const next = TABS[(i + step + TABS.length) % TABS.length];
+            onTab(next.id);
+            document.getElementById(`scoreboard-tab-${next.id}`)?.focus();
+          }}
+          className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+            tab === t.id
+              ? "border-foreground text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          {t.label}
+          {counts[t.id] !== undefined && (
+            <span className="ml-1 text-[10px] font-normal text-muted-foreground/60">
+              ({counts[t.id]})
+            </span>
+          )}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /**
  * The full scoreboard: a podium for the top three, then every family as a
  * ranked row whose bar is scaled to the leader, each expanding to show which
@@ -351,6 +452,148 @@ export function FamilyStandingsView({
 }
 
 /**
+ * The Projects tab: every project that belongs to a family, ranked against
+ * every other project rather than only against its siblings.
+ *
+ * The family view answers "who's winning"; this one answers "what's actually
+ * carrying it", which the per-family breakdown can't — a mid-table family's
+ * strongest project can outscore the leader's weakest, and nesting hides that.
+ *
+ * Only family-assigned projects reach here (the caller filters): those are the
+ * ones in the competition. A project with no family has points that count for
+ * nobody, which the page already says out loud to the one person who can fix it
+ * instead of ranking it against projects that do count.
+ *
+ * Pure, like FamilyStandingsView — bars are divs with an inline width, since
+ * there's no chart library and the accents are per-row data.
+ */
+export function ProjectStandingsView({
+  projects,
+  standings,
+  totalPoints,
+  totalAwards,
+  semesterName,
+}: {
+  /** project_scores rows, already filtered to projects with a family. */
+  projects: ProjectScore[];
+  /** For the family a project belongs to — project_scores carries only its id. */
+  standings: FamilyStanding[];
+  totalPoints: number;
+  totalAwards: number;
+  semesterName: string | null;
+}) {
+  // Keyed loosely so a row's own `family_id` (nullable on the RPC shape, though
+  // the caller has filtered the nulls out) can be looked up without a cast.
+  const families = useMemo(
+    () => new Map<string | null, FamilyStanding>(standings.map((f) => [f.family_id, f])),
+    [standings],
+  );
+
+  // Anything that moved gets ranked, in either direction — a penalty is a
+  // result, and rankProjects already sorts it to the bottom. Only projects
+  // sitting on a true zero go to the tail: numbering a dozen of those would be
+  // noise, and they have nothing to say yet.
+  const scoring = projects.filter((p) => p.points !== 0);
+  const idle = projects.filter((p) => p.points === 0);
+  const ranked = rankProjects(scoring);
+  // Bars scale to the best project, the way the family list scales to the leader.
+  const top = ranked[0]?.points ?? 0;
+
+  if (projects.length === 0) {
+    return <EmptyCard>No projects have been assigned to a family yet.</EmptyCard>;
+  }
+
+  return (
+    <div className="flex flex-col gap-6">
+      <p className="text-xs text-muted-foreground">
+        <span className="text-sm font-semibold text-foreground">{semesterName}</span>
+        {" · "}
+        {countLabel(projects.length, "project")}
+        {(totalPoints !== 0 || totalAwards > 0) && (
+          <>
+            {" · "}
+            {totalPoints} point{totalPoints === 1 ? "" : "s"} awarded {" · "}
+            {countLabel(totalAwards, "award")}
+          </>
+        )}
+      </p>
+
+      {ranked.length === 0 ? (
+        <EmptyCard>No points awarded yet this semester.</EmptyCard>
+      ) : (
+        // No container border and no track behind the bars: they stand on the
+        // page the way the podium columns do, so the row of lengths reads as
+        // one chart rather than a bordered list that happens to be coloured.
+        <div className="flex flex-col gap-2">
+          {ranked.map((p, i) => {
+            const family = families.get(p.family_id);
+            const accent = projectBarColor(p, family?.color);
+            return (
+              <div
+                key={p.project_id}
+                className="relative overflow-hidden rounded-xl pl-2 pr-4 py-3 flex items-center gap-3 transition-[width] duration-700 ease-out"
+                style={{
+                  width: barWidth(p.points, top),
+                  minWidth: BAR_MIN_W,
+                  ...accentFill(accent),
+                }}
+              >
+                <span
+                  className="w-9 text-center text-xl font-black tabular-nums select-none opacity-40 flex-shrink-0"
+                  aria-hidden
+                >
+                  {rankLabel(ranked, i)}
+                </span>
+                <FamilyMark
+                  icon={family?.icon ?? null}
+                  iconUrl={family?.icon_url ?? null}
+                  color={family?.color ?? null}
+                  name={family?.family_name ?? p.project_name}
+                  size={32}
+                  onAccent
+                />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold leading-tight truncate">{p.project_name}</p>
+                  <p className="text-[11px] opacity-70 truncate">
+                    {family?.family_name ?? "—"} · {countLabel(p.award_count, "award")}
+                  </p>
+                </div>
+                {/* At the bar's own end rather than a shared right margin: the
+                    number belongs to the tip of its bar. */}
+                <span className="text-xl font-bold tabular-nums flex-shrink-0">{p.points}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {idle.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+            Not scoring yet
+          </h3>
+          <div className="border rounded-xl divide-y overflow-hidden">
+            {idle.map((p) => {
+              const family = families.get(p.family_id);
+              return (
+                <div
+                  key={p.project_id}
+                  className="px-4 py-2.5 flex items-center gap-3 text-sm text-muted-foreground"
+                >
+                  <span className="flex-1 min-w-0 truncate text-foreground">{p.project_name}</span>
+                  <span className="text-xs truncate">{family?.family_name ?? "—"}</span>
+                  <span className="w-24 text-right text-xs flex-shrink-0">no points yet</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
  * The dashboard sidebar's standings glance: the same ranked rows and the same
  * bar scale as the page, at 320px. Pure, for the same reason as
  * FamilyStandingsView.
@@ -431,8 +674,15 @@ export function FamilyStandingsCompact({
 }
 
 /**
- * What the /scoreboard page mounts: loads one semester's standings and hands
- * them to FamilyStandingsView, or explains why there's nothing to show.
+ * What the /scoreboard page mounts: loads one semester's standings once and
+ * switches between the two readings of them — families competing, or projects
+ * ranked against each other — or explains why there's nothing to show.
+ *
+ * The tab lives here rather than on the page because this is where the single
+ * useScoreboard call is; lifting it would mean either a second fetch of the
+ * same two RPCs or handing the rows back down as props. It also means the
+ * reader's choice survives a semester switch, since this component isn't
+ * remounted when semesterId changes.
  */
 export function FamilyScoreboard({
   semesterId,
@@ -444,23 +694,61 @@ export function FamilyScoreboard({
   /** Bump to refetch — how exec's award/void controls refresh the board. */
   reloadToken?: number;
 }) {
-  const { standings, byFamily, leader, totalPoints, totalAwards, error } =
+  const { standings, projects, byFamily, leader, totalPoints, totalAwards, error } =
     useScoreboard(semesterId, reloadToken);
+  const [tab, setTab] = useState<ScoreboardTab>("families");
 
+  // The competition is between family-assigned projects. An unassigned one's
+  // points count for nobody — the page warns exec about those separately
+  // rather than ranking them here.
+  const assigned = useMemo(
+    () => (projects ?? []).filter((p) => p.family_id !== null),
+    [projects],
+  );
+
+  // No strip on these four: there's nothing to switch between until there are
+  // standings to show, and showing it over an error would just offer the reader
+  // a second empty view.
   if (standings === null) return <ScoreboardSkeleton />;
   if (error) return <EmptyCard>{error}</EmptyCard>;
   if (!semesterId) return <EmptyCard>No semester is active yet.</EmptyCard>;
   if (standings.length === 0) return <EmptyCard>No families have been set up yet.</EmptyCard>;
 
   return (
-    <FamilyStandingsView
-      standings={standings}
-      byFamily={byFamily}
-      leader={leader}
-      totalPoints={totalPoints}
-      totalAwards={totalAwards}
-      semesterName={semesterName}
-    />
+    <div className="flex flex-col gap-6">
+      <ScoreboardTabs
+        tab={tab}
+        onTab={setTab}
+        counts={{ families: standings.length, projects: assigned.length }}
+      />
+      {/* The panel wrapper carries the tab relationship so the views themselves
+          stay pure and renderable on their own. */}
+      <div
+        role="tabpanel"
+        id={`scoreboard-panel-${tab}`}
+        aria-labelledby={`scoreboard-tab-${tab}`}
+        tabIndex={0}
+      >
+        {tab === "families" ? (
+          <FamilyStandingsView
+            standings={standings}
+            byFamily={byFamily}
+            leader={leader}
+            totalPoints={totalPoints}
+            totalAwards={totalAwards}
+            semesterName={semesterName}
+          />
+        ) : (
+          <ProjectStandingsView
+            projects={assigned}
+            standings={standings}
+            totalPoints={totalPoints}
+            totalAwards={totalAwards}
+            semesterName={semesterName}
+          />
+        )}
+      </div>
+    </div>
   );
 }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { groupByFamily, type FamilyStanding, type ProjectScore } from "@/lib/scoring";
 import { useRefreshOnReturn } from "@/lib/use-refresh-on-return";
@@ -19,7 +19,11 @@ import { useRefreshOnReturn } from "@/lib/use-refresh-on-return";
  */
 export function useScoreboard(semesterId: string | null, reloadToken = 0) {
   const [standings, setStandings] = useState<FamilyStanding[] | null>(null);
-  const [byFamily, setByFamily] = useState<Map<string | null, ProjectScore[]>>(new Map());
+  // The flat project_scores rows, as the RPC returned them (points desc, then
+  // name). Held raw rather than only as the grouped Map because the Projects
+  // standings rank every project against every other — `byFamily` below is
+  // derived from these, so the two can't drift.
+  const [projects, setProjects] = useState<ProjectScore[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   // The semester switcher can change mid-flight, so only the newest load writes.
   const genRef = useRef(0);
@@ -38,12 +42,12 @@ export function useScoreboard(semesterId: string | null, reloadToken = 0) {
     if (standingError || projectError) {
       setError("Couldn't load the scoreboard.");
       setStandings([]);
-      setByFamily(new Map());
+      setProjects([]);
       return;
     }
     setError(null);
     setStandings((standingRows ?? []) as FamilyStanding[]);
-    setByFamily(groupByFamily((projectRows ?? []) as ProjectScore[]));
+    setProjects((projectRows ?? []) as ProjectScore[]);
   }, [semesterId]);
 
   useEffect(() => {
@@ -54,9 +58,11 @@ export function useScoreboard(semesterId: string | null, reloadToken = 0) {
   // or a bfcache restore would otherwise leave it showing stale standings.
   useRefreshOnReturn(reload);
 
+  const byFamily = useMemo(() => groupByFamily(projects ?? []), [projects]);
+
   const leader = standings?.[0]?.points ?? 0;
   const totalPoints = standings?.reduce((sum, s) => sum + s.points, 0) ?? 0;
   const totalAwards = standings?.reduce((sum, s) => sum + s.award_count, 0) ?? 0;
 
-  return { standings, byFamily, leader, totalPoints, totalAwards, error, reload };
+  return { standings, projects, byFamily, leader, totalPoints, totalAwards, error, reload };
 }
