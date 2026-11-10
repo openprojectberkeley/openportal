@@ -13,6 +13,7 @@ import { ResumeReviewPanel } from "@/components/resume-review-panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PortalGridSkeleton, CalendarSkeleton, ScoreboardCompactSkeleton } from "@/components/skeletons";
 import { FamilyScoreboardCard } from "@/components/family-scoreboard";
+import { AnnouncementBanners } from "@/components/announcement-banners";
 import { getHomeView, shouldShowReapplyBanner } from "@/lib/member-status";
 
 type CompletionState = {
@@ -304,6 +305,8 @@ export default function HomePage() {
   if (view === "dashboard") {
     return (
       <div className="w-full max-w-6xl mx-auto p-5 flex flex-col gap-6">
+        <AnnouncementBanners />
+
         {/* Board/exec shortcut into the application manager, shown only while a
             period is open; the profile menu carries it the rest of the year. A
             dark-gray pill; on hover white swipes in from the left (like the
