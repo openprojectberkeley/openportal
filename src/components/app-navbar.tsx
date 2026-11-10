@@ -124,6 +124,9 @@ export function AppNavbar({ tabs = true }: { tabs?: boolean } = {}) {
                 <DropdownMenuItem onSelect={() => setProfileOpen(true)}>
                   Profile
                 </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => router.push("/attendance")}>
+                  Attendance
+                </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => router.push("/resume-review")}>
                   Resume Review
                 </DropdownMenuItem>
