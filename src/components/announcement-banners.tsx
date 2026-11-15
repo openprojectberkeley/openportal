@@ -74,7 +74,7 @@ export function AnnouncementBanners() {
  * Live announcements as one glass strip hanging off the bottom of the sticky
  * header (rendered inside AppNavbar's sticky wrapper, so it stays attached
  * while scrolling). Square top flush with the header rule, rounded bottom.
- * Each announcement is its own band in its colour at ~72% over a blurred,
+ * Each announcement is its own band in its colour at ~90% over a lightly blurred,
  * saturated page, with readable text and the gradient rim.
  */
 export function HeaderAnnouncements() {
@@ -106,11 +106,11 @@ export function HeaderAnnouncements() {
           <div
             key={a.id}
             className={cn(
-              "flex items-start gap-2.5 px-4 py-2 text-sm font-medium backdrop-blur-xl backdrop-saturate-150",
+              "flex items-start gap-2.5 px-4 py-2 text-sm font-medium backdrop-blur-md backdrop-saturate-150",
               i > 0 && "border-t border-black/10",
             )}
             style={{
-              backgroundColor: `color-mix(in srgb, ${a.color} 72%, transparent)`,
+              backgroundColor: `color-mix(in srgb, ${a.color} 90%, transparent)`,
               color: readableTextColor(a.color),
             }}
           >

@@ -772,17 +772,17 @@ export function DraftRoundsManager() {
 
   return (
     <div className="flex flex-col gap-6">
-      {error && <p className="text-sm text-red-500">{error}</p>}
+      {error && <p className="text-sm text-destructive">{error}</p>}
 
       {/* Period picker */}
       {periods === null ? (
-        <div className="h-9 w-48 rounded-md bg-muted animate-pulse" />
+        <div className="h-9 w-48 rounded-md bg-foreground/[0.09] animate-pulse" />
       ) : periods.length === 0 ? (
         <span className="text-sm text-muted-foreground">No application periods yet.</span>
       ) : (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button className="flex items-center gap-2 self-start border rounded-md px-3 py-2 text-sm bg-background hover:bg-accent transition-colors">
+            <button className="flex h-9 items-center gap-2 self-start rounded-md border border-input bg-transparent px-3 text-sm shadow-sm hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
               <span className="text-muted-foreground">Draft for</span>
               <span className="font-medium">{selectedPeriod?.name ?? "Select period"}</span>
               <ChevronDown size={14} className="text-muted-foreground" />
@@ -803,7 +803,7 @@ export function DraftRoundsManager() {
           {completedAt ? (
             <>
               <div className="flex items-center gap-2 text-sm">
-                <CheckCheck size={16} className="text-green-600" />
+                <CheckCheck size={16} className="text-success" />
                 <span>
                   Draft completed{draftedLabel ? ` — ${draftedLabel} applicants drafted` : ""}
                   <span className="text-muted-foreground"> ({new Date(completedAt).toLocaleString()})</span>.
@@ -852,7 +852,7 @@ export function DraftRoundsManager() {
                 </Button>
                 <Button
                   size="sm"
-                  className="bg-green-600 hover:bg-green-600/90"
+                  className="bg-success text-success-foreground hover:bg-success/90"
                   onClick={() => setConfirmTarget({ kind: "complete" })}
                   disabled={working}
                 >
@@ -942,7 +942,7 @@ export function DraftRoundsManager() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
             {/* LEFT: the single, editable pick-order box for the active round */}
             {rounds === null ? (
-              <div className="h-24 rounded-xl bg-muted animate-pulse" />
+              <div className="h-24 rounded-xl bg-foreground/[0.09] animate-pulse" />
             ) : rounds.length === 0 ? (
               <div className="px-4 py-10 text-center text-sm text-muted-foreground rounded-xl surface flex flex-col gap-3 items-center">
                 No rounds yet. Add one to start setting up the draft.
@@ -1146,8 +1146,9 @@ function PicksThisRound({
             return (
               <div
                 key={rp.id}
-                className={`flex flex-col gap-1.5 rounded-lg p-2 ${
-                  rp.id === currentPickId ? "bg-background shadow-edge" : ""
+                aria-current={rp.id === currentPickId ? "step" : undefined}
+                className={`flex flex-col gap-0.5 rounded-lg p-2 ${
+                  rp.id === currentPickId ? "bg-foreground/[0.06]" : ""
                 }`}
               >
                 <div className="flex items-center justify-between gap-2">
@@ -1177,13 +1178,13 @@ function PicksThisRound({
                   </div>
                 </div>
                 {row.appIds.length === 0 ? (
-                  <p className="px-1 py-1 text-xs text-muted-foreground">No picks yet.</p>
+                  <p className="py-1 pl-7 text-xs text-muted-foreground">No picks yet</p>
                 ) : (
                   row.appIds.map((appId, i) => {
                     const ind = indByAppId[appId];
                     const rank = rankByAppProject[`${appId}:${rp.project_id}`] ?? 0;
                     return (
-                      <div key={`${appId}-${i}`} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm bg-background shadow-edge">
+                      <div key={`${appId}-${i}`} className="group flex items-center gap-1.5 rounded-md py-1 pl-7 pr-1 text-sm hover:bg-foreground/[0.04]">
                         <button
                           type="button"
                           onClick={() => onOpenApplicant(appId)}
@@ -1194,7 +1195,7 @@ function PicksThisRound({
                         {rank > 0 && (
                           <span
                             className="shrink-0 text-[11px] tabular-nums text-muted-foreground/70"
-                            title={rankLabel(rank)}
+                            aria-label={rankLabel(rank)}
                           >
                             {rankLabel(rank).split(" ")[0]}
                           </span>
@@ -1300,36 +1301,28 @@ function RoundCard({
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
   return (
-    <div className="rounded-xl surface p-4 flex flex-col gap-3">
-      {addableProjects.length > 0 && (
-        <div className="flex items-center justify-end">
-          <CommandPicker
-            align="end"
-            options={addableProjects.map((p) => ({ value: p.id, label: p.name }))}
-            onSelect={(id) => {
-              const p = addableProjects.find((x) => x.id === id);
-              if (p) onAddProject(p);
-            }}
-            searchPlaceholder="Search projects…"
-            emptyText="No projects left to add"
-            contentClassName="w-64"
-          >
-            <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs">
-              <Plus size={13} className="mr-1.5" />
-              Add project
-            </Button>
-          </CommandPicker>
+    <div className="rounded-xl surface p-2 flex flex-col gap-1">
+      {/* Column labels once, instead of "Picks" / "Confirmed" on every row. */}
+      {round.projects.length > 0 && (
+        <div className="flex items-center gap-2 px-2.5 pb-1 pt-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          <span className="w-4 shrink-0" />
+          <span className="flex-1">Pick order</span>
+          <span className="w-24 shrink-0 whitespace-nowrap text-right normal-case font-normal tracking-normal tabular-nums">
+            {round.projects.filter((rp) => boardRows[rp.id]?.submittedAt).length}/{round.projects.length} confirmed
+          </span>
+          <span className="w-14 shrink-0 text-center">Picks</span>
+          <span className="w-4 shrink-0" />
         </div>
       )}
 
       {round.projects.length === 0 ? (
-        <div className="px-4 py-6 text-center text-sm text-muted-foreground rounded-lg bg-background/60">
-          No projects in this round.
+        <div className="px-4 py-6 text-center text-sm text-muted-foreground">
+          No projects in this round
         </div>
       ) : (
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onReorder}>
           <SortableContext items={round.projects.map((p) => p.id)} strategy={verticalListSortingStrategy}>
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-0.5">
               {round.projects.map((rp, i) => (
                 <ProjectTile
                   key={rp.id}
@@ -1346,6 +1339,27 @@ function RoundCard({
             </div>
           </SortableContext>
         </DndContext>
+      )}
+
+      {addableProjects.length > 0 && (
+        <div className="px-1 pt-1">
+          <CommandPicker
+            align="end"
+            options={addableProjects.map((p) => ({ value: p.id, label: p.name }))}
+            onSelect={(id) => {
+              const p = addableProjects.find((x) => x.id === id);
+              if (p) onAddProject(p);
+            }}
+            searchPlaceholder="Search projects…"
+            emptyText="No projects left to add"
+            contentClassName="w-64"
+          >
+            <Button variant="ghost" size="sm" className="h-8 px-2.5 text-muted-foreground hover:text-foreground">
+              <Plus size={14} className="mr-1.5" />
+              Add project
+            </Button>
+          </CommandPicker>
+        </div>
       )}
     </div>
   );
@@ -1386,49 +1400,50 @@ function ProjectTile({
     <div
       ref={setNodeRef}
       style={style}
-      className={`flex items-center gap-2 rounded-lg px-2.5 py-2 ${
-        isCurrent ? "bg-accent shadow-[inset_0_0_0_1px_hsl(var(--foreground)/0.14)]" : "bg-background shadow-edge"
+      aria-current={isCurrent ? "step" : undefined}
+      className={`group relative flex items-center gap-2 rounded-lg px-2.5 py-1.5 ${
+        isDragging ? "bg-background shadow-overlay" : isCurrent ? "bg-foreground/[0.07]" : "hover:bg-foreground/[0.04]"
       }`}
     >
+      {/* The position doubles as the drag handle: the grip shows on hover. */}
       <button
         {...attributes}
         {...listeners}
-        className="text-muted-foreground/50 hover:text-muted-foreground cursor-grab touch-none shrink-0"
-        aria-label="Drag to reorder"
+        className="relative flex w-4 shrink-0 cursor-grab touch-none justify-center text-xs font-medium tabular-nums text-muted-foreground"
+        aria-label={`Drag to reorder (position ${position})`}
       >
-        <GripVertical size={16} />
+        <span className="group-hover:opacity-0">{position}</span>
+        <GripVertical size={15} className="absolute inset-0 m-auto opacity-0 group-hover:opacity-100" aria-hidden />
       </button>
-      <span className="w-4 shrink-0 text-xs font-medium text-muted-foreground">{position}.</span>
       <button
         type="button"
         onClick={onOpenInfo}
-        className="flex min-w-0 flex-1 items-center gap-2 text-left hover:opacity-80"
-        title={`${rp.name} — details`}
+        className="flex min-w-0 flex-1 items-center gap-2 text-left underline-offset-2 hover:underline"
       >
         <ProjectIcon project={rp} className="h-6 w-6" />
         <span className="truncate text-sm font-medium">{rp.name}</span>
       </button>
-      {confirmed ? (
-        <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-success">
-          <Check size={13} /> Confirmed
-        </span>
-      ) : stagedCount > 0 ? (
-        <span className="shrink-0 text-xs text-muted-foreground">{stagedCount} staged</span>
-      ) : null}
-      <label className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
-        Picks
-        <Input
-          type="number"
-          min={0}
-          value={rp.pick_count}
-          onChange={(e) => onPickCountChange(Number(e.target.value))}
-          onBlur={(e) => onPickCountCommit(Number(e.target.value))}
-          className="h-7 w-14 px-2 text-xs"
-        />
-      </label>
+      <span className="flex w-24 shrink-0 justify-end text-xs">
+        {confirmed ? (
+          <span className="flex items-center gap-1 text-success" aria-label="Picks confirmed">
+            <Check size={14} />
+          </span>
+        ) : stagedCount > 0 ? (
+          <span className="text-muted-foreground tabular-nums">{stagedCount} staged</span>
+        ) : null}
+      </span>
+      <Input
+        type="number"
+        min={0}
+        aria-label={`Picks for ${rp.name}`}
+        value={rp.pick_count}
+        onChange={(e) => onPickCountChange(Number(e.target.value))}
+        onBlur={(e) => onPickCountCommit(Number(e.target.value))}
+        className="h-7 w-14 shrink-0 px-2 text-center text-xs tabular-nums"
+      />
       <button
         onClick={onRemove}
-        className="text-muted-foreground/50 hover:text-destructive shrink-0"
+        className="flex w-4 shrink-0 justify-center text-muted-foreground opacity-0 hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
         aria-label={`Remove ${rp.name} from this round`}
       >
         <X size={15} />

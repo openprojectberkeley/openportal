@@ -32,7 +32,7 @@ export function CoffeeChatIndicator({
       <TooltipTrigger asChild>
         <span
           aria-label={label}
-          className={`inline-flex items-center gap-0.5 ${done ? "text-green-600" : "text-amber-600"}`}
+          className={`inline-flex items-center gap-0.5 ${done ? "text-success" : "text-warning"}`}
         >
           <Coffee size={14} />
           {done ? <Check size={12} className="stroke-[3]" /> : <Clock size={12} />}
@@ -50,14 +50,15 @@ export function CoffeeChatIndicator({
 export function InfosessionIndicator({ attended }: { attended?: boolean | null }) {
   if (!attended) return null;
   return (
-    <span
-      title="Attended an info session"
-      aria-label="Attended an info session"
-      className="inline-flex items-center gap-0.5 text-sky-600"
-    >
-      <Presentation size={14} />
-      <Check size={12} className="stroke-[3]" />
-    </span>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span aria-label="Attended an info session" className="inline-flex items-center gap-0.5 text-info">
+          <Presentation size={14} />
+          <Check size={12} className="stroke-[3]" />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="top">Attended an info session</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -102,13 +103,15 @@ export function LateBadge({
   if (!isLate(submittedAt, endsAt)) return null;
   const days = daysLate(submittedAt, endsAt);
   return (
-    <span
-      className={cn("inline-flex shrink-0 items-center gap-0.5 text-[11px] font-medium text-warning", className)}
-      title={`Submitted ${days} ${days === 1 ? "day" : "days"} after the period deadline`}
-    >
-      <Clock size={11} aria-hidden />
-      {days}d late
-    </span>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className={cn("inline-flex shrink-0 items-center gap-0.5 text-[11px] font-medium text-warning", className)}>
+          <Clock size={11} aria-hidden />
+          {days}d late
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="top">Submitted {days} {days === 1 ? "day" : "days"} after the period deadline</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -120,7 +123,7 @@ export function InvalidIndicator({ valid }: { valid?: boolean | null }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span className="inline-flex items-center text-red-600 dark:text-red-400" aria-label="Missing recruiting requirements">
+        <span className="inline-flex items-center text-destructive" aria-label="Missing recruiting requirements">
           <AlertTriangle size={14} />
         </span>
       </TooltipTrigger>
@@ -135,13 +138,14 @@ export function InvalidIndicator({ valid }: { valid?: boolean | null }) {
 export function SubmittedApplicationIndicator({ submitted }: { submitted?: boolean | null }) {
   if (!submitted) return null;
   return (
-    <span
-      title="Submitted an application"
-      aria-label="Submitted an application"
-      className="inline-flex items-center gap-0.5 text-violet-600"
-    >
-      <FileCheck size={14} />
-    </span>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span aria-label="Submitted an application" className="inline-flex items-center gap-0.5 text-info">
+          <FileCheck size={14} />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="top">Submitted an application</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -156,12 +160,12 @@ export function WishlistedByIndicator({ projects }: { projects?: WishlistProject
       : `Wishlisted by ${projects.length} projects`;
   return (
     <span
-      className="relative shrink-0 group/wish text-amber-500"
+      className="relative shrink-0 group/wish text-warning"
       aria-label={label}
     >
-      <Star size={14} className="fill-amber-500/80" />
+      <Star size={14} className="fill-warning/80" />
       {projects.length > 1 && (
-        <span className="absolute -right-1 -top-1 flex h-3 min-w-3 items-center justify-center rounded-full bg-amber-500 px-0.5 text-[8px] font-semibold tabular-nums leading-none text-white">
+        <span className="absolute -right-1 -top-1 flex h-3 min-w-3 items-center justify-center rounded-full bg-warning px-0.5 text-[8px] font-semibold tabular-nums leading-none text-warning-foreground">
           {projects.length}
         </span>
       )}

@@ -13,7 +13,12 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
+import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
+import { InfoHint } from "@/components/ui/info-hint";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useConfirm } from "@/components/ui/use-confirm";
+import { optimistic } from "@/lib/optimistic";
 import {
   type ProjectQuestion,
   type QuestionType,
@@ -46,8 +51,11 @@ export function ProjectQuestionsDialog({ projectId, open, onOpenChange }: Props)
   const [questions, setQuestions] = useState<ProjectQuestion[]>([]);
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState<Draft | null>(null);
-  const [saving, setSaving] = useState(false);
+  // Only creating a question waits (it needs the new row's id); edits,
+  // reorders and deletes are optimistic.
+  const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { ask, dialog: confirmDialog } = useConfirm();
 
   // The fixed essay question's per-project settings (prompt wording + whether
   // it's required); everything else about it (position, 150-200 word
@@ -95,14 +103,16 @@ export function ProjectQuestionsDialog({ projectId, open, onOpenChange }: Props)
     if (updateError) setEssayError(updateError.message);
   };
 
-  const saveEssayRequired = async (required: boolean) => {
-    setEssayRequired(required);
+  const saveEssayRequired = (required: boolean) => {
     const supabase = createClient();
-    const { error: updateError } = await supabase
-      .from("projects")
-      .update({ essay_required: required })
-      .eq("id", projectId);
-    if (updateError) setEssayError(updateError.message);
+    void optimistic({
+      label: "essay setting",
+      key: `essay-required:${projectId}`,
+      apply: () => setEssayRequired(required),
+      rollback: () => setEssayRequired(!required),
+      commit: () => supabase.from("projects").update({ essay_required: required }).eq("id", projectId).select("id"),
+      requireRows: true,
+    });
   };
 
   const openAdd = () => { setError(null); setDraft(emptyDraft()); };
@@ -129,58 +139,92 @@ export function ProjectQuestionsDialog({ projectId, open, onOpenChange }: Props)
       return;
     }
 
-    setSaving(true);
     setError(null);
     const supabase = createClient();
 
     if (draft.id) {
-      const { error: updateError } = await supabase
-        .from("project_questions")
-        .update({ type: draft.type, prompt, options, required: draft.required, updated_at: new Date().toISOString() })
-        .eq("id", draft.id);
-      if (updateError) { setError(updateError.message); setSaving(false); return; }
-      setQuestions((prev) =>
-        prev.map((q) => (q.id === draft.id ? { ...q, type: draft.type, prompt, options, required: draft.required } : q)),
-      );
+      const id = draft.id;
+      const next = { type: draft.type, prompt, options, required: draft.required };
+      const before = questions;
+      void optimistic({
+        label: "question",
+        key: `question:${id}`,
+        apply: () => {
+          setQuestions((prev) => prev.map((q) => (q.id === id ? { ...q, ...next } : q)));
+          setDraft(null);
+        },
+        rollback: () => setQuestions(before),
+        commit: () =>
+          supabase
+            .from("project_questions")
+            .update({ ...next, updated_at: new Date().toISOString() })
+            .eq("id", id)
+            .select("id"),
+        requireRows: true,
+      });
+      return;
     } else {
+      setCreating(true);
       const position = questions.length ? Math.max(...questions.map((q) => q.position)) + 1 : 0;
       const { data, error: insertError } = await supabase
         .from("project_questions")
         .insert({ project_id: projectId, position, type: draft.type, prompt, options, required: draft.required })
         .select("id, project_id, position, type, prompt, options, required")
         .single();
-      if (insertError) { setError(insertError.message); setSaving(false); return; }
+      setCreating(false);
+      if (insertError) { setError(insertError.message); return; }
       setQuestions((prev) => [...prev, data as ProjectQuestion]);
     }
 
-    setSaving(false);
     setDraft(null);
   };
 
-  const deleteQuestion = async (id: string) => {
-    if (!confirm("Delete this question? Existing answers to it are removed too.")) return;
-    const supabase = createClient();
-    const { error: deleteError } = await supabase.from("project_questions").delete().eq("id", id);
-    if (deleteError) return;
-    setQuestions((prev) => prev.filter((q) => q.id !== id));
-  };
+  const deleteQuestion = (q: ProjectQuestion) =>
+    ask({
+      title: "Delete this question?",
+      description: "Existing answers to it are removed too.",
+      confirmLabel: "Delete question",
+      destructive: true,
+      run: () => {
+        const supabase = createClient();
+        const before = questions;
+        void optimistic({
+          label: "question deletion",
+          key: `question:${q.id}`,
+          apply: () => setQuestions((prev) => prev.filter((x) => x.id !== q.id)),
+          rollback: () => setQuestions(before),
+          commit: () => supabase.from("project_questions").delete().eq("id", q.id).select("id"),
+          requireRows: true,
+        });
+      },
+    });
 
-  const move = async (index: number, dir: -1 | 1) => {
+  // Reorders at once; both position writes run behind it.
+  const move = (index: number, dir: -1 | 1) => {
     const target = index + dir;
     if (target < 0 || target >= questions.length) return;
     const a = questions[index];
     const b = questions[target];
+    const before = questions;
     const supabase = createClient();
-    // Swap positions in the DB, then reflect locally.
-    await Promise.all([
-      supabase.from("project_questions").update({ position: b.position }).eq("id", a.id),
-      supabase.from("project_questions").update({ position: a.position }).eq("id", b.id),
-    ]);
-    setQuestions((prev) => {
-      const next = [...prev];
-      next[index] = { ...b, position: a.position };
-      next[target] = { ...a, position: b.position };
-      return next;
+    void optimistic({
+      label: "question order",
+      key: `question-order:${projectId}`,
+      apply: () =>
+        setQuestions((prev) => {
+          const next = [...prev];
+          next[index] = { ...b, position: a.position };
+          next[target] = { ...a, position: b.position };
+          return next;
+        }),
+      rollback: () => setQuestions(before),
+      commit: async () => {
+        const results = await Promise.all([
+          supabase.from("project_questions").update({ position: b.position }).eq("id", a.id),
+          supabase.from("project_questions").update({ position: a.position }).eq("id", b.id),
+        ]);
+        return results.find((r) => r.error) ?? results[0];
+      },
     });
   };
 
@@ -191,62 +235,68 @@ export function ProjectQuestionsDialog({ projectId, open, onOpenChange }: Props)
           <DialogTitle>Application questions</DialogTitle>
         </DialogHeader>
 
-        <div className="flex flex-col gap-4">
+        {confirmDialog}
+        <div className="flex flex-col gap-5">
           {loading ? (
-            <p className="text-sm text-muted-foreground">Loading…</p>
+            <div className="flex flex-col gap-3 rounded-lg surface p-4" aria-hidden>
+              <Skeleton className="h-3 w-24 rounded-full" />
+              <Skeleton className="h-20 w-full" />
+              <Skeleton className="h-3.5 w-40 rounded-full" />
+              <Skeleton className="h-3.5 w-56 rounded-full" />
+            </div>
           ) : (
-            <div className="flex flex-col gap-3 border rounded-lg p-4 bg-accent/10">
-              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                Essay question
-              </span>
-              <div className="flex flex-col gap-1">
-                <Label htmlFor="essay-prompt">Prompt</Label>
-                <textarea
-                  id="essay-prompt"
-                  rows={3}
-                  value={essayPrompt}
-                  onChange={(e) => setEssayPrompt(e.target.value)}
-                  onBlur={saveEssayPrompt}
-                  className="border rounded-md px-3 py-2 text-sm w-full resize-y bg-background focus:outline-none focus:ring-1 focus:ring-ring"
-                />
-                <span className="text-[11px] text-muted-foreground">
+            <div className="flex flex-col gap-3 rounded-lg surface p-4">
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Essay</span>
+                <InfoHint label="About the essay">
                   Always first in the applicant&apos;s modal. 150–200 words is suggested; any non-empty answer saves.
-                </span>
+                </InfoHint>
+                <label className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
+                  Required
+                  <Switch checked={essayRequired} onCheckedChange={saveEssayRequired} aria-label="Essay required" />
+                </label>
               </div>
-              <label className="flex items-center gap-2 text-sm cursor-pointer w-fit">
-                <Checkbox
-                  checked={essayRequired}
-                  onCheckedChange={(v) => saveEssayRequired(v === true)}
-                />
-                Required
-              </label>
-              {essayError && <p className="text-sm text-red-500">{essayError}</p>}
+              <Textarea
+                id="essay-prompt"
+                aria-label="Essay prompt"
+                rows={3}
+                value={essayPrompt}
+                onChange={(e) => setEssayPrompt(e.target.value)}
+                onBlur={saveEssayPrompt}
+                className="resize-y"
+              />
+              {essayError && <p className="text-sm text-destructive">{essayError}</p>}
             </div>
           )}
 
           {!loading && (
-            <p className="text-xs text-muted-foreground">
-              These appear in the applicant&apos;s modal for this project, after the essay above.
-            </p>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                Custom questions
+              </span>
+              <InfoHint label="About custom questions">
+                These appear in the applicant&apos;s modal for this project, after the essay.
+              </InfoHint>
+            </div>
           )}
 
           {loading ? null : questions.length === 0 ? (
-            <p className="text-sm text-muted-foreground border rounded-lg px-4 py-6 text-center">
-              No custom questions yet.
+            <p className="rounded-lg bg-foreground/[0.03] px-4 py-6 text-center text-sm text-muted-foreground">
+              No custom questions yet
             </p>
           ) : (
-            <div className="border rounded-lg overflow-hidden">
+            <div className="-mx-3 flex flex-col gap-0.5">
               {questions.map((q, i) => (
-                <div key={q.id} className={`flex items-start gap-2 px-3 py-2.5 ${i > 0 ? "border-t" : ""}`}>
+                <div key={q.id} className="group flex items-start gap-2 rounded-lg px-3 py-2.5 hover:bg-foreground/[0.03]">
                   <div className="flex flex-col gap-0.5 flex-1 min-w-0">
                     <span className="text-sm font-medium whitespace-pre-wrap">{q.prompt}</span>
-                    <span className="text-[11px] text-muted-foreground">
+                    <span className="text-xs text-muted-foreground">
                       {QUESTION_TYPE_LABELS[q.type]}
                       {q.required ? " · required" : " · optional"}
                       {isChoiceType(q.type) && q.options?.length ? ` · ${q.options.length} options` : ""}
                     </span>
                   </div>
-                  <div className="flex items-center gap-1 flex-shrink-0">
+                  <div className="flex items-center gap-1 flex-shrink-0 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
                     <button onClick={() => move(i, -1)} disabled={i === 0} className="text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors" aria-label="Move up">
                       <ChevronUp size={15} />
                     </button>
@@ -256,7 +306,7 @@ export function ProjectQuestionsDialog({ projectId, open, onOpenChange }: Props)
                     <button onClick={() => openEdit(q)} className="text-muted-foreground hover:text-foreground transition-colors ml-1" aria-label="Edit">
                       <Pencil size={13} />
                     </button>
-                    <button onClick={() => deleteQuestion(q.id)} className="text-muted-foreground hover:text-red-500 transition-colors" aria-label="Delete">
+                    <button onClick={() => deleteQuestion(q)} className="text-muted-foreground hover:text-destructive transition-colors" aria-label="Delete">
                       <X size={14} />
                     </button>
                   </div>
@@ -266,19 +316,19 @@ export function ProjectQuestionsDialog({ projectId, open, onOpenChange }: Props)
           )}
 
           {draft ? (
-            <div className="flex flex-col gap-3 border rounded-lg p-4 bg-accent/20">
+            <div className="flex flex-col gap-3 rounded-lg bg-foreground/[0.03] p-4 animate-fade-in-up">
               <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
                 {draft.id ? "Edit question" : "New question"}
               </span>
               <div className="flex flex-col gap-1">
                 <Label htmlFor="q-prompt">Question</Label>
                 {draft.type === "long_answer" ? (
-                  <textarea
+                  <Textarea
                     id="q-prompt"
                     rows={3}
                     value={draft.prompt}
                     onChange={(e) => setDraft((d) => (d ? { ...d, prompt: e.target.value } : d))}
-                    className="border rounded-md px-3 py-2 text-sm w-full resize-y bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+                    className="resize-y"
                   />
                 ) : (
                   <Input id="q-prompt" value={draft.prompt} onChange={(e) => setDraft((d) => (d ? { ...d, prompt: e.target.value } : d))} />
@@ -288,7 +338,7 @@ export function ProjectQuestionsDialog({ projectId, open, onOpenChange }: Props)
                 <Label>Type</Label>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <button className="flex items-center justify-between gap-2 border rounded-md px-3 py-2 text-sm bg-background hover:bg-accent transition-colors">
+                    <button className="flex h-9 items-center justify-between gap-2 rounded-md border border-input bg-transparent px-3 text-sm shadow-sm hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
                       {QUESTION_TYPE_LABELS[draft.type]}
                       <ChevronDown size={14} className="text-muted-foreground" />
                     </button>
@@ -322,7 +372,7 @@ export function ProjectQuestionsDialog({ projectId, open, onOpenChange }: Props)
                       />
                       <button
                         onClick={() => setDraft((d) => (d ? { ...d, options: d.options.filter((_, j) => j !== oi) } : d))}
-                        className="text-muted-foreground hover:text-red-500 transition-colors flex-shrink-0"
+                        className="text-muted-foreground hover:text-destructive transition-colors flex-shrink-0"
                         aria-label="Remove option"
                       >
                         <X size={14} />
@@ -338,18 +388,18 @@ export function ProjectQuestionsDialog({ projectId, open, onOpenChange }: Props)
                 </div>
               )}
 
-              <label className="flex items-center gap-2 text-sm cursor-pointer w-fit">
-                <Checkbox
+              <label className="flex items-center gap-2 text-sm w-fit">
+                <Switch
                   checked={draft.required}
-                  onCheckedChange={(v) => setDraft((d) => (d ? { ...d, required: v === true } : d))}
+                  onCheckedChange={(v) => setDraft((d) => (d ? { ...d, required: v } : d))}
                 />
                 Required
               </label>
 
-              {error && <p className="text-sm text-red-500">{error}</p>}
+              {error && <p className="text-sm text-destructive">{error}</p>}
               <div className="flex justify-end gap-2">
                 <Button variant="outline" size="sm" onClick={() => { setDraft(null); setError(null); }}>Cancel</Button>
-                <Button size="sm" onClick={saveDraft} disabled={saving}>{saving ? "Saving..." : "Save question"}</Button>
+                <Button size="sm" onClick={saveDraft} disabled={creating}>{draft.id ? "Save" : "Add question"}</Button>
               </div>
             </div>
           ) : (

@@ -5,11 +5,23 @@ import { fetchBusyIntervals, requestFreeBusyToken } from "@/lib/google-calendar"
 import Link from "next/link";
 import Script from "next/script";
 import { cloneElement, useCallback, useEffect, useState } from "react";
-import { CalendarCheck, Check, ChevronLeft, ChevronRight, Lock, MapPin, UserX, X } from "lucide-react";
+import { ArrowRight, CalendarCheck, ChevronDown, ChevronLeft, ChevronRight, Lock, MapPin, MoreHorizontal, Settings, Trash2, X } from "lucide-react";
 import { useRoleSim } from "@/components/role-simulation-provider";
 import { usePersonProfile, initials } from "@/components/person-profile-provider";
 import { ScrollArea } from "@/components/overlay-scrollbar";
-import { SlotCardsSkeleton } from "@/components/skeletons";
+import { BookedChatsSkeleton } from "@/components/skeletons";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Disclosure } from "@/components/ui/disclosure";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { background, optimistic, sessionUserId } from "@/lib/optimistic";
@@ -48,21 +60,6 @@ const DURATIONS: Duration[] = [15, 20, 30];
 // How many equal segments an hour is split into for each duration (60 / dur).
 const DIVISION: Record<Duration, number> = { 15: 4, 20: 3, 30: 2 };
 const SEATS_PER_SUBSLOT: Record<Duration, number> = { 15: 1, 20: 2, 30: 3 };
-// Fill color for an open (bookable) segment, by the duration its hour is split
-// into — the bright, prominent palette.
-const DURATION_COLOR: Record<Duration, string> = {
-  30: "bg-green-400",
-  20: "bg-amber-300",
-  15: "bg-blue-300",
-};
-// Booked segments use a darker shade of the same hue (plus a lock icon), so
-// they read as taken without competing with the open availability.
-const BOOKED_COLOR: Record<Duration, string> = {
-  30: "bg-green-700",
-  20: "bg-amber-600",
-  15: "bg-blue-600",
-};
-
 // Fallback window used only until VP Tech/President configures one (or the app_settings
 // row is missing). Months are 0-indexed, so (2026, 7, 1) = Aug 1, 2026.
 const DEFAULT_RANGE_START = new Date(2026, 7, 1);
@@ -230,8 +227,6 @@ export default function ManagerCoffeeChatsPage() {
 
   // Google Calendar free/busy auto-fill.
   const [syncing, setSyncing] = useState(false);
-  const [syncError, setSyncError] = useState<string | null>(null);
-  const [syncSummary, setSyncSummary] = useState<string | null>(null);
 
   // Drag-to-select: hold and drag across segments to paint (or clear) a
   // rectangle of availability at once. `di` is the day index into weekDates;
@@ -567,6 +562,9 @@ export default function ManagerCoffeeChatsPage() {
     };
     window.addEventListener("pointerup", commit);
     return () => window.removeEventListener("pointerup", commit);
+    // Re-subscribes every render anyway (the derived maps are rebuilt each
+    // render); the listener just needs the latest closure.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dragState, dragCurrent, weekDates, bookedSubSlots, lockedDivByHour, brushDuration, div, fillsByHour]);
 
   // Tooltip data: every sub-slot (past or upcoming), grouped by the hour tile
@@ -790,43 +788,46 @@ export default function ManagerCoffeeChatsPage() {
   // duration: a shorter appointment still needs a genuinely free hour to
   // land in, and the manager reviews/adjusts before saving anyway.
   const handleSync = async () => {
-    setSyncError(null);
-    setSyncSummary(null);
     setSyncing(true);
+    const toastId = toast.loading("Syncing with Google Calendar…");
     try {
       const token = await requestFreeBusyToken();
       const busy = await fetchBusyIntervals(token, rangeStart, rangeEndExclusive);
 
       let added = 0;
-      setSelected((prev) => {
-        const next = new Map(prev);
-        for (let date = new Date(rangeStart); date < rangeEndExclusive; date = addDays(date, 1)) {
-          for (const hour of HOURS) {
-            const hk = slotKey(date, hour);
-            // Skip out-of-range/past hours, hours already painted, and any hour
-            // that contains a booking (its division is frozen).
-            const alreadyFilled = [...next.keys()].some((k) => hourKeyOf(k) === hk);
-            if (!isEditable(date, hour) || alreadyFilled || lockedDivByHour.has(hk)) continue;
-            const slotStart = new Date(date);
-            slotStart.setHours(hour, 0, 0, 0);
-            const slotEnd = new Date(slotStart.getTime() + 60 * 60 * 1000);
-            const overlaps = busy.some((b) => b.start < slotEnd && b.end > slotStart);
-            if (!overlaps) {
-              for (let si = 0; si < div; si++) next.set(subKey(date, hour, si * brushDuration), brushDuration);
-              added++;
-            }
+      const next = new Map(selected);
+      for (let date = new Date(rangeStart); date < rangeEndExclusive; date = addDays(date, 1)) {
+        for (const hour of HOURS) {
+          const hk = slotKey(date, hour);
+          // Skip out-of-range/past hours, hours already painted, and any hour
+          // that contains a booking (its division is frozen).
+          const alreadyFilled = [...next.keys()].some((k) => hourKeyOf(k) === hk);
+          if (!isEditable(date, hour) || alreadyFilled || lockedDivByHour.has(hk)) continue;
+          const slotStart = new Date(date);
+          slotStart.setHours(hour, 0, 0, 0);
+          const slotEnd = new Date(slotStart.getTime() + 60 * 60 * 1000);
+          const overlaps = busy.some((b) => b.start < slotEnd && b.end > slotStart);
+          if (!overlaps) {
+            for (let si = 0; si < div; si++) next.set(subKey(date, hour, si * brushDuration), brushDuration);
+            added++;
           }
         }
-        return next;
-      });
+      }
+      setSelected(next);
 
-      setSyncSummary(
-        added > 0
-          ? `Added ${added} free ${added === 1 ? "slot" : "slots"} from your calendar. Review and Save.`
-          : "No new free slots found in this window.",
-      );
+      if (added > 0) {
+        toast.success(`Added ${added} free ${added === 1 ? "hour" : "hours"} from your calendar`, {
+          id: toastId,
+          description: "Review the grid, then Save.",
+        });
+      } else {
+        toast.success("No new free hours in this window", { id: toastId });
+      }
     } catch (err) {
-      setSyncError(err instanceof Error ? err.message : "Couldn't sync with Google Calendar.");
+      toast.error("Couldn't sync with Google Calendar", {
+        id: toastId,
+        description: err instanceof Error ? err.message : undefined,
+      });
     } finally {
       setSyncing(false);
     }
@@ -971,340 +972,338 @@ export default function ManagerCoffeeChatsPage() {
 
   const defaultLocationDirty = draftDefaultLocation.trim() !== defaultLocation.trim();
 
-  // Shared card for both the Upcoming and Past lists. Past slots gray out and
-  // drop location-editing / cancel (nothing to prep or cancel after the
-  // fact) — but keep the complete toggle, so attendance can still be recorded.
+  const fmtDay = (d: Date) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const canClear = !saving && (selected.size > 0 || dbSlots.size > 0);
+
+  // One booked sub-slot as a list row: when, seats, where; then one sub-row per
+  // attendee with attendance and (upcoming only) a ⋯ menu to cancel.
   const renderBookedSlot = (slot: UpcomingSlot, isPast: boolean) => {
     const d = new Date(slot.meeting_time);
     const resolvedLocation = slot.location || defaultLocation.trim() || null;
     return (
-      <div key={slot.meeting_time} className={`rounded-xl surface p-4 flex flex-col gap-2 ${isPast ? "opacity-50" : ""}`}>
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm font-medium">
-              {d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
-            </p>
-            <p className="text-xs text-muted-foreground">
-              {d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
-              {" · "}
-              {slot.duration_minutes} min
-            </p>
-          </div>
-          <span className={`text-sm font-semibold tabular-nums ${slot.filled === slot.capacity ? "text-red-500" : "text-green-600"}`}>
-            {slot.filled}/{slot.capacity}
+      <div key={slot.meeting_time} className="flex flex-col gap-2 rounded-lg px-4 py-3 transition-colors hover:bg-foreground/[0.03]">
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+          <p className="text-sm font-medium">
+            {d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
+            {", "}
+            {d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
+          </p>
+          <span className="text-xs text-muted-foreground">
+            {slot.duration_minutes} min · {slot.filled}/{slot.capacity} {slot.capacity === 1 ? "seat" : "seats"}
           </span>
-        </div>
-        <div className="flex items-center gap-1.5 text-xs">
-          <MapPin size={12} className="text-muted-foreground flex-shrink-0" />
-          <span className={`truncate ${resolvedLocation ? "text-foreground" : "text-muted-foreground italic"}`}>
-            {resolvedLocation || "No location set"}
-          </span>
-          {!isPast && (
-            <button
-              type="button"
-              onClick={() => {
-                setLocationTarget({
-                  meeting_time: slot.meeting_time,
-                  attendeeIds: slot.attendees.map((a) => a.id),
-                  hadLocation: !!slot.location,
-                });
-                setLocationDraft(slot.location ?? defaultLocation);
-              }}
-              className="text-muted-foreground hover:text-foreground underline decoration-dotted underline-offset-2"
-            >
-              {slot.location ? "Edit" : "Add"}
-            </button>
-          )}
-        </div>
-        {slot.attendees.length > 0 ? (
-          <>
-          <div className="flex flex-wrap gap-1.5 pt-1">
-            {slot.attendees.map((a) => (
-              <div
-                key={a.user_id}
-                className="flex items-center gap-1 pl-1 pr-1 py-0.5 rounded-full bg-foreground/10 hover:bg-foreground/20 transition-colors"
+          <span className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+            <MapPin size={12} className="flex-shrink-0" aria-label="Location" />
+            <span className="max-w-[18rem] truncate">{resolvedLocation ?? "No location set"}</span>
+            {!isPast && (
+              <button
+                type="button"
+                onClick={() => {
+                  setLocationTarget({
+                    meeting_time: slot.meeting_time,
+                    attendeeIds: slot.attendees.map((a) => a.id),
+                    hadLocation: !!slot.location,
+                  });
+                  setLocationDraft(slot.location ?? "");
+                }}
+                className="ml-1 rounded-sm underline decoration-dotted underline-offset-2 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               >
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        openProfile({ userId: a.user_id, name: a.name, preloaded: { email: a.email, avatar_url: a.avatarUrl } })
-                      }
-                      className="flex items-center gap-1.5 text-xs font-medium"
-                    >
-                      {a.avatarUrl ? (
-                        <img src={a.avatarUrl} alt={a.name} className="h-5 w-5 rounded-full object-cover flex-shrink-0" />
-                      ) : (
-                        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-foreground/15 text-[9px] font-semibold flex-shrink-0">
-                          {initials(a.name)}
-                        </span>
-                      )}
-                      {a.name}
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="top" className="max-w-[16rem]">
-                    {a.email ?? "No email on file"}
-                  </TooltipContent>
-                </Tooltip>
-                <button
-                  type="button"
-                  onClick={() => toggleComplete(a.id, slot.meeting_time, !a.complete)}
-                  title={a.complete ? "Attended — click to undo" : "Mark as attended"}
-                  aria-pressed={a.complete}
-                  className={`flex items-center justify-center w-5 h-5 rounded-md transition-colors ${
-                    a.complete
-                      ? "bg-green-500 text-white shadow-sm"
-                      : "bg-success/10 text-success hover:bg-success/20"
-                  }`}
-                >
-                  <Check size={12} />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => toggleNoShow(a.id, slot.meeting_time, !a.no_show)}
-                  title={a.no_show ? "No-show — click to undo" : "Mark as no-show"}
-                  aria-pressed={a.no_show}
-                  className={`flex items-center justify-center w-5 h-5 rounded-md transition-colors ${
-                    a.no_show
-                      ? "bg-red-500 text-white shadow-sm"
-                      : "bg-destructive/10 text-destructive hover:bg-destructive/20"
-                  }`}
-                >
-                  <UserX size={12} />
-                </button>
-                {!isPast && (
+                {slot.location ? "Edit" : "Set"}
+              </button>
+            )}
+          </span>
+        </div>
+        <div className="flex flex-col gap-1.5">
+          {slot.attendees.map((a) => (
+            <div key={a.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 sm:flex-nowrap">
+              <Tooltip>
+                <TooltipTrigger asChild>
                   <button
                     type="button"
-                    onClick={() => { setCancelTarget({ id: a.id, name: a.name, meeting_time: slot.meeting_time }); setCancelMessage(""); }}
-                    title="Cancel this booking"
-                    className="flex items-center justify-center w-4 h-4 rounded-full text-red-500 hover:bg-red-500/15 transition-colors"
+                    onClick={() =>
+                      openProfile({ userId: a.user_id, name: a.name, preloaded: { email: a.email, avatar_url: a.avatarUrl } })
+                    }
+                    className="flex min-w-0 items-center gap-2 rounded-sm text-sm transition-colors hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                   >
-                    <X size={10} />
+                    {a.avatarUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={a.avatarUrl} alt="" className="h-6 w-6 rounded-full object-cover flex-shrink-0" />
+                    ) : (
+                      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-foreground/10 text-[10px] font-semibold flex-shrink-0">
+                        {initials(a.name)}
+                      </span>
+                    )}
+                    <span className="truncate">{a.name}</span>
                   </button>
-                )}
-              </div>
-            ))}
-          </div>
-          {slot.attendees.some((a) => a.message) && (
-            <div className="flex flex-col gap-1 pt-1.5">
-              {slot.attendees.filter((a) => a.message).map((a) => (
-                <p key={a.user_id} className="text-xs text-muted-foreground">
-                  <span className="font-medium text-foreground">{a.name}:</span>{" "}
-                  <span className="italic">&ldquo;{a.message}&rdquo;</span>
-                </p>
-              ))}
+                </TooltipTrigger>
+                <TooltipContent side="top">{a.email ?? "No email on file"}</TooltipContent>
+              </Tooltip>
+              <span className="w-0 min-w-0 flex-1 truncate text-xs italic text-muted-foreground">
+                {a.message && <>&ldquo;{a.message}&rdquo;</>}
+              </span>
+              <Segmented
+                aria-label={`Attendance — ${a.name}`}
+                size="xs"
+                shape="soft"
+                allowDeselect
+                selectOnFocus={false}
+                value={a.complete ? "attended" : a.no_show ? "no_show" : ""}
+                onChange={(v) => {
+                  if (v === "attended") toggleComplete(a.id, slot.meeting_time, true);
+                  else if (v === "no_show") toggleNoShow(a.id, slot.meeting_time, true);
+                  else if (a.complete) toggleComplete(a.id, slot.meeting_time, false);
+                  else toggleNoShow(a.id, slot.meeting_time, false);
+                }}
+                options={[
+                  { value: "attended", label: "Attended", indicatorClassName: "bg-success", selectedTextClassName: "text-success-foreground" },
+                  { value: "no_show", label: "No-show", indicatorClassName: "bg-destructive", selectedTextClassName: "text-destructive-foreground" },
+                ]}
+              />
+              {isPast ? (
+                <span className="hidden w-7 sm:block" aria-hidden />
+              ) : (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" aria-label={`More for ${a.name}`}>
+                      <MoreHorizontal />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem
+                      className="text-destructive focus:text-destructive"
+                      onSelect={() => { setCancelTarget({ id: a.id, name: a.name, meeting_time: slot.meeting_time }); setCancelMessage(""); }}
+                    >
+                      <X />
+                      Cancel booking
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
             </div>
-          )}
-          </>
-        ) : (
-          <p className="text-xs text-muted-foreground">No attendees yet.</p>
-        )}
+          ))}
+        </div>
       </div>
     );
   };
 
   return (
-    <div className="w-full max-w-3xl mx-auto p-6 flex flex-col gap-10">
+    <div className="w-full max-w-6xl mx-auto p-5 flex flex-col gap-6">
       {GOOGLE_CLIENT_ID && (
         <Script src="https://accounts.google.com/gsi/client" strategy="afterInteractive" />
       )}
       <div className="flex flex-col gap-1">
         <BackLink href="/manager" label="Manager" />
         <div className="flex items-center justify-between gap-3 flex-wrap">
-          <h1 className="text-2xl font-bold tracking-tight">Coffee Chats</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Coffee chats</h1>
           <Link
             href="/manager/coffee-chats/all"
-            className="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-accent transition-colors"
+            className="group inline-flex items-center gap-1 rounded-sm text-sm font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
           >
             View everyone&apos;s availability
+            <ArrowRight size={14} aria-hidden className="transition-transform duration-instant ease-out-quart group-hover:translate-x-0.5" />
           </Link>
+        </div>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
+          {canEditWindow ? (
+            // Exec only: the window everyone sets availability within.
+            <Popover onOpenChange={(o) => { if (o) { setDraftStart(toDateInputValue(rangeStart)); setDraftEnd(toDateInputValue(rangeEnd)); setWindowError(null); } }}>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  aria-label="Coffee chat window"
+                  className="-ml-1 inline-flex items-center gap-1 rounded-md px-1 py-0.5 transition-colors hover:bg-foreground/[0.05] hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                >
+                  {fmtDay(rangeStart)} – {fmtDay(rangeEnd)}
+                  <ChevronDown size={14} aria-hidden />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent
+                align="start"
+                className="flex w-auto flex-col gap-3"
+                onOpenAutoFocus={(e) => { e.preventDefault(); document.getElementById("window-start")?.focus(); }}
+              >
+                <div className="flex items-center gap-1.5">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Coffee chat window</p>
+                  <InfoHint label="About the window">The date range every host sets availability within.</InfoHint>
+                </div>
+                <div className="flex items-end gap-2">
+                  <label className="flex flex-col gap-1 text-xs font-medium">
+                    Start
+                    <Input id="window-start" type="date" value={draftStart} max={draftEnd || undefined} onChange={(e) => setDraftStart(e.target.value)} className="w-40" />
+                  </label>
+                  <label className="flex flex-col gap-1 text-xs font-medium">
+                    End
+                    <Input type="date" value={draftEnd} min={draftStart || undefined} onChange={(e) => setDraftEnd(e.target.value)} className="w-40" />
+                  </label>
+                </div>
+                {windowError && <p className="text-sm text-destructive">{windowError}</p>}
+                <Button size="sm" onClick={saveWindow} disabled={!windowDirty} className="self-end">
+                  Save
+                </Button>
+              </PopoverContent>
+            </Popover>
+          ) : (
+            <span>{fmtDay(rangeStart)} – {fmtDay(rangeEnd)}</span>
+          )}
+          {!loading && (
+            <>
+              <span aria-hidden className="h-1 w-1 rounded-full bg-muted-foreground/50" />
+              <span>{bookedCount} booked</span>
+              {bookedCount < SATURDAY_REQUIRED_BELOW && (
+                <span className="text-warning">Keep Saturdays open until {SATURDAY_REQUIRED_BELOW} are booked</span>
+              )}
+            </>
+          )}
         </div>
       </div>
 
-      {/* Bookable window — VP Tech/President only */}
-      {canEditWindow && (
-        <div className="flex flex-col gap-3 rounded-xl surface p-4">
-          <div className="flex flex-col gap-0.5">
-            <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Coffee Chat Window</h2>
-            <p className="text-xs text-muted-foreground">
-              The date range everyone can set availability within. Applies to all managers.
-            </p>
-          </div>
-          <div className="flex flex-wrap items-end gap-3">
-            <label className="flex flex-col gap-1 text-xs font-medium">
-              Start
-              <input
-                type="date"
-                value={draftStart}
-                max={draftEnd || undefined}
-                onChange={(e) => setDraftStart(e.target.value)}
-                className="border rounded-md px-3 py-1.5 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-ring"
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-xs font-medium">
-              End
-              <input
-                type="date"
-                value={draftEnd}
-                min={draftStart || undefined}
-                onChange={(e) => setDraftEnd(e.target.value)}
-                className="border rounded-md px-3 py-1.5 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-ring"
-              />
-            </label>
-            <button
-              onClick={saveWindow}
-              disabled={!windowDirty}
-              className="rounded-md bg-foreground text-background px-3 py-2 text-sm font-medium hover:opacity-80 transition-opacity disabled:opacity-30"
-            >
-              Save window
-            </button>
-          </div>
-          {windowError && <p className="text-sm text-red-500">{windowError}</p>}
-        </div>
-      )}
-
       {/* Availability grid */}
-      <div className="flex flex-col gap-4">
-        <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Your Availability</h2>
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <div className="flex flex-col gap-0.5">
-            <span className="text-sm font-medium tabular-nums">
-              {bookedCount} coffee chat{bookedCount === 1 ? "" : "s"} booked this window
-            </span>
-            {bookedCount < SATURDAY_REQUIRED_BELOW && (
-              <span className="text-xs text-amber-500">
-                Under {SATURDAY_REQUIRED_BELOW} booked — keep Saturdays open
+      <section className="flex flex-col gap-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={() => setWeekOffset((w) => Math.max(0, w - 1))}
+              disabled={weekOffset === 0}
+              aria-label="Previous week"
+            >
+              <ChevronLeft />
+            </Button>
+            <h2 className="text-base font-semibold tracking-tight">
+              {fmtDay(weekStart)} – {weekDates[6].toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+            </h2>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={() => setWeekOffset((w) => Math.min(weekCount - 1, w + 1))}
+              disabled={weekOffset >= weekCount - 1}
+              aria-label="Next week"
+            >
+              <ChevronRight />
+            </Button>
+            <InfoHint label="How the grid works">
+              <span className="flex flex-col gap-1.5">
+                <span>Drag to paint {brushDuration}-minute slots; drag from a filled slot to clear. Save when done.</span>
+                <span className="flex items-center gap-1.5"><Lock size={11} aria-hidden /> Booked (hover for who)</span>
+                <span className="flex items-center gap-1.5"><MapPin size={11} aria-hidden /> Custom location, not your default</span>
+                <span>Each day you open needs at least {MIN_SEATS_PER_DAY} seats.</span>
               </span>
-            )}
+            </InfoHint>
           </div>
-          <div className="flex items-center gap-3 flex-wrap">
-            {bookedCount >= MAY_CLOSE_AT && (
-              <button
-                onClick={() => setClearOpen(true)}
-                disabled={saving || (selected.size === 0 && dbSlots.size === 0)}
-                className="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-accent transition-colors disabled:opacity-30"
+          <div className="flex items-center gap-2">
+            <Segmented
+              aria-label="Slot length"
+              size="sm"
+              value={String(brushDuration)}
+              onChange={(v) => setBrushDuration(Number(v) as Duration)}
+              options={DURATIONS.map((d) => ({ value: String(d), label: `${d}m` }))}
+            />
+            <Button size="sm" onClick={handleSave} disabled={!hasChanges || saving}>
+              Save
+            </Button>
+            <Popover onOpenChange={(o) => { if (o) setDraftDefaultLocation(defaultLocation); }}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <PopoverTrigger asChild>
+                    <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground" aria-label="Default location">
+                      <Settings />
+                    </Button>
+                  </PopoverTrigger>
+                </TooltipTrigger>
+                <TooltipContent>Default location</TooltipContent>
+              </Tooltip>
+              <PopoverContent
+                align="end"
+                className="flex w-80 flex-col gap-3"
+                // Focus the field, not the ? hint (which would pop its tooltip).
+                onOpenAutoFocus={(e) => { e.preventDefault(); document.getElementById("default-location")?.focus(); }}
               >
-                Close remaining availability
-              </button>
-            )}
-            {GOOGLE_CLIENT_ID && (
-              <button
-                onClick={handleSync}
-                disabled={syncing || !settingsReady}
-                className="flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-accent transition-colors disabled:opacity-30"
-              >
-                <CalendarCheck size={14} />
-                {syncing ? "Syncing…" : "Sync with Google Calendar"}
-              </button>
-            )}
-            <button
-              onClick={() => setClearOpen(true)}
-              disabled={saving || (selected.size === 0 && dbSlots.size === 0)}
-              className="rounded-md bg-destructive/10 text-destructive px-3 py-1.5 text-xs font-medium hover:bg-destructive/20 transition-colors disabled:opacity-30"
-            >
-              Clear all
-            </button>
-            <button
-              onClick={handleSave}
-              disabled={!hasChanges || saving}
-              className="rounded-md bg-foreground text-background px-3 py-1.5 text-xs font-medium hover:opacity-80 transition-opacity disabled:opacity-30"
-            >
-              {saving ? "Saving…" : "Save"}
-            </button>
+                <div className="flex items-center gap-1.5">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Default location</p>
+                  <InfoHint label="About the default location">
+                    Where your chats happen unless you set one per chat. Changing it updates every upcoming chat that follows it, and attendees are told.
+                  </InfoHint>
+                </div>
+                <Input
+                  value={draftDefaultLocation}
+                  onChange={(e) => setDraftDefaultLocation(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && defaultLocationDirty) saveDefaultLocation(); }}
+                  placeholder="Room or meeting link"
+                  aria-label="Default location"
+                  id="default-location"
+                />
+                <Button size="sm" onClick={saveDefaultLocation} disabled={!defaultLocationDirty} className="self-end">
+                  Save
+                </Button>
+              </PopoverContent>
+            </Popover>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground" aria-label="More actions">
+                  <MoreHorizontal />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {GOOGLE_CLIENT_ID && (
+                  <>
+                    <DropdownMenuItem onSelect={() => void handleSync()} disabled={syncing || !settingsReady}>
+                      <CalendarCheck />
+                      Sync with Google Calendar
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                  </>
+                )}
+                <DropdownMenuItem
+                  onSelect={() => setClearOpen(true)}
+                  disabled={!canClear}
+                  className="text-destructive focus:text-destructive"
+                >
+                  <Trash2 />
+                  {bookedCount >= MAY_CLOSE_AT ? "Close remaining availability" : "Clear all availability"}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
-        </div>
-
-        {/* Duration brush — sets the length tagged onto newly painted tiles */}
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground">New slots:</span>
-          <Segmented
-            aria-label="New slot length"
-            size="xs"
-            value={String(brushDuration)}
-            onChange={(v) => setBrushDuration(Number(v) as Duration)}
-            options={DURATIONS.map((d) => ({ value: String(d), label: `${d}m` }))}
-          />
-          <InfoHint label="About slot length">Drag on the grid to paint {brushDuration}-minute segments.</InfoHint>
-        </div>
-
-        {/* Default meeting location / link — inherited by newly-saved slots */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <MapPin size={14} className="text-muted-foreground" />
-          <input
-            type="text"
-            value={draftDefaultLocation}
-            onChange={(e) => setDraftDefaultLocation(e.target.value)}
-            placeholder="Default location or meeting link (e.g. Zoom URL)"
-            className="flex-1 min-w-[16rem] border rounded-md px-3 py-1.5 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-ring"
-          />
-          <button
-            onClick={saveDefaultLocation}
-            disabled={!defaultLocationDirty}
-            className="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-accent transition-colors disabled:opacity-30"
-          >
-            Save default
-          </button>
-        </div>
-
-        {syncError && <p className="text-sm text-red-500">{syncError}</p>}
-        {syncSummary && <p className="text-sm text-green-600">{syncSummary}</p>}
-
-        {/* Week nav */}
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setWeekOffset((w) => Math.max(0, w - 1))}
-            disabled={weekOffset === 0}
-            aria-label="Previous week"
-            className="p-1 rounded hover:bg-accent disabled:opacity-30 transition-colors"
-          >
-            <ChevronLeft size={16} />
-          </button>
-          <span className="text-sm font-medium">
-            {weekStart.toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-            {" – "}
-            {weekDates[6].toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-          </span>
-          <button
-            onClick={() => setWeekOffset((w) => Math.min(weekCount - 1, w + 1))}
-            disabled={weekOffset >= weekCount - 1}
-            aria-label="Next week"
-            className="p-1 rounded hover:bg-accent disabled:opacity-30 transition-colors"
-          >
-            <ChevronRight size={16} />
-          </button>
         </div>
 
         {/* Grid */}
         <ScrollArea orientation="horizontal">
           <div className="min-w-[560px] select-none">
             {/* Day headers */}
-            <div className="grid grid-cols-[3.5rem_repeat(7,1fr)] gap-1 mb-1">
+            <div className="grid grid-cols-[3.5rem_repeat(7,1fr)] gap-1 mb-1.5">
               <div />
               {weekDates.map((date, i) => {
                 const seats = seatsByDate.get(toDateInputValue(date)) ?? 0;
                 const belowMin = seats > 0 && seats < MIN_SEATS_PER_DAY;
+                const isToday = date.toDateString() === now.toDateString();
                 return (
-                  <div key={i} className={`text-center transition-opacity ${inRange(date) ? "" : "opacity-30"}`}>
+                  <div key={i} className={`flex flex-col items-center gap-0.5 ${inRange(date) ? "" : "opacity-30"}`}>
                     <p className="text-xs text-muted-foreground">{DAY_LABELS[i]}</p>
-                    <p className={`text-sm font-semibold ${date.toDateString() === now.toDateString() ? "text-blue-500" : ""}`}>
+                    <p
+                      className={`inline-flex h-6 min-w-6 items-center justify-center rounded-md px-1 text-sm font-semibold ${
+                        isToday ? "bg-foreground text-background" : ""
+                      }`}
+                    >
                       {date.getDate()}
                     </p>
-                    {inRange(date) && seats > 0 && (
-                      <p className={`text-[10px] tabular-nums ${belowMin ? "text-amber-500" : "text-green-600"}`}>
-                        {seats}/{MIN_SEATS_PER_DAY} seats
-                      </p>
-                    )}
+                    <p className={`h-3.5 text-[10px] ${belowMin ? "text-warning" : "text-muted-foreground"}`}>
+                      {inRange(date) && seats > 0 ? `${seats}/${MIN_SEATS_PER_DAY} seats` : ""}
+                    </p>
                   </div>
                 );
               })}
             </div>
 
-            {/* Hour rows — no vertical gap, so each day reads as one strip */}
+            {/* Hour rows: no vertical gap, so each day reads as one tinted strip. */}
             <div className="flex flex-col">
               {HOURS.map((hour, hi) => {
                 const firstHour = hi === 0;
                 const lastHour = hi === HOURS.length - 1;
+                // Continuous column: a light tint rounded only at the ends, a
+                // background-coloured hairline between hours.
+                const frame = `${firstHour ? "rounded-t-lg" : ""} ${lastHour ? "rounded-b-lg" : "border-b border-b-background"}`;
                 return (
                 <div key={hour} className="grid grid-cols-[3.5rem_repeat(7,1fr)] gap-1">
                   <div className="flex items-start justify-end pr-2">
@@ -1325,16 +1324,8 @@ export default function ManagerCoffeeChatsPage() {
                     const lockedDur = lockedDivByHour.get(hk);
                     const bookedOffsets = bookedOffsetsByHour.get(hk);
 
-                    // Continuous-column framing: full side borders, rounded only
-                    // at the very top/bottom, hairline separators between hours.
-                    const frame =
-                      `border-x border-foreground/15 ${firstHour ? "border-t border-t-foreground/15 rounded-t-md" : ""} ` +
-                      (lastHour ? "border-b border-b-foreground/15 rounded-b-md" : "border-b border-b-foreground/10");
-
                     if (outOfRange) {
-                      return (
-                        <div key={di} className={`h-9 bg-foreground/5 opacity-10 ${frame}`} />
-                      );
+                      return <div key={di} className={`h-9 bg-foreground/[0.015] ${frame}`} />;
                     }
 
                     // A booked sub-slot freezes the hour's duration; otherwise
@@ -1354,10 +1345,13 @@ export default function ManagerCoffeeChatsPage() {
                       di >= dragRect.d0 && di <= dragRect.d1 &&
                       dragRect.f0 <= hourFineStart + div - 1 && dragRect.f1 >= hourFineStart &&
                       isEditable(date, hour) && !past && !hourLocked;
+                    // Segment splits stay visible on fills as background hairlines.
+                    const sep = (si: number, on: boolean) =>
+                      si ? `border-t ${on ? "border-t-background/60" : "border-t-foreground/[0.04]"}` : "";
 
                     const cell = (
                       <div className="relative">
-                        <div className={`flex flex-col h-9 overflow-hidden ${past ? "opacity-40 cursor-not-allowed" : ""} ${frame}`}>
+                        <div className={`flex flex-col h-9 overflow-hidden bg-foreground/[0.03] ${past ? "opacity-40 cursor-not-allowed" : ""} ${frame}`}>
                           {Array.from({ length: cellDiv }, (_, si) => {
                             const offset = si * cellDur;
                             const locked = !!bookedOffsets?.has(offset);
@@ -1366,9 +1360,9 @@ export default function ManagerCoffeeChatsPage() {
                               return (
                                 <div
                                   key={si}
-                                  className={`flex-1 flex items-center justify-center ${BOOKED_COLOR[cellDur]} text-white/85 cursor-not-allowed ${si ? "border-t border-t-white/20" : ""}`}
+                                  className={`flex-1 flex items-center justify-center bg-foreground/75 text-background cursor-not-allowed ${sep(si, true)}`}
                                 >
-                                  <Lock size={10} />
+                                  <Lock size={10} aria-label="Booked" />
                                 </div>
                               );
                             }
@@ -1381,9 +1375,9 @@ export default function ManagerCoffeeChatsPage() {
                                 <div
                                   key={si}
                                   onClick={past ? undefined : () => toggleSubSlot(date, hour, offset, cellDur)}
-                                  className={`flex-1 touch-none transition-colors ${si ? "border-t border-t-foreground/10" : ""} ${
+                                  className={`flex-1 touch-none transition-colors ${sep(si, existing)} ${
                                     past ? "" : "cursor-pointer"
-                                  } ${existing ? DURATION_COLOR[cellDur] : past ? "" : "hover:bg-accent"}`}
+                                  } ${existing ? "bg-foreground/25" : past ? "" : "hover:bg-foreground/10"}`}
                                 />
                               );
                             }
@@ -1398,22 +1392,21 @@ export default function ManagerCoffeeChatsPage() {
                             } else {
                               filled = existing;
                             }
-                            const previewPaint = segInDrag && dragState!.mode === "select";
                             return (
                               <div
                                 key={si}
                                 onPointerDown={past ? undefined : (e) => { e.preventDefault(); startDrag(di, hi, bi, date, hour); }}
                                 onPointerEnter={past ? undefined : () => { if (dragState) setDragCurrent({ di, fi: hi * div + bi }); }}
-                                className={`flex-1 touch-none transition-colors ${si ? "border-t border-t-foreground/10" : ""} ${
-                                  segInDrag ? "ring-1 ring-inset ring-blue-400 " : ""
-                                }${filled ? (previewPaint ? DURATION_COLOR[brushDuration] : DURATION_COLOR[cellDur]) : past ? "" : "hover:bg-accent"}`}
+                                className={`flex-1 touch-none transition-colors ${sep(si, filled)} ${
+                                  segInDrag ? "ring-1 ring-inset ring-ring " : ""
+                                }${filled ? "bg-foreground/25" : past ? "" : "hover:bg-foreground/10"}`}
                               />
                             );
                           })}
                         </div>
                         {hasLocationOverride && (
-                          <span className="pointer-events-none absolute top-0 right-0 z-[1] flex items-center justify-center w-3 h-3 rounded-bl bg-foreground/80 text-background">
-                            <MapPin size={7} />
+                          <span className="pointer-events-none absolute top-0 right-0 z-[1] flex items-center justify-center w-3 h-3 rounded-bl bg-background text-foreground">
+                            <MapPin size={7} aria-label="Custom location" />
                           </span>
                         )}
                       </div>
@@ -1434,55 +1427,34 @@ export default function ManagerCoffeeChatsPage() {
             </div>
           </div>
         </ScrollArea>
+      </section>
 
-        <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
-          {DURATIONS.map((d) => (
-            <span key={d} className="flex items-center gap-1.5">
-              <span className={`inline-block w-3 h-3 rounded-sm ${DURATION_COLOR[d]}`} /> {d}-min slots
-            </span>
-          ))}
-          <span className="flex items-center gap-1.5">
-            <span className="inline-flex items-center justify-center w-3 h-3 rounded-sm bg-green-700 text-white/85">
-              <Lock size={8} />
-            </span>{" "}
-            Booked (darker + lock)
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="inline-flex items-center justify-center w-3 h-3 rounded-sm bg-foreground/80 text-background">
-              <MapPin size={8} />
-            </span>{" "}
-            Custom location (differs from default)
-          </span>
-        </div>
-      </div>
-
-      {/* Booked coffee chats — upcoming, then past (grayed out) below */}
-      {loading ? (
-        <div className="flex flex-col gap-3">
-          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Upcoming</h2>
-          <SlotCardsSkeleton />
-        </div>
-      ) : (
-        <>
-          {bookedUpcoming.length > 0 && (
-            <div className="flex flex-col gap-3">
-              <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Upcoming</h2>
-              {bookedUpcoming.map((slot) => renderBookedSlot(slot, false))}
-            </div>
-          )}
-          {bookedPast.length > 0 && (
-            <div className="flex flex-col gap-3">
-              <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Past</h2>
-              {bookedPast.map((slot) => renderBookedSlot(slot, true))}
-            </div>
-          )}
-        </>
-      )}
+      {/* Booked chats: upcoming, then past behind a disclosure. */}
+      <section className="flex flex-col gap-3">
+        <h2 className="text-base font-semibold tracking-tight">
+          Upcoming
+          {!loading && <span className="ml-1.5 font-normal text-muted-foreground">{bookedUpcoming.length}</span>}
+        </h2>
+        {loading ? (
+          <BookedChatsSkeleton />
+        ) : bookedUpcoming.length === 0 && bookedPast.length === 0 ? (
+          <p className="rounded-xl surface px-4 py-8 text-center text-sm text-muted-foreground">No chats booked yet</p>
+        ) : bookedUpcoming.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Nothing coming up.</p>
+        ) : (
+          <div className="-mx-4 flex flex-col gap-0.5">{bookedUpcoming.map((slot) => renderBookedSlot(slot, false))}</div>
+        )}
+        {!loading && bookedPast.length > 0 && (
+          <Disclosure label={`Past ${bookedPast.length}`} className="pt-2">
+            <div className="-mx-4 -mt-2 flex flex-col gap-0.5 [contain:inline-size]">{bookedPast.map((slot) => renderBookedSlot(slot, true))}</div>
+          </Disclosure>
+        )}
+      </section>
 
       <ConfirmDialog
         open={clearOpen}
         onOpenChange={setClearOpen}
-        title="Clear all availability?"
+        title={bookedCount >= MAY_CLOSE_AT ? "Close remaining availability?" : "Clear all availability?"}
         description="This removes every open slot you've offered across the whole window. Booked chats are kept. This can't be undone."
         confirmLabel="Clear availability"
         onConfirm={clearAvailability}
@@ -1498,12 +1470,13 @@ export default function ManagerCoffeeChatsPage() {
         confirmLabel="Cancel booking"
         onConfirm={cancelBooking}
       >
-        <textarea
+        <Textarea
           value={cancelMessage}
           onChange={(e) => setCancelMessage(e.target.value)}
-          placeholder="Optional message to the applicant (e.g. a reason, or to suggest they rebook)…"
+          placeholder="Optional message, e.g. a reason or a nudge to rebook"
+          aria-label="Message to the attendee"
           rows={3}
-          className="w-full border rounded-md px-3 py-2 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-ring resize-none"
+          className="resize-none"
         />
       </ConfirmDialog>
 
@@ -1511,18 +1484,24 @@ export default function ManagerCoffeeChatsPage() {
         open={locationTarget !== null}
         onOpenChange={(o) => { if (!o) setLocationTarget(null); }}
         title="Meeting location"
-        description="Set a location or meeting link for this chat. Attendees are notified and it shows on their booking."
+        description="Attendees are notified and see it on their booking."
         confirmLabel="Save location"
         destructive={false}
         onConfirm={saveSlotLocation}
       >
-        <input
-          type="text"
-          value={locationDraft}
-          onChange={(e) => setLocationDraft(e.target.value)}
-          placeholder="e.g. https://zoom.us/j/… or Soda Hall 3rd floor"
-          className="w-full border rounded-md px-3 py-2 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-ring"
-        />
+        <div className="flex items-center gap-2">
+          <Input
+            value={locationDraft}
+            onChange={(e) => setLocationDraft(e.target.value)}
+            placeholder={defaultLocation.trim() || "Room or meeting link"}
+            aria-label="Location"
+          />
+          {locationDraft !== "" && (
+            <Button variant="ghost" size="sm" onClick={() => setLocationDraft("")}>
+              Use default
+            </Button>
+          )}
+        </div>
       </ConfirmDialog>
     </div>
   );

@@ -10,6 +10,7 @@ import { CoffeeChatIndicator, InfosessionIndicator, type CoffeeState } from "@/c
 import { isReturningMember, type MemberStatus } from "@/lib/member-status";
 import { cn } from "@/lib/utils";
 import { optimistic } from "@/lib/optimistic";
+import { Segmented } from "@/components/ui/segmented";
 
 type HostOption = { user_id: string; name: string };
 
@@ -74,7 +75,6 @@ export function SheetCoffeeCell({
   const [hostId, setHostId] = useState<string | null>(hostIds[0] ?? null);
   const [hosts, setHosts] = useState<HostOption[] | null>(null);
   const [search, setSearch] = useState("");
-  const saving = false;
   const [error, setError] = useState<string | null>(null);
 
   const primaryHostId = hostIds[0] ?? null;
@@ -139,7 +139,7 @@ export function SheetCoffeeCell({
         <button
           type="button"
           className="inline-flex min-h-[1.25rem] items-center rounded px-0.5 text-left hover:bg-accent"
-          title="Edit coffee chat"
+          aria-label="Edit coffee chat"
         >
           {state === "none" ? (
             <span className="text-muted-foreground">—</span>
@@ -149,20 +149,18 @@ export function SheetCoffeeCell({
         </button>
       </PopoverTrigger>
       <PopoverContent container={dialogContainer} align="start" className="w-72 space-y-3 p-3">
-        <p className="text-xs font-medium text-muted-foreground">Coffee chat</p>
-        <div className="flex flex-col gap-1">
-          {(["done", "booked", "none"] as const).map((s) => (
-            <label key={s} className="flex cursor-pointer items-center gap-2 text-sm">
-              <input
-                type="radio"
-                name={`coffee-${applicantId}`}
-                checked={status === s}
-                onChange={() => setStatus(s)}
-              />
-              {s === "done" ? "Done" : s === "booked" ? "Booked" : "None"}
-            </label>
-          ))}
-        </div>
+        <Segmented
+          aria-label="Coffee chat"
+          value={status}
+          onChange={setStatus}
+          className="w-full"
+          itemClassName="flex-1"
+          options={[
+            { value: "none", label: "None" },
+            { value: "booked", label: "Booked" },
+            { value: "done", label: "Done", indicatorClassName: "bg-success", selectedTextClassName: "text-success-foreground" },
+          ]}
+        />
         {status !== "none" && (
           <div className="space-y-1.5">
             <p className="text-xs font-medium text-muted-foreground">With</p>
@@ -172,10 +170,14 @@ export function SheetCoffeeCell({
               placeholder="Search hosts…"
               className="h-8"
             />
-            <ScrollArea className="h-36 rounded-md border">
+            <ScrollArea className="h-36 rounded-md bg-foreground/[0.03]">
               <div className="p-1">
                 {!hosts ? (
-                  <p className="px-2 py-1.5 text-xs text-muted-foreground">Loading…</p>
+                  <div aria-hidden className="flex flex-col gap-2.5 px-2 py-2">
+                    {[60, 45, 70, 50].map((w) => (
+                      <span key={w} className="h-3.5 animate-pulse rounded-full bg-foreground/[0.09]" style={{ width: `${w}%` }} />
+                    ))}
+                  </div>
                 ) : filteredHosts.length === 0 ? (
                   <p className="px-2 py-1.5 text-xs text-muted-foreground">No matches</p>
                 ) : (
@@ -197,13 +199,13 @@ export function SheetCoffeeCell({
             </ScrollArea>
           </div>
         )}
-        {error && <p className="text-xs text-red-500">{error}</p>}
+        {error && <p className="text-xs text-destructive">{error}</p>}
         <div className="flex justify-end gap-2">
-          <Button type="button" variant="ghost" size="sm" onClick={() => setOpen(false)} disabled={saving}>
+          <Button type="button" variant="ghost" size="sm" onClick={() => setOpen(false)}>
             Cancel
           </Button>
-          <Button type="button" size="sm" onClick={save} disabled={saving}>
-            {saving ? "Saving…" : "Save"}
+          <Button type="button" size="sm" onClick={save}>
+            Save
           </Button>
         </div>
       </PopoverContent>
@@ -223,7 +225,6 @@ export function SheetInfosessionCell({
   const { dialogContainer, probeRef } = useDialogContainer();
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState(attended);
-  const saving = false;
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -232,7 +233,13 @@ export function SheetInfosessionCell({
     setError(null);
   }, [open, attended]);
 
-  const save = () => {
+  // One click writes: picking an option applies it and closes.
+  const save = (value: boolean) => {
+    setValue(value);
+    if (value === attended) {
+      setOpen(false);
+      return;
+    }
     setError(null);
     const supabase = createClient();
     const before = attended;
@@ -255,7 +262,7 @@ export function SheetInfosessionCell({
         <button
           type="button"
           className="inline-flex min-h-[1.25rem] items-center rounded px-0.5 text-left hover:bg-accent"
-          title="Edit info session"
+          aria-label="Edit info session"
         >
           {attended ? (
             <InfosessionIndicator attended />
@@ -265,26 +272,18 @@ export function SheetInfosessionCell({
         </button>
       </PopoverTrigger>
       <PopoverContent container={dialogContainer} align="start" className="w-56 space-y-3 p-3">
-        <p className="text-xs font-medium text-muted-foreground">Info session</p>
-        <div className="flex flex-col gap-1">
-          <label className="flex cursor-pointer items-center gap-2 text-sm">
-            <input type="radio" checked={value} onChange={() => setValue(true)} />
-            Attended
-          </label>
-          <label className="flex cursor-pointer items-center gap-2 text-sm">
-            <input type="radio" checked={!value} onChange={() => setValue(false)} />
-            Not attended
-          </label>
-        </div>
-        {error && <p className="text-xs text-red-500">{error}</p>}
-        <div className="flex justify-end gap-2">
-          <Button type="button" variant="ghost" size="sm" onClick={() => setOpen(false)} disabled={saving}>
-            Cancel
-          </Button>
-          <Button type="button" size="sm" onClick={save} disabled={saving}>
-            {saving ? "Saving…" : "Save"}
-          </Button>
-        </div>
+        <Segmented
+          aria-label="Info session"
+          value={value ? "yes" : "no"}
+          onChange={(v) => save(v === "yes")}
+          className="w-full"
+          itemClassName="flex-1"
+          options={[
+            { value: "no", label: "Not attended" },
+            { value: "yes", label: "Attended", indicatorClassName: "bg-success", selectedTextClassName: "text-success-foreground" },
+          ]}
+        />
+        {error && <p className="text-xs text-destructive">{error}</p>}
       </PopoverContent>
     </Popover>
   );
@@ -304,7 +303,6 @@ export function SheetReturningCell({
   const { dialogContainer, probeRef } = useDialogContainer();
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState(returning);
-  const saving = false;
   const [error, setError] = useState<string | null>(null);
 
   const editable = memberStatus === "non_member" || memberStatus === "inactive";
@@ -315,8 +313,9 @@ export function SheetReturningCell({
     setError(null);
   }, [open, returning]);
 
-  const save = async () => {
+  const save = (value: boolean) => {
     if (!editable) return;
+    setValue(value);
     const nextStatus: MemberStatus = value ? "inactive" : "non_member";
     if (nextStatus === memberStatus) {
       setOpen(false);
@@ -338,7 +337,7 @@ export function SheetReturningCell({
   };
 
   const display = returning ? (
-    <span className="text-indigo-600">Yes</span>
+    <span className="font-medium text-foreground">Yes</span>
   ) : (
     <span className="text-muted-foreground">No</span>
   );
@@ -366,32 +365,25 @@ export function SheetReturningCell({
         <button
           type="button"
           className="inline-flex min-h-[1.25rem] items-center rounded px-0.5 text-left hover:bg-accent"
-          title="Edit returning status"
+          aria-label="Edit returning status"
         >
           {display}
         </button>
       </PopoverTrigger>
       <PopoverContent container={dialogContainer} align="start" className="w-56 space-y-3 p-3">
-        <p className="text-xs font-medium text-muted-foreground">Returning</p>
-        <div className="flex flex-col gap-1">
-          <label className="flex cursor-pointer items-center gap-2 text-sm">
-            <input type="radio" checked={value} onChange={() => setValue(true)} />
-            Yes
-          </label>
-          <label className="flex cursor-pointer items-center gap-2 text-sm">
-            <input type="radio" checked={!value} onChange={() => setValue(false)} />
-            No
-          </label>
-        </div>
-        {error && <p className="text-xs text-red-500">{error}</p>}
-        <div className="flex justify-end gap-2">
-          <Button type="button" variant="ghost" size="sm" onClick={() => setOpen(false)} disabled={saving}>
-            Cancel
-          </Button>
-          <Button type="button" size="sm" onClick={save} disabled={saving}>
-            {saving ? "Saving…" : "Save"}
-          </Button>
-        </div>
+        <p className="text-xs font-medium text-muted-foreground">Returning member</p>
+        <Segmented
+          aria-label="Returning member"
+          value={value ? "yes" : "no"}
+          onChange={(v) => save(v === "yes")}
+          className="w-full"
+          itemClassName="flex-1"
+          options={[
+            { value: "no", label: "No" },
+            { value: "yes", label: "Yes" },
+          ]}
+        />
+        {error && <p className="text-xs text-destructive">{error}</p>}
       </PopoverContent>
     </Popover>
   );

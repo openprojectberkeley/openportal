@@ -252,11 +252,18 @@ The tokens live in `globals.css` (`--dur-*`, `--ease-*`), are exposed in Tailwin
 - **Optional fields.** Forms show what's required; everything optional sits in a `Disclosure` (`ui/disclosure.tsx`, "More options"), which opens with a height animation and starts open when anything inside is already set. Used on portal, project, family, event, announcement and semester forms.
 - **Colour picking.** One `ColorPicker` everywhere: a 36px trigger (swatch, hex, chevron) opening a popover with the presets, the native picker, a hex field and "No colour" (hidden when `required`).
 - **Loading.** Paint the real shell (title, tabs, toolbars) immediately and put skeletons only where data goes. Start data requests on mount rather than after client-side role checks; the API enforces access.
+  - Skeletons are `bg-foreground/[0.09]` (the `Skeleton` base), which reads in both themes; never `bg-muted`.
+  - A text-line skeleton is as tall as its text (`h-3.5` for `text-sm`, `h-3` for `text-xs`) and `rounded-full`.
+  - **Full layout, then shrink.** While a record loads, show skeletons for everything it could contain (profile modal: avatar, pronouns, badges, Academic, Contact, Interests; hover card: avatar and badges). When it lands, empty sections drop out and the box animates down to its real height (`useShrinkOnLoad` in `src/lib/use-shrink-on-load.ts`). Loading only ever shrinks a box, never grows it.
 - **Events are bars, not cards.** Every event (cards, month chips, the week all-day band, agenda, panels, attendance rows) is just its information beside a rounded vertical colour bar: `eventBarColor()` (category colour, else the portal's, else slate; very dark accents lifted). Week time blocks keep a faint 14% tint of their span plus the bar. Category and portal labels use `readableAccentText()`, the accent mixed 30% toward the foreground so it reads on the page in both themes. Each card has `id="event-<id>"`, and clicking a chip scrolls to it.
 - **Calendar navigation.** The period label opens a `MonthYearPicker` (year stepper, months, Today, exact date). "+N more" selects the day and scrolls to its list.
-- **Announcements** hang off the sticky header as one glass strip on every app page: square top, rounded bottom, each announcement in its colour at 72% over a blur, readable text, the gradient rim.
+- **Announcements** hang off the sticky header as one glass strip on every app page: square top, rounded bottom, each announcement in its colour at 90% over a light blur (nearly solid, still a touch glassy), readable text, the gradient rim.
 - **Admin lists: rows first, details lazy.** List routes return light rows (names, counts); expanding a row opens instantly (`animate-expand`) with skeleton lines and fetches that row's details or roster (`/api/admin/*/[id]`).
-- **Rosters.** `RosterList` is the one member/role list: name, crown toggle, remove, a search box past 5 rows, scrolling inside its panel. No pills.
+- **Admin members are paged on the server.** `/api/admin/members?page=&pageSize=50&q=&roles=&status=` returns `{ rows, total, all }`; search (debounced 250ms), role and status filters run there and reset to page 1. While the next page loads the current rows stay, dimmed, under a thin sliding bar; the stagger plays per page of 50, never across hundreds of rows. Pickers that need everyone use the names-only `?names=1`, fetched once when the Portals or Projects tab opens.
+- **Rosters.** `RosterList` is the one member/role list: name, crown toggle, remove, a search box past 5 rows, scrolling inside its panel. No pills. Pass `expectedCount` (the list API's `member_count`): while loading it shows that many skeleton rows (up to a full scroll area, 9), then shrinks to fit once the roster arrives.
+- **Crowns.** `AdminCrown` is `text-foreground` (dark in light mode, light in dark); the owner's is amber, `text-amber-600 dark:text-amber-400`, the one sanctioned palette colour.
+- **Avatar upload.** The avatar is its own button (`AvatarPicker`): hover or focus dims it and shows a camera; click opens the cropper; errors toast. No separate "Change photo" button.
+- **Edit profile.** Avatar beside the names and pronouns ("Show on profile" switch, explanation in an `InfoHint`); then Academic and Contact sections with in-panel labels; LinkedIn/GitHub are prefixed fields (`linkedin.com/in/`, `github.com/` inside the input) edited as handles; Interests is a `Textarea` (`ui/textarea.tsx`, styled like `Input`).
 - **Access changes ask first.** Roles, member status, PM and admin tiers go through `useConfirm()` (a `ConfirmDialog` naming the person and the change), then apply optimistically. Removing access is red.
 - **Pagers are arrows.** Previous/next are chevron icon buttons with aria-labels, never "Previous"/"Next" text.
 - **Segmented in grids.** `shape="soft"` (3px corners), `allowDeselect` (click the selected option to clear), per-option coloured indicators, and `selectOnFocus={false}` so arrowing across a grid never writes data (attendance P/A/E).
@@ -266,6 +273,24 @@ The tokens live in `globals.css` (`--dur-*`, `--ease-*`), are exposed in Tailwin
 - **Announcement banners.** A flat fill in the admin's chosen colour, with `accentRing` and readable text.
 - **Sign-in page.** The wordmark pairs a bold "Open Portal" with a light (300) "Open Project". The left panel is dark in both themes. It shows the three floating logo shapes, with a cursor blob that inverts whatever is under it.
 - **Footer.** One quiet line: name, link, copyright, theme toggle.
+- **Page section headings** are `text-base font-semibold tracking-tight`, sentence case, with a muted count after them ("Your codes 3"). Uppercase `text-xs` labels are only for groups inside a panel or column (Wishlist, 1st choice, Academic).
+- **Field help.** A label carries at most a short muted tag ("Optional", "Highly recommended"); any explanation goes in an `InfoHint` beside it (`FieldLabel` on the application page). Form fields are `Input`/`Textarea`; native date/time fields copy the Input classes.
+- **One-click popover edits.** A two- or three-way choice in a popover (sheet info session, returning member) is a `Segmented` that writes on click and closes; Save buttons are only for edits with more than one field.
+- **Social links.** LinkedIn/GitHub always render through `SocialLink` (`components/social-link.tsx`): the brand icon plus the handle, linked; full URLs and bare handles are both parsed.
+- **Admin members pager** sits both top-right of the filter row and under the list.
+- **Infosession.** Sessions are rows with icon buttons (Google Calendar, .ics) behind tooltips. Codes are rows (mono code, copy on click, trash on hover); the newest code shows large in a `surface` chip with a copy icon.
+- **Applicant cards.** A confirmed pick shows its project as a 3px bar down the left edge over a 7% wash (the event-bar mark), never a full colour fill; staged picks are the neutral `foreground/[0.07]` fill. Project colour fills only the column's head card.
+- **Draft rounds.** A round is one `surface` panel of rows, with column labels once at the top (pick order, "n/m confirmed", Picks) instead of repeated per row: position number (turns into the drag grip on hover), project, a success check when confirmed, the pick-count input, and a remove × on hover. "Add project" is a ghost row at the bottom. Picks under each project are indented rows, not cards.
+- **Sheet column help** lives at the top of that column's header menu, not in a native `title`. Native `title` attributes are out everywhere: use `Tooltip`, an `InfoHint`, or an `aria-label`.
+- **Long codes stay on one line**: truncate with `min-w-0 truncate`, show the whole value in a tooltip, and copy the full value on click.
+- **Coffee chats.**
+  - **Card:** roles are one muted comma line. The footer is always `h-9` and shows exactly one of: a "Book a chat" `Button`, muted "No open times", `text-success` check + "Booked", or a read-only summary.
+  - **Shared pieces:** `CoffeeTeamGrid` (search, equal-height grid, empty state) and `HostHeader` (the host's name is the page `h1`; roles line; interests), each with its own skeleton.
+  - **Booking page:** the time zone appears once, beside "Select a time"; all time tiles form one radiogroup (arrows move and select); the message sits behind an "Add a message" `Disclosure`.
+  - **Availability grid is neutral:** open `foreground/25`, booked `foreground/75` with a lock, slot length visible through segment splits. Day columns are `foreground/[0.03]` strips with no outlines; today is an inverted date badge; seat count turns `text-warning` only below the minimum; the legend lives in an `InfoHint`.
+  - **Host toolbar:** visible = slot-length `Segmented` + Save (label never changes). Gear popover = default location. ⋯ menu = Google Calendar sync (results as toasts) and one destructive clear. Execs set the booking window from a one-line date-range popover.
+  - **Booked chats:** row lists, Past behind a `Disclosure`. Each attendee sub-row has an Attended/No-show `Segmented` (`shape="soft"`, `allowDeselect`, `selectOnFocus={false}`); cancel lives in that attendee's ⋯ menu.
+  - **Gotchas:** a `truncate` child inside a `Disclosure` can widen the page (use `w-0 flex-1` on it, or `[contain:inline-size]` on the list). A popover whose first focusable is an `InfoHint` pops its tooltip on open; use `onOpenAutoFocus` to focus the field.
 
 ## Do's and Don'ts
 
@@ -281,5 +306,5 @@ The tokens live in `globals.css` (`--dur-*`, `--ease-*`), are exposed in Tailwin
 - Use outlined container boxes, `divide-y` row rules, or borders thicker than 1px.
 - Use uppercase eyebrows above headings, or monospace as decoration.
 - Use raw Tailwind palette colours (`text-red-500`, `bg-green-600`).
-- Use `transition-all`, animate width or height, scale the hovered element, or bounce.
+- Use `transition-all`, animate width or height, scale the hovered element, or bounce. (Exceptions: `animate-expand` for disclosure, and the one-shot shrink when a loaded record replaces its skeleton.)
 - Show "Saving…" spinners for writes that could be optimistic.

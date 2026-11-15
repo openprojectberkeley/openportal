@@ -6,11 +6,8 @@ import Link from "next/link";
 import { CoffeeChatCard } from "@/components/coffee-chat-card";
 import { useRefreshOnReturn } from "@/lib/use-refresh-on-return";
 import { loadCoffeeChatWindowBounds } from "@/lib/coffee-chat-window";
-import { CoffeeTeamSkeleton } from "@/components/skeletons";
+import { CoffeeTeamGrid } from "@/components/coffee-team-grid";
 import { roleRank, sortRoles } from "@/lib/role-order";
-import { staggerStyle } from "@/lib/motion";
-import { Search } from "lucide-react";
-import { Input } from "@/components/ui/input";
 import { BackLink } from "@/components/back-link";
 
 type MemberCard = {
@@ -29,7 +26,6 @@ type MemberCard = {
 // (coffee-chat/page.tsx) minus every booking/cancel path.
 export default function EveryoneAvailabilityPage() {
   const [members, setMembers] = useState<MemberCard[]>([]);
-  const [teamQuery, setTeamQuery] = useState("");
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
@@ -99,7 +95,7 @@ export default function EveryoneAvailabilityPage() {
     const rolesMap = new Map<string, { id: string; role_name: string; access_level: string | null }[]>();
     for (const entry of allRoles ?? []) {
       if (!rolesMap.has(entry.user_id)) rolesMap.set(entry.user_id, []);
-      if (entry.roles) rolesMap.get(entry.user_id)!.push(entry.roles as any);
+      if (entry.roles) rolesMap.get(entry.user_id)!.push(entry.roles as unknown as { id: string; role_name: string; access_level: string | null });
     }
 
     const nameMap = new Map<string, string>();
@@ -144,75 +140,32 @@ export default function EveryoneAvailabilityPage() {
 
   useRefreshOnReturn(load);
 
-  // Team search over name, roles and interests (interests is free text).
-  const tq = teamQuery.trim().toLowerCase();
-  const shownMembers = tq
-    ? members.filter((m) =>
-        [m.name, ...(m.roles ?? []).map((r) => r.role_name), m.interests ?? ""].some((t) => t.toLowerCase().includes(tq)),
-      )
-    : members;
-
   return (
-    <div className="w-full max-w-5xl mx-auto p-6 flex flex-col gap-8">
+    <div className="w-full max-w-6xl mx-auto p-5 flex flex-col gap-6">
       <div className="flex flex-col gap-1">
         <BackLink href="/manager/coffee-chats" label="Coffee chats" />
-        <h1 className="text-2xl font-bold tracking-tight">Everyone&apos;s Availability</h1>
-        <p className="text-sm text-muted-foreground">
-          Every board member&apos;s coffee-chat availability, view-only. Tap a person to see their times.
-        </p>
+        <h1 className="text-2xl font-bold tracking-tight">Everyone&apos;s availability</h1>
       </div>
 
-      {loading ? (
-        <section className="flex flex-col gap-3">
-          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Our Team</h2>
-          <CoffeeTeamSkeleton />
-        </section>
-      ) : members.length > 0 ? (
-        <section className="flex flex-col gap-3">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-              Our Team <span className="text-xs font-normal text-muted-foreground/60">({shownMembers.length})</span>
-            </h2>
-            {/* Name, role or interest: "design", "ML", a first name. */}
-            <div className="relative w-full sm:w-64">
-              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" aria-hidden />
-              <Input
-                value={teamQuery}
-                onChange={(e) => setTeamQuery(e.target.value)}
-                placeholder="Search name, role or interest…"
-                aria-label="Search the team"
-                className="h-8 pl-8 text-sm"
-              />
-            </div>
-          </div>
-          {shownMembers.length === 0 && (
-            <p className="rounded-xl surface px-4 py-8 text-center text-sm text-muted-foreground">
-              Nobody matches &ldquo;{teamQuery.trim()}&rdquo;.
-            </p>
-          )}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 auto-rows-fr gap-4">
-            {shownMembers.map((m, i) => (
-              <Link
-                key={m.user_id}
-                href={`/manager/coffee-chats/all/${m.user_id}`}
-                style={staggerStyle(i)}
-                className="flex h-full animate-fade-in-up rounded-xl [&>*]:flex-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <CoffeeChatCard
-                  id={m.user_id}
-                  name={m.name}
-                  roles={m.roles}
-                  avatarUrl={m.avatarUrl}
-                  interests={m.interests}
-                  summary={{ open: m.open, booked: m.booked }}
-                />
-              </Link>
-            ))}
-          </div>
-        </section>
-      ) : (
-        <p className="text-sm text-muted-foreground">No team members available for coffee chats right now.</p>
-      )}
+      <CoffeeTeamGrid
+        members={members}
+        loading={loading}
+        renderItem={(m) => (
+          <Link
+            href={`/manager/coffee-chats/all/${m.user_id}`}
+            className="flex rounded-xl transition-shadow hover:shadow-md [&>*]:flex-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <CoffeeChatCard
+              id={m.user_id}
+              name={m.name}
+              roles={m.roles}
+              avatarUrl={m.avatarUrl}
+              interests={m.interests}
+              summary={{ open: m.open, booked: m.booked }}
+            />
+          </Link>
+        )}
+      />
     </div>
   );
 }

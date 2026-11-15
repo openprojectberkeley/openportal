@@ -6,10 +6,10 @@ import { createClient } from "@/lib/supabase/client";
 import { useRefreshOnReturn } from "@/lib/use-refresh-on-return";
 import { loadCoffeeChatWindowBounds } from "@/lib/coffee-chat-window";
 import { bucketOpenSlots, groupSlotsByDay, type DayGroup } from "@/lib/coffee-chat-slots";
-import { AvailabilitySkeleton } from "@/components/skeletons";
-import { PersonName } from "@/components/person-profile-provider";
 import { MapPin } from "lucide-react";
 import { BackLink } from "@/components/back-link";
+import { HostHeader } from "@/components/coffee-host-header";
+import { Skeleton } from "@/components/ui/skeleton";
 
 type PersonInfo = {
   name: string;
@@ -83,7 +83,10 @@ function ViewAvailabilityInner() {
 
       setPerson({
         name: [profile?.preferred_firstname, profile?.lastname].filter(Boolean).join(" ") || "Member",
-        roles: (roleRows ?? []).flatMap((r: any) => (r.roles ? [r.roles] : [])),
+        roles: (roleRows ?? []).flatMap((r) => {
+          const role = r.roles as unknown as { id: string; role_name: string } | null;
+          return role ? [role] : [];
+        }),
         avatarUrl: profile?.avatar_url ?? null,
         interests: profile?.interests ?? null,
         defaultLocation: profile?.default_chat_location ?? null,
@@ -96,84 +99,51 @@ function ViewAvailabilityInner() {
 
   useRefreshOnReturn(loadSlots);
 
-  const initials = person?.name
-    .split(" ")
-    .map((w) => w[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase() ?? "";
-
   const firstName = person?.name.split(" ")[0] ?? "them";
 
   return (
-    <div className="w-full max-w-5xl mx-auto p-6 flex flex-col gap-6">
+    <div className="w-full max-w-6xl mx-auto p-5 flex flex-col gap-6">
       <BackLink href="/manager/coffee-chats/all" label="Everyone's availability" />
 
       <div className="flex flex-col md:flex-row gap-8 md:items-start">
         {/* Left: host header + times (view-only). */}
-        <div className="flex flex-col gap-8 md:w-2/3">
-          {person && (
-            <div className="flex items-center gap-4">
-              {person.avatarUrl ? (
-                <img src={person.avatarUrl} alt={person.name} className="h-14 w-14 rounded-full object-cover flex-shrink-0" />
-              ) : (
-                <div className="h-14 w-14 rounded-full bg-foreground/10 flex items-center justify-center text-sm font-semibold flex-shrink-0">
-                  {initials}
-                </div>
-              )}
-              <div className="flex flex-col gap-1.5">
-                <PersonName
-                  userId={id}
-                  name={person.name}
-                  preloaded={{ roles: person.roles, avatar_url: person.avatarUrl, interests: person.interests }}
-                  className="font-semibold"
-                />
-                <div className="flex flex-wrap gap-1">
-                  {person.roles.map((r) => (
-                    <span key={r.id} className="px-2 py-0.5 rounded-full bg-foreground/10 text-xs font-medium">
-                      {r.role_name}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
+        <div className="flex flex-col gap-8 md:w-2/3 min-w-0">
+          <HostHeader userId={id} host={person} />
 
-          <div className="flex flex-col gap-6">
-            <h2 className="font-semibold">Availability</h2>
+          <section className="flex flex-col gap-5">
+            <h2 className="text-base font-semibold tracking-tight">Availability</h2>
             {loading ? (
-              <AvailabilitySkeleton />
+              // Mirrors the flat text chips below (not the booking page's tiles).
+              Array.from({ length: 2 }, (_, d) => (
+                <div key={d} className="flex flex-col gap-2" aria-hidden>
+                  <Skeleton className="h-3.5 w-36 rounded-full" />
+                  <div className="flex flex-wrap gap-x-4 gap-y-2">
+                    {Array.from({ length: 5 }, (_, i) => (
+                      <Skeleton key={i} className="h-3.5 w-20 rounded-full" />
+                    ))}
+                  </div>
+                </div>
+              ))
             ) : days.length === 0 ? (
               <p className="text-sm text-muted-foreground">No availability in the current window.</p>
             ) : (
               days.map((day) => (
                 <div key={day.label} className="flex flex-col gap-2">
                   <p className="text-sm font-medium text-muted-foreground">{day.label}</p>
-                  <div className="flex flex-wrap gap-2">
+                  {/* Read-only: flat muted text chips, nothing that looks pressable. */}
+                  <div className="flex flex-wrap gap-x-4 gap-y-2">
                     {day.slots.map((slot) => {
                       const full = slot.openCount === 0;
                       return (
                         <div
                           key={slot.meeting_time}
-                          className={`flex flex-col items-center px-4 py-2 rounded-md bg-foreground/[0.05] text-sm font-medium ${
-                            full ? "opacity-50" : ""
-                          }`}
+                          className={`flex items-baseline gap-1.5 text-sm ${full ? "opacity-50" : ""}`}
                         >
-                          {slot.timeLabel}
-                          <span className="flex items-center gap-1.5 text-[11px] font-normal text-muted-foreground">
-                            <span>{slot.duration_minutes} min</span>
-                            {slot.capacity > 1 && (
-                              <>
-                                <span className="h-1 w-1 rounded-full bg-current" />
-                                <span className="tabular-nums">{slot.filled}/{slot.capacity}</span>
-                              </>
-                            )}
-                            {full && slot.capacity <= 1 && (
-                              <>
-                                <span className="h-1 w-1 rounded-full bg-current" />
-                                <span>booked</span>
-                              </>
-                            )}
+                          <span className="font-medium">{slot.timeLabel}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {slot.duration_minutes}m
+                            {slot.capacity > 1 && <> · {slot.filled}/{slot.capacity}</>}
+                            {full && slot.capacity <= 1 && <> · booked</>}
                           </span>
                         </div>
                       );
@@ -182,42 +152,35 @@ function ViewAvailabilityInner() {
                 </div>
               ))
             )}
-          </div>
+          </section>
         </div>
 
-        {/* Right: about the host (one-third, sticky). View-only — no booking. */}
-        <div className="flex flex-col gap-6 md:w-1/3 md:sticky md:top-6 self-start rounded-xl surface p-4">
-          {person && (
-            <div className="flex flex-col gap-3">
-              <h3 className="text-sm font-semibold">About {firstName}&apos;s coffee chats</h3>
-              <div className="flex items-start gap-1.5 text-sm text-muted-foreground">
-                <MapPin size={14} className="mt-0.5 flex-shrink-0" />
-                {person.defaultLocation ? (
-                  /^https?:\/\//.test(person.defaultLocation) ? (
-                    <a
-                      href={person.defaultLocation}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="underline decoration-dotted underline-offset-2 hover:text-foreground break-all"
-                    >
-                      {person.defaultLocation}
-                    </a>
-                  ) : (
-                    <span className="break-words">{person.defaultLocation}</span>
-                  )
+        {/* Right: where the host meets (one-third, sticky). View-only. */}
+        <aside className="flex flex-col gap-3 md:w-1/3 md:sticky md:top-6 self-start w-full rounded-xl surface p-4">
+          {person ? (
+            <div className="flex items-start gap-1.5 text-sm text-muted-foreground">
+              <MapPin size={14} className="mt-0.5 flex-shrink-0" aria-label="Location" />
+              {person.defaultLocation ? (
+                /^https?:\/\//.test(person.defaultLocation) ? (
+                  <a
+                    href={person.defaultLocation}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline decoration-dotted underline-offset-2 hover:text-foreground break-all"
+                  >
+                    {person.defaultLocation}
+                  </a>
                 ) : (
-                  <span className="italic">No location set yet</span>
-                )}
-              </div>
-              {person.interests && (
-                <div className="flex flex-col gap-1">
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Interests</p>
-                  <p className="text-sm text-muted-foreground leading-snug">{person.interests}</p>
-                </div>
+                  <span className="break-words">{person.defaultLocation}</span>
+                )
+              ) : (
+                <span>{firstName} hasn&apos;t set a location yet.</span>
               )}
             </div>
+          ) : (
+            <Skeleton className="h-3.5 w-3/4 rounded-full" />
           )}
-        </div>
+        </aside>
       </div>
     </div>
   );

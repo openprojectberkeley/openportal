@@ -7,6 +7,9 @@ import { initials, ProjectBadge, type OpenTarget, type PublicProfile } from "@/c
 import { CoffeeChatIndicator, InfosessionIndicator, SubmittedApplicationIndicator } from "@/components/applicant-indicators";
 import { sortRoles } from "@/lib/role-order";
 import { MEMBER_STATUS_BADGE_LABEL } from "@/lib/member-status";
+import { Skeleton } from "@/components/ui/skeleton";
+import { SocialLink } from "@/components/social-link";
+import { useShrinkOnLoad } from "@/lib/use-shrink-on-load";
 
 type Props = {
   target: OpenTarget | null;
@@ -58,12 +61,13 @@ export function ProfileModal({ target, cached, onLoaded, onClose }: Props) {
   const roles = sortRoles(merged.roles ?? []);
   const projects = merged.projects ?? [];
 
-  const contact: { label: string; value: string; href?: string }[] = [];
+  const contact: { label: string; value: string; href?: string; node?: React.ReactNode }[] = [];
   if (merged.email) contact.push({ label: "Email", value: merged.email, href: `mailto:${merged.email}` });
   if (merged.phone) contact.push({ label: "Phone", value: merged.phone, href: `tel:${merged.phone}` });
   if (merged.linkedin)
-    contact.push({ label: "LinkedIn", value: merged.linkedin, href: hrefFor(merged.linkedin) });
-  if (merged.github) contact.push({ label: "GitHub", value: merged.github, href: hrefFor(merged.github) });
+    contact.push({ label: "LinkedIn", value: merged.linkedin, node: <SocialLink kind="linkedin" value={merged.linkedin} /> });
+  if (merged.github)
+    contact.push({ label: "GitHub", value: merged.github, node: <SocialLink kind="github" value={merged.github} /> });
 
   const academic: { label: string; value: string }[] = [];
   if (merged.major) academic.push({ label: "Major", value: merged.major });
@@ -78,6 +82,13 @@ export function ProfileModal({ target, cached, onLoaded, onClose }: Props) {
   // click-outside still closes this modal normally.
   const stop = (e: React.SyntheticEvent) => e.stopPropagation();
 
+  // Until the full record arrives, every slot shows a skeleton as if the
+  // profile were complete; sections with nothing in them then drop out, so
+  // the modal only ever shrinks (animated).
+  const pending = loading && !data;
+  const { outerRef, innerRef } = useShrinkOnLoad(pending);
+  const hasBadges = roles.length > 0 || projects.length > 0;
+
   return (
     <Dialog open={!!userId} onOpenChange={(o) => !o && onClose()}>
       <DialogContent
@@ -91,9 +102,13 @@ export function ProfileModal({ target, cached, onLoaded, onClose }: Props) {
         onTouchEnd={stop}
       >
         <ScrollArea viewportClassName="max-h-[90vh] p-6">
+        <div ref={outerRef}>
+        <div ref={innerRef}>
         <DialogHeader>
           <div className="flex items-center gap-4">
-            {merged.avatar_url ? (
+            {pending && !merged.avatar_url ? (
+              <Skeleton className="h-14 w-14 rounded-full flex-shrink-0" />
+            ) : merged.avatar_url ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={merged.avatar_url}
@@ -108,11 +123,19 @@ export function ProfileModal({ target, cached, onLoaded, onClose }: Props) {
             <div className="flex flex-col gap-1.5 min-w-0">
               <div className="flex flex-wrap items-baseline gap-x-2 min-w-0">
                 <DialogTitle className="truncate">{name}</DialogTitle>
-                {merged.pronouns && (
+                {merged.pronouns ? (
                   <span className="text-sm text-muted-foreground">{merged.pronouns}</span>
-                )}
+                ) : pending ? (
+                  <Skeleton className="h-3.5 w-14 rounded-full" />
+                ) : null}
               </div>
               <div className="flex flex-wrap items-center gap-1">
+                {pending && !hasBadges && (
+                  <>
+                    <Skeleton className="h-5 w-16 rounded-full" />
+                    <Skeleton className="h-5 w-24 rounded-full" />
+                  </>
+                )}
                 {roles.map((r) => (
                   <span
                     key={r.id}
@@ -136,24 +159,55 @@ export function ProfileModal({ target, cached, onLoaded, onClose }: Props) {
         </DialogHeader>
 
         <div className="flex flex-col gap-5 text-sm">
+          {pending ? (
+            <>
+              <SkeletonSection title="Academic" widths={[40, 16]} labels={["Major", "Year"]} />
+              <SkeletonSection title="Contact" widths={[52, 28, 44, 36]} labels={["Email", "Phone", "LinkedIn", "GitHub"]} />
+              <div className="flex flex-col gap-2">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Interests</h3>
+                <Skeleton className="h-3.5 w-full rounded-full" />
+                <Skeleton className="h-3.5 w-3/4 rounded-full" />
+              </div>
+            </>
+          ) : (
+            <>
           {academic.length > 0 && <Section title="Academic" rows={academic} />}
           {contact.length > 0 && <Section title="Contact" rows={contact} />}
-          {merged.interests && (
+            </>
+          )}
+          {!pending && merged.interests && (
             <div className="flex flex-col gap-1.5">
               <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Interests</h3>
               <p className="text-foreground leading-relaxed">{merged.interests}</p>
             </div>
           )}
 
-          {loading && !data && <p className="text-muted-foreground py-2">Loading profile…</p>}
-          {error && !data && <p className="text-red-500 py-2">Couldn&apos;t load this profile.</p>}
+          {error && !data && <p className="text-destructive py-2">Couldn&apos;t load this profile.</p>}
           {!loading && !error && academic.length === 0 && contact.length === 0 && !merged.interests && (
             <p className="text-muted-foreground py-2">No additional details.</p>
           )}
         </div>
+        </div>
+        </div>
         </ScrollArea>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function SkeletonSection({ title, labels, widths }: { title: string; labels: string[]; widths: number[] }) {
+  return (
+    <div aria-hidden className="flex flex-col gap-2">
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</h3>
+      <div className="flex flex-col gap-1.5">
+        {labels.map((label, i) => (
+          <div key={label} className="flex h-5 items-center gap-3">
+            <span className="w-28 flex-shrink-0 text-muted-foreground">{label}</span>
+            <Skeleton className="h-3.5 rounded-full" style={{ width: `${widths[i]}%` }} />
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -162,7 +216,7 @@ function Section({
   rows,
 }: {
   title: string;
-  rows: { label: string; value: string; href?: string }[];
+  rows: { label: string; value: string; href?: string; node?: React.ReactNode }[];
 }) {
   return (
     <div className="flex flex-col gap-2">
@@ -172,7 +226,9 @@ function Section({
           <div key={row.label} className="flex gap-3">
             <dt className="w-28 flex-shrink-0 text-muted-foreground">{row.label}</dt>
             <dd className="min-w-0 break-words text-foreground">
-              {row.href ? (
+              {row.node ? (
+                row.node
+              ) : row.href ? (
                 <a
                   href={row.href}
                   target={row.href.startsWith("http") ? "_blank" : undefined}
@@ -190,14 +246,4 @@ function Section({
       </dl>
     </div>
   );
-}
-
-// LinkedIn/GitHub fields may be stored as full URLs, bare handles, or
-// "linkedin.com/in/..." — normalize to something clickable.
-function hrefFor(value: string): string | undefined {
-  const v = value.trim();
-  if (!v) return undefined;
-  if (v.startsWith("http://") || v.startsWith("https://")) return v;
-  if (v.includes(".") && v.includes("/")) return `https://${v}`;
-  return undefined;
 }

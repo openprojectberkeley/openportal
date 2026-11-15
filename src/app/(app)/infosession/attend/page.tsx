@@ -3,6 +3,10 @@
 import { createClient } from "@/lib/supabase/client";
 import { useState } from "react";
 import { BackLink } from "@/components/back-link";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { InfoHint } from "@/components/ui/info-hint";
+import { Check } from "lucide-react";
 
 export default function AttendPage() {
   const [code, setCode] = useState("");
@@ -71,9 +75,11 @@ export default function AttendPage() {
   if (submitted) {
     return (
       <div className="flex flex-1 w-full items-center justify-center p-6">
-        <div className="flex flex-col gap-4 w-full max-w-sm text-center">
-          <div className="text-4xl">✓</div>
-          <h1 className="text-2xl font-bold tracking-tight">Attendance recorded!</h1>
+        <div className="flex flex-col items-center gap-3 w-full max-w-sm text-center animate-fade-in-up">
+          <span className="flex h-12 w-12 items-center justify-center rounded-full bg-success/15 text-success">
+            <Check size={22} />
+          </span>
+          <h1 className="text-2xl font-bold tracking-tight">Attendance recorded</h1>
           <p className="text-sm text-muted-foreground">Thanks for coming to the infosession.</p>
           <BackLink href="/" label="Dashboard" />
         </div>
@@ -85,38 +91,33 @@ export default function AttendPage() {
     <div className="w-full max-w-lg mx-auto p-6 flex flex-col gap-8">
       <div className="flex flex-col gap-1">
         <BackLink href="/infosession" label="Infosession" />
-        <h1 className="text-2xl font-bold tracking-tight">Submit Attendance</h1>
-      </div>
-
-      <div className="rounded-xl p-6 flex flex-col gap-4 surface">
-        <p className="text-sm leading-relaxed">
-          Speak to a PM during the meet and greet portion of the infosession.
-          After your conversation, ask the PM for a <span className="font-medium">code</span>.
-          Enter that code below to record your attendance.
-        </p>
+        <h1 className="text-2xl font-bold tracking-tight">Submit attendance</h1>
       </div>
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
         <div className="flex flex-col gap-1.5">
-          <label htmlFor="code" className="text-sm font-medium">Attendance code</label>
-          <input
+          <div className="flex items-center gap-1.5">
+            <label htmlFor="code" className="text-sm font-medium">Attendance code</label>
+            <InfoHint label="Where to get a code">
+              Talk to a PM during the meet and greet. Afterwards, ask them for a code and enter it here.
+            </InfoHint>
+          </div>
+          <Input
             id="code"
             type="text"
             value={code}
             onChange={(e) => setCode(e.target.value.toUpperCase())}
-            placeholder="Enter the code from your PM"
+            placeholder="Code from your PM"
+            autoComplete="off"
+            autoFocus
             required
-            className="border rounded-md px-3 py-2 text-sm w-full bg-background uppercase tracking-wider focus:outline-none focus:ring-1 focus:ring-ring"
+            className="h-11 font-mono text-base uppercase tracking-[0.2em] placeholder:font-sans placeholder:tracking-normal placeholder:normal-case"
           />
         </div>
-        {error && <p className="text-sm text-red-500">{error}</p>}
-        <button
-          type="submit"
-          disabled={loading || !code.trim()}
-          className="w-full rounded-md bg-foreground text-background px-4 py-2.5 text-sm font-medium hover:opacity-80 transition-opacity disabled:opacity-30"
-        >
-          {loading ? "Submitting..." : "Submit"}
-        </button>
+        {error && <p className="text-sm text-destructive">{error}</p>}
+        <Button type="submit" size="lg" disabled={loading || !code.trim()}>
+          {loading ? "Checking code…" : "Submit"}
+        </Button>
       </form>
     </div>
   );

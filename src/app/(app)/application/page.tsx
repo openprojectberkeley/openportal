@@ -29,6 +29,31 @@ import { uploadResume, deleteResume, resumeSignedUrl } from "@/lib/resume-upload
 import { OTHER_CLASS_SUGGESTIONS, TECH_AREAS, TECH_CLASSES, TECH_CLASS_NA } from "@/lib/application-profile";
 import { MultiCombobox, joinList, splitList } from "@/components/ui/combobox";
 import { BackLink } from "@/components/back-link";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { InfoHint } from "@/components/ui/info-hint";
+
+// A field label with an inline "Optional" (or similar) tag; any explanation
+// lives in an InfoHint rather than a line of helper text.
+function FieldLabel({
+  children,
+  tag,
+  hint,
+  htmlFor,
+}: {
+  children: React.ReactNode;
+  tag?: string;
+  hint?: React.ReactNode;
+  htmlFor?: string;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+      <Label className="text-sm font-medium" htmlFor={htmlFor}>{children}</Label>
+      {tag && <span className="text-xs text-muted-foreground">{tag}</span>}
+      {hint && <InfoHint label="More about this question">{hint}</InfoHint>}
+    </div>
+  );
+}
 
 // Postgres' RLS-violation code — the applications_open() checks baked into the
 // application_rankings/applications write policies fail with this when a period
@@ -685,30 +710,22 @@ export default function ApplicationPage() {
         <BackLink href="/" label="Dashboard" />
         <h1 className="text-2xl font-bold tracking-tight">Application</h1>
         <p className="text-sm text-muted-foreground">
-          Drag projects into your ranking (top {rankTarget}), then complete the questions for your
-          top {requiredTarget} choice{requiredTarget === 1 ? "" : "s"}. Your progress saves automatically.
+          Rank your top {rankTarget}, then answer the questions for your top {requiredTarget}. Progress saves automatically.
         </p>
       </div>
 
       {/* About you — optional background, above the project rankings. */}
       <section className="flex flex-col gap-6 rounded-xl surface p-5">
-        <div className="flex flex-col gap-0.5">
-          <h2 className="text-lg font-semibold">About you</h2>
-          <p className="text-sm text-muted-foreground">
-            A few optional questions to help us match you to projects. Answers save automatically.
-          </p>
+        <div className="flex items-center gap-2">
+          <h2 className="text-lg font-semibold tracking-tight">About you</h2>
+          <InfoHint label="About these questions">All optional; they help us match you to projects.</InfoHint>
         </div>
 
         {/* Technical areas of interest */}
         <div className="flex flex-col gap-3">
-          <div className="flex flex-col gap-0.5">
-            <Label className="text-sm font-medium">
-              Rank the technical areas you&apos;re interested in working on
-            </Label>
-            <span className="text-xs text-muted-foreground">
-              Optional · 1 (least) – 5 (most). Tap a number again to clear it.
-            </span>
-          </div>
+          <FieldLabel tag="Optional" hint="1 is least, 5 is most. Tap a number again to clear it.">
+            Rank the technical areas you&apos;re interested in working on
+          </FieldLabel>
           <div className="flex flex-col">
             {TECH_AREAS.map((a) => (
               <div key={a.key} className="flex items-center justify-between gap-3 py-2">
@@ -721,14 +738,9 @@ export default function ApplicationPage() {
 
         {/* Tech classes taken */}
         <div className="flex flex-col gap-3">
-          <div className="flex flex-col gap-0.5">
-            <Label className="text-sm font-medium">
-              Which of the following tech classes (or equivalent) have you taken or are enrolled in?
-            </Label>
-            <span className="text-xs text-muted-foreground">
-              Optional · Include lower/upper-div classes relevant to the projects you want. List any others below.
-            </span>
-          </div>
+          <FieldLabel tag="Optional" hint="Include lower- and upper-div classes relevant to the projects you want. Add any others below.">
+            Which of these tech classes (or equivalent) have you taken or are taking?
+          </FieldLabel>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             {TECH_CLASSES.map((c) => (
               <label key={c.key} className="flex items-center gap-2 text-sm cursor-pointer">
@@ -753,12 +765,7 @@ export default function ApplicationPage() {
 
       {/* Resume — optional, one per person, stored privately. */}
       <section className="flex flex-col gap-2 rounded-xl surface p-5">
-        <div className="flex flex-col gap-0.5">
-          <Label className="text-sm font-medium">Resume</Label>
-          <span className="text-xs text-muted-foreground">
-            Highly recommended · PDF or Word (.pdf, .doc, .docx), up to 500 KB.
-          </span>
-        </div>
+        <FieldLabel tag="Highly recommended" hint="PDF or Word (.pdf, .doc, .docx), up to 500 KB.">Resume</FieldLabel>
         <ResumeField
           resume={resume}
           uploading={resumeUploading}
@@ -766,20 +773,18 @@ export default function ApplicationPage() {
           onSelect={onResumeSelected}
           onRemove={onResumeRemove}
         />
-        <div className="flex flex-col gap-0.5 pt-1">
-          <Label className="text-sm font-medium" htmlFor="portfolio-url">Portfolio link</Label>
-          <span className="text-xs text-muted-foreground">
-            Optional · Designers, share a link to your portfolio (Behance, Dribbble, personal site, etc.).
-          </span>
+        <div className="pt-1">
+          <FieldLabel htmlFor="portfolio-url" tag="Optional" hint="Designers: share your portfolio (Behance, Dribbble, a personal site…).">
+            Portfolio link
+          </FieldLabel>
         </div>
-        <input
+        <Input
           id="portfolio-url"
           type="url"
           inputMode="url"
           value={portfolioUrl}
           onChange={(e) => onPortfolioChange(e.target.value)}
           placeholder="https://your-portfolio.com"
-          className="border rounded-md px-3 py-2 text-sm w-full bg-background focus:outline-none focus:ring-1 focus:ring-ring"
         />
       </section>
 
@@ -806,8 +811,8 @@ export default function ApplicationPage() {
           {/* Ranking */}
           <div className="flex flex-col gap-3">
             <div className="flex items-center gap-2">
-              <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Your ranking</h2>
-              <span className="text-xs font-medium text-muted-foreground tabular-nums">{rankedView.length}/{rankTarget}</span>
+              <h2 className="text-base font-semibold tracking-tight">Your ranking</h2>
+              <span className="text-sm text-muted-foreground tabular-nums">{rankedView.length}/{rankTarget}</span>
             </div>
             <RankZone
               ranked={rankedView}
@@ -830,16 +835,13 @@ export default function ApplicationPage() {
 
       {/* Free-text — after the project rankings. */}
       <div className="flex flex-col gap-2">
-        <div className="flex flex-col gap-0.5">
-          <Label className="text-sm font-medium">Anything else you&apos;d like us to know?</Label>
-          <span className="text-xs text-muted-foreground">Optional</span>
-        </div>
-        <textarea
+        <FieldLabel tag="Optional" htmlFor="about-note">Anything else you&apos;d like us to know?</FieldLabel>
+        <Textarea
+          id="about-note"
           value={aboutNote}
           onChange={(e) => onAboutChange(e.target.value)}
-          placeholder="Share anything else you'd like the team to know…"
           rows={4}
-          className="border rounded-md px-3 py-2 text-sm w-full resize-y bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+          className="resize-y"
         />
       </div>
 
@@ -927,13 +929,10 @@ function AvailableZone({
   const { setNodeRef } = useDroppable({ id: AVAILABLE_ZONE });
   return (
     <div ref={setNodeRef} className="flex flex-col gap-4 rounded-xl">
-      <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Projects</h2>
+      <h2 className="text-base font-semibold tracking-tight">Projects</h2>
       <SortableContext items={availableIds} strategy={verticalListSortingStrategy}>
         <div className="flex flex-col gap-2">
-          <AvailableGroup title={TYPE_LABELS.studio} list={studioAvailable} pmMap={pmMap} studioMet={studioMet} full={full} onAdd={onAdd} />
-          <p className="text-xs text-muted-foreground">
-            Returning members are prioritized for OP Studio projects.
-          </p>
+          <AvailableGroup title={TYPE_LABELS.studio} hint="Returning members are prioritized for OP Studio projects." list={studioAvailable} pmMap={pmMap} studioMet={studioMet} full={full} onAdd={onAdd} />
         </div>
         <AvailableGroup title={TYPE_LABELS.launch} list={launchAvailable} pmMap={pmMap} studioMet={studioMet} full={full} onAdd={onAdd} />
       </SortableContext>
@@ -943,6 +942,7 @@ function AvailableZone({
 
 function AvailableGroup({
   title,
+  hint,
   list,
   pmMap,
   studioMet,
@@ -950,6 +950,7 @@ function AvailableGroup({
   onAdd,
 }: {
   title: string;
+  hint?: string;
   list: Project[];
   pmMap: Record<string, Pm[]>;
   studioMet: (id: string) => boolean;
@@ -959,8 +960,9 @@ function AvailableGroup({
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-2">
-        <h3 className="text-xs font-semibold text-muted-foreground/80 uppercase tracking-wide">{title}</h3>
+        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{title}</h3>
         <span className="text-[10px] font-normal text-muted-foreground/60">({list.length})</span>
+        {hint && <InfoHint label={`About ${title}`}>{hint}</InfoHint>}
       </div>
       {list.length === 0 ? (
         <p className="text-xs text-muted-foreground">None available.</p>
@@ -1167,7 +1169,7 @@ function CardContent({
                   *
                 </span>
               )}
-              <span className="px-2 py-0.5 rounded-full bg-foreground/10 text-foreground text-[11px] font-medium flex-shrink-0">
+              <span className="text-xs text-muted-foreground flex-shrink-0">
                 {TYPE_LABELS[project.type]}
               </span>
               {/* Edit: the rounded square flashes only while REQUIRED questions
@@ -1334,7 +1336,7 @@ function ResumeField({
         }}
       />
       {resume ? (
-        <div className="flex items-center gap-2 border rounded-md px-3 py-2 text-sm bg-background">
+        <div className="flex items-center gap-2 rounded-md bg-foreground/[0.04] px-3 py-2 text-sm">
           <FileText size={16} className="text-muted-foreground flex-shrink-0" />
           <button
             type="button"
@@ -1391,7 +1393,7 @@ function DragPreview({ project }: { project: Project }) {
       <div className="relative z-10 flex items-center gap-2 min-w-0">
         <ProjectIcon project={project} />
         <span className="font-medium text-sm truncate">{project.name}</span>
-        <span className="px-2 py-0.5 rounded-full bg-foreground/10 text-foreground text-[11px] font-medium flex-shrink-0">
+        <span className="text-xs text-muted-foreground flex-shrink-0">
           {TYPE_LABELS[project.type]}
         </span>
       </div>

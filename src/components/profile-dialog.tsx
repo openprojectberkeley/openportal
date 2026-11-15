@@ -22,8 +22,28 @@ import { ChevronDown, X } from "lucide-react";
 
 const CLASS_YEARS = ["Freshman", "Sophomore", "Junior", "Senior", "Postgrad"] as const;
 import { AvatarPicker } from "@/components/avatar-picker";
-import { Checkbox } from "@/components/ui/checkbox";
+import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
+import { InfoHint } from "@/components/ui/info-hint";
 import { PronounsPicker } from "@/components/pronouns-field";
+
+// LinkedIn/GitHub are edited as handles behind a fixed prefix. Stored values
+// may be full URLs, "linkedin.com/in/…" or bare handles; anything that isn't
+// recognisably one of those is left as typed.
+const LINK_PREFIX = { linkedin: "linkedin.com/in/", github: "github.com/" } as const;
+type LinkKey = keyof typeof LINK_PREFIX;
+const LINK_RE: Record<LinkKey, RegExp> = {
+  linkedin: /^(https?:\/\/)?(www\.)?linkedin\.com\/in\//i,
+  github: /^(https?:\/\/)?(www\.)?github\.com\//i,
+};
+function toHandle(key: LinkKey, value: string): string {
+  return value.trim().replace(LINK_RE[key], "").replace(/\/+$/, "");
+}
+function fromHandle(key: LinkKey, handle: string): string {
+  const h = toHandle(key, handle);
+  if (!h) return "";
+  return /[./]/.test(h) ? h : `${LINK_PREFIX[key]}${h}`;
+}
 
 type ProfileFields = {
   preferred_firstname: string;
@@ -52,7 +72,7 @@ const EMPTY: ProfileFields = {
 const LABELS: Record<keyof ProfileFields, string> = {
   preferred_firstname: "Preferred first name",
   lastname: "Last name",
-  major: "Major(s)",
+  major: "Major",
   grad_year: "Year",
   phone: "Phone",
   linkedin: "LinkedIn",
@@ -112,15 +132,9 @@ export function ProfileDialog({ open, onOpenChange, userId, onSave }: Props) {
             avatarUrl: data.avatar_url ?? null,
           };
           setFields({
-            preferred_firstname: data.preferred_firstname ?? "",
-            lastname: data.lastname ?? "",
-            major: data.major ?? "",
-            grad_year: data.grad_year ?? "",
-            phone: data.phone ?? "",
-            linkedin: data.linkedin ?? "",
-            github: data.github ?? "",
-            interests: data.interests ?? "",
-            pronouns: data.pronouns ?? "",
+            ...loadedRef.current.fields,
+            linkedin: toHandle("linkedin", data.linkedin ?? ""),
+            github: toHandle("github", data.github ?? ""),
           });
           setPronounsPublic(data.pronouns_public ?? true);
           setAvatarUrl(data.avatar_url ?? null);
@@ -141,7 +155,11 @@ export function ProfileDialog({ open, onOpenChange, userId, onSave }: Props) {
   const handleSave = () => {
     setError(null);
     const supabase = createClient();
-    const saved = { fields, avatarUrl, pronounsPublic };
+    const saved = {
+      fields: { ...fields, linkedin: fromHandle("linkedin", fields.linkedin), github: fromHandle("github", fields.github) },
+      avatarUrl,
+      pronounsPublic,
+    };
     const before = loadedRef.current;
     void optimistic({
       label: "profile",
@@ -187,13 +205,27 @@ export function ProfileDialog({ open, onOpenChange, userId, onSave }: Props) {
           inputClassName="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
         />
       ) : key === "interests" ? (
-        <textarea
+        <Textarea
           id={key}
           value={fields[key]}
           onChange={(e) => setFields((f) => ({ ...f, [key]: e.target.value }))}
-          rows={2}
-          className="border rounded-md px-3 py-2 text-sm w-full resize-none bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+          rows={3}
+          placeholder="What you're into, in a sentence or two"
+          className="resize-none"
         />
+      ) : key === "linkedin" || key === "github" ? (
+        // Prefixed field: the fixed part of the URL sits inside the input.
+        <div className="flex h-9 w-full items-center rounded-md border border-input shadow-sm transition-colors focus-within:ring-1 focus-within:ring-ring">
+          <span className="select-none whitespace-nowrap pl-3 text-sm text-muted-foreground">{LINK_PREFIX[key]}</span>
+          <input
+            id={key}
+            value={fields[key]}
+            onChange={(e) => setFields((f) => ({ ...f, [key]: toHandle(key, e.target.value) }))}
+            placeholder="username"
+            autoComplete="off"
+            className="h-full min-w-0 flex-1 bg-transparent pr-3 text-base placeholder:text-muted-foreground/60 focus:outline-none md:text-sm"
+          />
+        </div>
       ) : key === "grad_year" ? (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -250,41 +282,68 @@ export function ProfileDialog({ open, onOpenChange, userId, onSave }: Props) {
             <span className="sr-only">Close</span>
           </button>
         </div>
-        <ScrollArea className="min-h-0" viewportClassName="px-6 pb-6 flex flex-col gap-4">
-          <AvatarPicker
-            userId={userId}
-            value={avatarUrl}
-            name={[fields.preferred_firstname, fields.lastname].filter(Boolean).join(" ")}
-            onChange={setAvatarUrl}
-          />
-          <div className="grid grid-cols-3 gap-3">
-            {renderField("preferred_firstname")}
-            {renderField("lastname")}
-            {renderField("pronouns")}
-          </div>
-          <label className="flex items-start gap-2 text-sm">
-            <Checkbox
-              className="mt-0.5"
-              checked={pronounsPublic}
-              onCheckedChange={(v) => setPronounsPublic(v === true)}
+        <ScrollArea className="min-h-0" viewportClassName="px-6 pb-6 flex flex-col gap-6">
+          {/* Who you are: photo (click to change) beside names and pronouns. */}
+          <div className="flex items-start gap-5">
+            <AvatarPicker
+              userId={userId}
+              value={avatarUrl}
+              name={[fields.preferred_firstname, fields.lastname].filter(Boolean).join(" ")}
+              onChange={setAvatarUrl}
+              className="mt-5"
             />
-            <span>
-              Show my pronouns on my profile
-              <span className="block text-xs text-muted-foreground">
-                Visible to everyone. Turn this off to keep them private.
-              </span>
-            </span>
-          </label>
-          <div className="grid grid-cols-3 gap-3">
-            {renderField("major")}
-            {renderField("grad_year")}
-            {renderField("phone")}
+            <div className="flex min-w-0 flex-1 flex-col gap-3">
+              <div className="grid grid-cols-2 gap-3">
+                {renderField("preferred_firstname")}
+                {renderField("lastname")}
+              </div>
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center justify-between gap-2">
+                  <Label htmlFor="pronouns">{LABELS.pronouns}</Label>
+                  <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    Show on profile
+                    <InfoHint label="About pronoun visibility">
+                      Visible to everyone when on. Turn it off to keep them private.
+                    </InfoHint>
+                    <Switch
+                      checked={pronounsPublic}
+                      onCheckedChange={setPronounsPublic}
+                      aria-label="Show pronouns on profile"
+                      className="ml-1 scale-90"
+                    />
+                  </label>
+                </div>
+                <PronounsPicker
+                  value={fields.pronouns}
+                  onChange={(v) => setFields((f) => ({ ...f, pronouns: v }))}
+                  triggerClassName="flex h-9 w-full items-center justify-between rounded-md border border-input bg-transparent px-3 text-sm shadow-sm transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  inputClassName="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                />
+              </div>
+            </div>
           </div>
-          {renderField("linkedin")}
-          {renderField("github")}
+
+          <section className="flex flex-col gap-3">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Academic</h3>
+            <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-3">
+              {renderField("major")}
+              {renderField("grad_year")}
+            </div>
+          </section>
+
+          <section className="flex flex-col gap-3">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Contact</h3>
+            <div className="grid grid-cols-2 gap-3">
+              {renderField("phone")}
+              <span aria-hidden />
+              {renderField("linkedin")}
+              {renderField("github")}
+            </div>
+          </section>
+
           {renderField("interests")}
-          {error && <p className="text-sm text-red-500">{error}</p>}
-          <div className="flex justify-end gap-2 mt-2">
+          {error && <p className="text-sm text-destructive">{error}</p>}
+          <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>

@@ -1,4 +1,5 @@
 import { ManagerShellSkeleton, CodesTableSkeleton } from "@/components/skeletons";
+import { Skeleton } from "@/components/ui/skeleton";
 
 // Route-transition placeholder: mirrors the page shell + the "Your codes" table
 // so navigating in (and the client-component mount gap) shows the same skeleton
@@ -6,8 +7,9 @@ import { ManagerShellSkeleton, CodesTableSkeleton } from "@/components/skeletons
 export default function Loading() {
   return (
     <ManagerShellSkeleton>
-      <div className="flex flex-col gap-4">
-        <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Your codes</h2>
+      <Skeleton className="h-10 w-44" />
+      <div className="flex flex-col gap-3">
+        <h2 className="text-base font-semibold tracking-tight">Your codes</h2>
         <CodesTableSkeleton />
       </div>
     </ManagerShellSkeleton>

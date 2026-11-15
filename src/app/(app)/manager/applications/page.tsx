@@ -63,6 +63,7 @@ import { toast } from "sonner";
 import { Combobox } from "@/components/ui/combobox";
 import { BackLink } from "@/components/back-link";
 import { AdminCrown } from "@/components/admin-crown";
+import { InfoHint } from "@/components/ui/info-hint";
 
 // The project currently under review: which project the reviewer is
 // assigned to (or, for a full-access reviewer, has picked from all of them).
@@ -199,7 +200,7 @@ function PeriodStatusText({ period }: { period: ApplicationPeriod }) {
       : period.status === "closed"
         ? "Closed"
         : "Draft";
-  const color = isOpenNow(period) ? "text-green-600" : "text-muted-foreground";
+  const color = isOpenNow(period) ? "text-success" : "text-muted-foreground";
   return <span className={`text-xs font-medium ${color}`}>{label}</span>;
 }
 
@@ -808,24 +809,25 @@ export default function ManagerApplicationsPage() {
     <div className={`w-full ${allSelected ? "max-w-7xl" : "max-w-5xl"} mx-auto p-5 flex flex-col gap-6`}>
       <div className="flex flex-col gap-1">
         <BackLink href="/manager" label="Manager" />
-        <h1 className="text-2xl font-bold tracking-tight">Applications</h1>
-        <p className="text-sm text-muted-foreground">
-          Review submitted applications and accept applicants into a project. Tip: use
-          &ldquo;View as&rdquo; (bottom-right) to preview the accepted-member experience.
-        </p>
+        <div className="flex items-center gap-2">
+          <h1 className="text-2xl font-bold tracking-tight">Applications</h1>
+          <InfoHint label="About this page">
+            Review submitted applications and accept applicants into a project. Use &ldquo;View as&rdquo; (bottom right) to preview the accepted-member experience.
+          </InfoHint>
+        </div>
       </div>
 
       {/* Period bar: the period picker (which also holds "Manage periods") on
           the left, the exec-only tools as icons on the right. */}
       <div className="flex flex-wrap items-center gap-3">
         {periods === null ? (
-          <div className="h-9 w-48 rounded-md bg-muted animate-pulse" />
+          <div className="h-9 w-48 rounded-md bg-foreground/[0.09] animate-pulse" />
         ) : (
           // Rendered even with no periods yet, since "Manage periods" -- the only
           // way to create the first one -- lives inside it.
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button className="flex items-center gap-2 border rounded-md px-3 py-2 text-sm bg-background hover:bg-accent transition-colors">
+              <button className="flex h-9 items-center gap-2 rounded-md border border-input bg-transparent px-3 text-sm shadow-sm hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
                 <span className="font-medium">
                   {selectedPeriod?.name ?? (periods.length === 0 ? "No periods yet" : "Select period")}
                 </span>
@@ -929,7 +931,7 @@ export default function ManagerApplicationsPage() {
           )}
         </div>
       )}
-      {reviewableProjects === null && <div className="h-9 w-48 rounded-md bg-muted animate-pulse" />}
+      {reviewableProjects === null && <div className="h-9 w-48 rounded-md bg-foreground/[0.09] animate-pulse" />}
 
       {isExec && (
         <AnalyticsModal
@@ -982,8 +984,9 @@ export default function ManagerApplicationsPage() {
             {/* Left: who's already on the team, then the draft window */}
             <div className="flex flex-col gap-6">
               <div className="flex flex-col gap-2.5">
-                <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  On the team{roster ? ` (${roster.length})` : ""}
+                <h2 className="text-base font-semibold tracking-tight">
+                  On the team
+                  {roster && <span className="ml-1.5 font-normal text-muted-foreground tabular-nums">{roster.length}</span>}
                 </h2>
                 {roster === null ? (
                   <ApplicationListSkeleton rows={3} />
@@ -992,12 +995,13 @@ export default function ManagerApplicationsPage() {
                     No one on this project yet.
                   </div>
                 ) : (
-                  <div className="flex flex-col gap-2.5">
+                  // One panel of rows rather than a card per person.
+                  <div className="flex flex-col rounded-xl surface p-1.5">
                     {roster.map((m, i) => (
-                      <div key={m.user_id} style={staggerStyle(i)} className="animate-fade-in-up flex items-center gap-2 rounded-xl surface px-4 py-3">
+                      <div key={m.user_id} style={staggerStyle(i)} className="animate-fade-in-up flex items-center gap-2 rounded-lg px-3 py-2">
                         <PersonName userId={m.user_id} name={m.name} className="text-sm font-medium" />
                         {m.isPm && (
-                          <span title="PM" className="inline-flex">
+                          <span aria-label="PM" className="inline-flex">
                             <AdminCrown active size={13} />
                           </span>
                         )}
@@ -1007,7 +1011,7 @@ export default function ManagerApplicationsPage() {
                 )}
               </div>
 
-              {draftPicks.error && <p className="text-sm text-red-500">{draftPicks.error}</p>}
+              {draftPicks.error && <p className="text-sm text-destructive">{draftPicks.error}</p>}
 
               <DraftWindowPanel
                 appById={appById}
@@ -1038,8 +1042,9 @@ export default function ManagerApplicationsPage() {
             <div ref={applicantsColumnRef} className="flex flex-col gap-4">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-3">
-                  <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  <h2 className="text-base font-semibold tracking-tight">
                     Applicants
+                    {apps && <span className="ml-1.5 font-normal text-muted-foreground tabular-nums">{apps.length}</span>}
                   </h2>
                   <div className="flex items-center gap-1.5">
                     <Switch

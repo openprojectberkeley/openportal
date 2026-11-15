@@ -11,6 +11,12 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/overlay-scrollbar";
 import { optimistic } from "@/lib/optimistic";
 import { Segmented } from "@/components/ui/segmented";
+import { InfoHint } from "@/components/ui/info-hint";
+import { useConfirm } from "@/components/ui/use-confirm";
+
+// Native date-time fields styled like Input.
+const DATETIME_CLASS =
+  "h-9 rounded-md border border-input bg-transparent px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
 
 export type PeriodStatus = "draft" | "open" | "closed";
 
@@ -177,7 +183,7 @@ function GrantAccessPicker({
                 value={expiresAt}
                 min={toDateTimeLocal(new Date().toISOString())}
                 onChange={(e) => setExpiresAt(e.target.value)}
-                className="border rounded-md px-2 py-1.5 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+                className={DATETIME_CLASS}
               />
             </label>
             <div className="flex gap-2">
@@ -340,12 +346,14 @@ function ExtendedAccessSection({ periodId, allMembers }: { periodId: string; all
 
   return (
     <div className="flex flex-col gap-2 pt-1 mt-1">
-      <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-        Extended access
-      </Label>
-      <p className="text-xs text-muted-foreground">
-        These people can keep applying to this period even while it&apos;s closed to everyone else. Click a date to change it.
-      </p>
+      <div className="flex items-center gap-1.5">
+        <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+          Extended access
+        </Label>
+        <InfoHint label="About extended access">
+          These people can keep applying to this period even while it&apos;s closed to everyone else. Click a date to change it.
+        </InfoHint>
+      </div>
       {grants && grants.length > 0 && (
         <ul className="flex flex-col gap-1">
           {grants.map((g) => {
@@ -359,7 +367,7 @@ function ExtendedAccessSection({ periodId, allMembers }: { periodId: string; all
                       type="datetime-local"
                       value={editValue}
                       onChange={(e) => setEditValue(e.target.value)}
-                      className="border rounded-md px-1.5 py-0.5 text-xs bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+                      className="h-7 rounded-md border border-input bg-transparent px-1.5 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                     />
                     <Button
                       size="sm"
@@ -376,7 +384,7 @@ function ExtendedAccessSection({ periodId, allMembers }: { periodId: string; all
                       variant="ghost"
                       onClick={() => setEditingId(null)}
                       aria-label="Cancel"
-                      className="text-muted-foreground hover:text-red-500 h-6 w-6 p-0"
+                      className="text-muted-foreground hover:text-destructive h-6 w-6 p-0"
                     >
                       <X size={14} />
                     </Button>
@@ -384,7 +392,7 @@ function ExtendedAccessSection({ periodId, allMembers }: { periodId: string; all
                 ) : (
                   <button
                     onClick={() => { setEditingId(g.id); setEditValue(toDateTimeLocal(g.expires_at)); }}
-                    className={`text-xs shrink-0 underline decoration-dotted underline-offset-2 hover:text-foreground ${expired ? "text-red-500" : "text-muted-foreground"}`}
+                    className={`text-xs shrink-0 underline decoration-dotted underline-offset-2 hover:text-foreground ${expired ? "text-destructive" : "text-muted-foreground"}`}
                   >
                     {formatExpiry(g.expires_at)}
                   </button>
@@ -395,7 +403,7 @@ function ExtendedAccessSection({ periodId, allMembers }: { periodId: string; all
                   onClick={() => revoke(g)}
                   disabled={removingId === g.user_id}
                   aria-label={`Remove ${g.name}`}
-                  className="text-muted-foreground hover:text-red-500 h-6 w-6 p-0 shrink-0"
+                  className="text-muted-foreground hover:text-destructive h-6 w-6 p-0 shrink-0"
                 >
                   <X size={14} />
                 </Button>
@@ -407,7 +415,7 @@ function ExtendedAccessSection({ periodId, allMembers }: { periodId: string; all
       <div>
         <GrantAccessPicker options={available} onGrant={grant} />
       </div>
-      {error && <p className="text-sm text-red-500">{error}</p>}
+      {error && <p className="text-sm text-destructive">{error}</p>}
     </div>
   );
 }
@@ -427,8 +435,8 @@ function PeriodRow({
   const [start, setStart] = useState(toDateTimeLocal(period.starts_at));
   const [end, setEnd] = useState(toDateTimeLocal(period.ends_at));
   const [status, setStatus] = useState<PeriodStatus>(period.status);
-  const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const { ask, dialog: confirmDialog } = useConfirm();
   const [error, setError] = useState<string | null>(null);
 
   const dirty =
@@ -442,27 +450,41 @@ function PeriodRow({
     if (!name.trim()) { setError("Name is required."); return; }
     if (!start || !end) { setError("Pick a start and end."); return; }
     if (start >= end) { setError("Start must be before end."); return; }
-    setSaving(true);
+    // The fields already show the edit; the write runs behind and the list
+    // refreshes once it lands. A refusal puts the period back and toasts.
     const supabase = createClient();
-    const { error: err } = await supabase
-      .from("application_periods")
-      .update({
-        name: name.trim(),
-        starts_at: toIso(start),
-        ends_at: toIso(end),
-        status,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", period.id);
-    setSaving(false);
-    if (err) { setError(err.message); return; }
-    onChanged();
+    const before = { name: period.name, start: toDateTimeLocal(period.starts_at), end: toDateTimeLocal(period.ends_at), status: period.status };
+    void optimistic({
+      label: "period",
+      key: `period:${period.id}`,
+      apply: () => {},
+      rollback: () => { setName(before.name); setStart(before.start); setEnd(before.end); setStatus(before.status); },
+      commit: () =>
+        supabase
+          .from("application_periods")
+          .update({
+            name: name.trim(),
+            starts_at: toIso(start),
+            ends_at: toIso(end),
+            status,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", period.id)
+          .select("id"),
+      requireRows: true,
+      onCommitted: () => onChanged(),
+    });
   };
 
-  const remove = async () => {
-    if (!window.confirm(
-      `Delete the "${period.name}" period? Applications submitted for it will be detached (kept, but no longer tied to any period). This can't be undone.`,
-    )) return;
+  const remove = () =>
+    ask({
+      title: `Delete the "${period.name}" period?`,
+      description: "Applications submitted for it are kept but no longer tied to any period. This can't be undone.",
+      confirmLabel: "Delete period",
+      destructive: true,
+      run: () => void doRemove(),
+    });
+  const doRemove = async () => {
     setError(null);
     setDeleting(true);
     const supabase = createClient();
@@ -473,7 +495,8 @@ function PeriodRow({
   };
 
   return (
-    <div className="flex flex-col gap-2.5 border rounded-lg p-3">
+    <div className="flex flex-col gap-2.5 rounded-lg surface p-3">
+      {confirmDialog}
       <div className="flex items-center gap-2">
         <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Period name" />
         <Button
@@ -482,7 +505,7 @@ function PeriodRow({
           onClick={remove}
           disabled={deleting}
           aria-label="Delete period"
-          className="text-muted-foreground hover:text-red-500 shrink-0"
+          className="text-muted-foreground hover:text-destructive shrink-0"
         >
           <Trash2 size={16} />
         </Button>
@@ -495,7 +518,7 @@ function PeriodRow({
             value={start}
             max={end || undefined}
             onChange={(e) => setStart(e.target.value)}
-            className="border rounded-md px-3 py-1.5 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+            className={DATETIME_CLASS}
           />
         </label>
         <label className="flex flex-col gap-1 text-xs font-medium">
@@ -505,18 +528,18 @@ function PeriodRow({
             value={end}
             min={start || undefined}
             onChange={(e) => setEnd(e.target.value)}
-            className="border rounded-md px-3 py-1.5 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+            className={DATETIME_CLASS}
           />
         </label>
         <div className="flex flex-col gap-1 text-xs font-medium">
           Status
           <StatusPicker value={status} onChange={setStatus} />
         </div>
-        <Button size="sm" onClick={save} disabled={saving || !dirty}>
-          {saving ? "Saving…" : "Save"}
+        <Button size="sm" onClick={save} disabled={!dirty}>
+          Save
         </Button>
       </div>
-      {error && <p className="text-sm text-red-500">{error}</p>}
+      {error && <p className="text-sm text-destructive">{error}</p>}
       {canManageExtendedAccess && <ExtendedAccessSection periodId={period.id} allMembers={allMembers} />}
     </div>
   );
@@ -549,10 +572,15 @@ function NewPeriodForm({ onChanged }: { onChanged: () => void }) {
   };
 
   return (
-    <div className="flex flex-col gap-2.5 border border-dashed rounded-lg p-3">
-      <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-        New period
-      </Label>
+    <div className="flex flex-col gap-2.5 rounded-lg bg-foreground/[0.03] p-3">
+      <div className="flex items-center gap-1.5">
+        <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+          New period
+        </Label>
+        <InfoHint label="About new periods">
+          New periods start as Draft. Set one to Open to let non-members apply within its window.
+        </InfoHint>
+      </div>
       <Input value={name} onChange={(e) => setName(e.target.value)} placeholder='e.g. "Fall 2026"' />
       <div className="flex flex-wrap items-end gap-3">
         <label className="flex flex-col gap-1 text-xs font-medium">
@@ -562,7 +590,7 @@ function NewPeriodForm({ onChanged }: { onChanged: () => void }) {
             value={start}
             max={end || undefined}
             onChange={(e) => setStart(e.target.value)}
-            className="border rounded-md px-3 py-1.5 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+            className={DATETIME_CLASS}
           />
         </label>
         <label className="flex flex-col gap-1 text-xs font-medium">
@@ -572,7 +600,7 @@ function NewPeriodForm({ onChanged }: { onChanged: () => void }) {
             value={end}
             min={start || undefined}
             onChange={(e) => setEnd(e.target.value)}
-            className="border rounded-md px-3 py-1.5 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+            className={DATETIME_CLASS}
           />
         </label>
         <Button size="sm" onClick={create} disabled={saving}>
@@ -580,11 +608,7 @@ function NewPeriodForm({ onChanged }: { onChanged: () => void }) {
           {saving ? "Creating…" : "Create"}
         </Button>
       </div>
-      <p className="text-xs text-muted-foreground">
-        New periods start as <span className="font-medium">Draft</span>. Set one to{" "}
-        <span className="font-medium">Open</span> to let non-members apply within its window.
-      </p>
-      {error && <p className="text-sm text-red-500">{error}</p>}
+      {error && <p className="text-sm text-destructive">{error}</p>}
     </div>
   );
 }

@@ -1,9 +1,10 @@
 "use client";
 
 import { createClient } from "@/lib/supabase/client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Check, ChevronDown, ChevronRight, PlusCircle, X } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, ChevronRight, PlusCircle, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -26,6 +27,7 @@ import { MultiSelectFilter } from "@/components/multi-select-filter";
 import { TabStrip } from "@/components/ui/tab-strip";
 import { useConfirm } from "@/components/ui/use-confirm";
 import { Skeleton } from "@/components/ui/skeleton";
+import { SocialLink } from "@/components/social-link";
 
 type Tab = "members" | "projects" | "families" | "portals" | "announcements";
 
@@ -48,6 +50,8 @@ type MemberDetails = {
   github: string | null;
 };
 
+const PAGE_SIZE = 50;
+
 const DETAIL_LABELS: { key: keyof MemberDetails; label: string }[] = [
   { key: "major", label: "Major" },
   { key: "grad_year", label: "Grad year" },
@@ -61,11 +65,21 @@ export default function AdminPage() {
   const { ready, isExec } = useRoleSim();
   const [tab, setTab] = useState<Tab>("members");
   const [members, setMembers] = useState<Member[]>([]);
+  // One page of rows at a time; filters run on the server.
+  const [page, setPage] = useState(0);
+  const [total, setTotal] = useState(0);
+  const [allCount, setAllCount] = useState<number | null>(null);
+  const [fetching, setFetching] = useState(false);
+  const [listKey, setListKey] = useState(0);
+  const [memberOptions, setMemberOptions] = useState<{ user_id: string; name: string }[]>([]);
+  const namesRequested = useRef(false);
   const [allRoles, setAllRoles] = useState<Role[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
+  const [query, setQuery] = useState("");
+  const queryRef = useRef("");
   const [roleFilter, setRoleFilter] = useState<Set<string>>(new Set());
   const [statusFilter, setStatusFilter] = useState<Set<MemberStatus>>(new Set());
   const [projectCount, setProjectCount] = useState<number | null>(null);
@@ -79,31 +93,86 @@ export default function AdminPage() {
     if (ready && !isExec) router.replace("/");
   }, [ready, isExec, router]);
 
-  // Data starts loading on mount, in parallel with the role check above,
-  // rather than after it: the members API enforces exec itself, so a 401/403
-  // from it is the authoritative "not allowed" and sends you home. The page
-  // shell (title, tabs) paints immediately; only the list waits.
   useEffect(() => {
-    const supabase = createClient();
+    createClient().from("roles").select("id, role_name").order("role_name")
+      .then(({ data }) => setAllRoles(data ?? []));
+  }, []);
 
-    Promise.all([
-      fetch("/api/admin/members").then(async (r) => {
+  // Search is debounced; any filter change goes back to the first page.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      const next = search.trim();
+      if (next === queryRef.current) return;
+      queryRef.current = next;
+      setQuery(next);
+      setPage(0);
+    }, 250);
+    return () => clearTimeout(t);
+  }, [search]);
+  const listTopRef = useRef<HTMLDivElement>(null);
+  const goPage = (p: number) => {
+    setPage(p);
+    const top = listTopRef.current?.getBoundingClientRect().top ?? 0;
+    if (top < 0) listTopRef.current?.scrollIntoView({ block: "start" });
+  };
+
+  // Data starts loading on mount, in parallel with the role check above: the
+  // members API enforces exec itself, so a 401/403 from it is the
+  // authoritative "not allowed" and sends you home. The page shell (title,
+  // tabs) paints immediately; only the list waits. Later pages keep the
+  // current rows on screen (dimmed) until the next page arrives.
+  const requestSeq = useRef(0);
+  useEffect(() => {
+    const seq = ++requestSeq.current;
+    const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+    if (query) params.set("q", query);
+    if (roleFilter.size) params.set("roles", [...roleFilter].join(","));
+    if (statusFilter.size) params.set("status", [...statusFilter].join(","));
+    setFetching(true);
+    fetch(`/api/admin/members?${params}`)
+      .then(async (r) => {
         if (r.status === 401 || r.status === 403) {
           router.replace("/");
-          return { denied: true };
+          return null;
         }
         return r.json();
-      }),
-      supabase.from("roles").select("id, role_name").order("role_name"),
-    ]).then(([membersData, { data: rolesData }]) => {
-      if (membersData?.denied) return;
-      if (membersData.error) { setError(membersData.error); }
-      else { setMembers(membersData); }
-      setAllRoles(rolesData ?? []);
-      setLoading(false);
-    }).catch(() => { setError("Failed to load."); setLoading(false); });
+      })
+      .then((d) => {
+        if (!d || seq !== requestSeq.current) return;
+        if (d.error) setError(d.error);
+        else {
+          setError(null);
+          setMembers(d.rows);
+          setTotal(d.total);
+          setAllCount(d.all);
+          if (d.page !== page) setPage(d.page);
+          setListKey((k) => k + 1);
+        }
+        setLoading(false);
+        setFetching(false);
+      })
+      .catch(() => {
+        if (seq !== requestSeq.current) return;
+        setError("Failed to load.");
+        setLoading(false);
+        setFetching(false);
+      });
+  }, [router, page, query, roleFilter, statusFilter]);
 
-    // Header counts (exec is a member of every portal via is_exec(), so these
+  // Every member's name, for the portal/project pickers: fetched once, the
+  // first time one of those tabs opens.
+  useEffect(() => {
+    if ((tab !== "projects" && tab !== "portals") || namesRequested.current) return;
+    namesRequested.current = true;
+    fetch("/api/admin/members?names=1")
+      .then((r) => r.json())
+      .then((d) => { if (d?.names) setMemberOptions(d.names); })
+      .catch(() => { namesRequested.current = false; });
+  }, [tab]);
+
+  useEffect(() => {
+    const supabase = createClient();
+  // Header counts (exec is a member of every portal via is_exec(), so these
     // are unrestricted for exec).
     supabase.from("projects").select("id", { count: "exact", head: true })
       .then(({ count }) => setProjectCount(count ?? 0));
@@ -194,19 +263,25 @@ export default function AdminPage() {
     });
   };
 
-  const toggleRoleFilter = (roleId: string) =>
+  const toggleRoleFilter = (roleId: string) => {
+    setPage(0);
     setRoleFilter((prev) => {
       const next = new Set(prev);
-      next.has(roleId) ? next.delete(roleId) : next.add(roleId);
+      if (next.has(roleId)) next.delete(roleId);
+      else next.add(roleId);
       return next;
     });
+  };
 
-  const toggleStatusFilter = (status: MemberStatus) =>
+  const toggleStatusFilter = (status: MemberStatus) => {
+    setPage(0);
     setStatusFilter((prev) => {
       const next = new Set(prev);
-      next.has(status) ? next.delete(status) : next.add(status);
+      if (next.has(status)) next.delete(status);
+      else next.add(status);
       return next;
     });
+  };
 
   // Errors roll back this one member and toast; they no longer replace the
   // whole admin page.
@@ -225,18 +300,36 @@ export default function AdminPage() {
     });
   };
 
-  const filtered = members.filter((m) => {
-    const name = [m.preferred_firstname, m.lastname].filter(Boolean).join(" ").toLowerCase();
-    if (search && !name.includes(search.toLowerCase())) return false;
-    if (roleFilter.size > 0 && !m.roles.some((r) => roleFilter.has(r.id))) return false;
-    if (statusFilter.size > 0 && !statusFilter.has(m.status)) return false;
-    return true;
-  });
+  const filtered = members;
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const firstShown = total === 0 ? 0 : page * PAGE_SIZE + 1;
 
-  const memberOptions = members.map((m) => ({
-    user_id: m.user_id,
-    name: [m.preferred_firstname, m.lastname].filter(Boolean).join(" ") || "—",
-  }));
+  // Arrows + "page / pages", shown above the list (right-aligned) and below it.
+  const pager = (label: string) => (
+    <nav aria-label={label} className="flex items-center gap-2 text-xs text-muted-foreground">
+      <Button
+        variant="outline"
+        size="icon"
+        className="h-7 w-7"
+        disabled={page === 0}
+        aria-label="Previous page"
+        onClick={() => goPage(Math.max(0, page - 1))}
+      >
+        <ChevronLeft size={14} />
+      </Button>
+      <span className="tabular-nums">{page + 1} / {pageCount}</span>
+      <Button
+        variant="outline"
+        size="icon"
+        className="h-7 w-7"
+        disabled={page >= pageCount - 1}
+        aria-label="Next page"
+        onClick={() => goPage(Math.min(pageCount - 1, page + 1))}
+      >
+        <ChevronRight size={14} />
+      </Button>
+    </nav>
+  );
 
   return (
     <div className="p-8 w-full max-w-5xl mx-auto">
@@ -249,7 +342,7 @@ export default function AdminPage() {
         value={tab}
         onChange={setTab}
         tabs={[
-          { value: "members", label: "Members", count: loading ? null : members.length },
+          { value: "members", label: "Members", count: allCount },
           { value: "projects", label: "Projects", count: projectCount },
           { value: "families", label: "Families", count: familyCount },
           { value: "portals", label: "Portals", count: portalCount },
@@ -267,7 +360,7 @@ export default function AdminPage() {
         <PortalsPanel members={memberOptions} allRoles={allRoles} />
       ) : (
       <>
-      <div className="flex flex-wrap gap-3 mb-4">
+      <div ref={listTopRef} className="flex flex-wrap gap-3 mb-4 scroll-mt-20">
         <Input
           placeholder="Search by name..."
           value={search}
@@ -305,12 +398,13 @@ export default function AdminPage() {
         </DropdownMenu>
         {(search || roleFilter.size > 0 || statusFilter.size > 0) && (
           <button
-            onClick={() => { setSearch(""); setRoleFilter(new Set()); setStatusFilter(new Set()); }}
+            onClick={() => { setSearch(""); setPage(0); setRoleFilter(new Set()); setStatusFilter(new Set()); }}
             className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
           >
             <X size={14} /> Clear
           </button>
         )}
+        {!error && !loading && total > PAGE_SIZE && <div className="ml-auto self-center">{pager("Member pages")}</div>}
       </div>
 
       {error ? (
@@ -318,7 +412,16 @@ export default function AdminPage() {
       ) : loading ? (
         <PanelListSkeleton rows={8} />
       ) : (
-      <div className="flex flex-col gap-0.5">
+      <div
+        key={listKey}
+        aria-busy={fetching}
+        className={`relative flex flex-col gap-0.5 transition-opacity duration-instant ${fetching ? "opacity-60" : ""}`}
+      >
+        {fetching && (
+          <span aria-hidden className="absolute inset-x-4 -top-2 h-px overflow-hidden rounded-full bg-foreground/10">
+            <span className="block h-full w-1/3 animate-indeterminate motion-reduce:animate-none bg-foreground/50" />
+          </span>
+        )}
         {filtered.map((m, i) => {
           const isOpen = expanded.has(m.user_id);
           const name = [m.preferred_firstname, m.lastname].filter(Boolean).join(" ") || "—";
@@ -411,9 +514,13 @@ export default function AdminPage() {
                     <div key={key} className="flex min-w-0 items-center gap-2 text-sm">
                       <span className="text-muted-foreground w-24 flex-shrink-0">{label}</span>
                       {details[m.user_id] ? (
-                        <span className="min-w-0 break-all">{details[m.user_id][key] || "—"}</span>
+                        (key === "linkedin" || key === "github") && details[m.user_id][key] ? (
+                          <SocialLink kind={key} value={details[m.user_id][key]} />
+                        ) : (
+                          <span className="min-w-0 break-all">{details[m.user_id][key] || "—"}</span>
+                        )
                       ) : (
-                        <Skeleton className="h-3.5 w-32" />
+                        <Skeleton className="h-3.5 w-32 rounded-full" />
                       )}
                     </div>
                   ))}
@@ -426,10 +533,18 @@ export default function AdminPage() {
         })}
         {filtered.length === 0 && (
           <div className="px-4 py-8 text-center text-sm text-muted-foreground">
-            {members.length === 0 ? "No members yet." : "No members match your filters."}
+            {allCount === 0 ? "No members yet." : "No members match your filters."}
           </div>
         )}
       </div>
+      )}
+      {!error && !loading && total > PAGE_SIZE && (
+        <div className="mt-4 flex items-center justify-between gap-3 px-4 text-xs text-muted-foreground">
+          <span className="tabular-nums" aria-live="polite">
+            {firstShown}–{Math.min(total, (page + 1) * PAGE_SIZE)} of {total}
+          </span>
+          {pager("Member pages (bottom)")}
+        </div>
       )}
       </>
       )}

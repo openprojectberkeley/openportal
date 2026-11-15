@@ -8,12 +8,14 @@ import { PersonName, initials } from "@/components/person-profile-provider";
 import { gcalUrl } from "@/lib/gcal";
 import { useRefreshOnReturn } from "@/lib/use-refresh-on-return";
 import { loadCoffeeChatWindowBounds, earliestBookableIso } from "@/lib/coffee-chat-window";
-import { CoffeeTeamSkeleton } from "@/components/skeletons";
+import { CoffeeTeamGrid } from "@/components/coffee-team-grid";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { roleRank, sortRoles } from "@/lib/role-order";
-import { MapPin, Search } from "lucide-react";
-import { staggerStyle } from "@/lib/motion";
-import { Input } from "@/components/ui/input";
+import { CalendarPlus, MapPin } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Disclosure } from "@/components/ui/disclosure";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { background, optimistic, sessionUserId } from "@/lib/optimistic";
 import { BackLink } from "@/components/back-link";
 
@@ -38,7 +40,6 @@ type Booking = {
 export default function CoffeeChatPage() {
   const router = useRouter();
   const [members, setMembers] = useState<MemberCard[]>([]);
-  const [teamQuery, setTeamQuery] = useState("");
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
   const [cancelTarget, setCancelTarget] = useState<Booking | null>(null);
@@ -81,7 +82,7 @@ export default function CoffeeChatPage() {
             .select("id, member_id, meeting_time, duration_minutes, location, message")
             .eq("applicant_id", user.id)
             .order("meeting_time", { ascending: true })
-        : Promise.resolve({ data: [] as any[] }),
+        : Promise.resolve({ data: [] as { id: string; member_id: string; meeting_time: string; duration_minutes: number; location: string | null; message: string | null }[] }),
     ]);
 
     // Which members still have at least one open future slot inside the current
@@ -121,7 +122,7 @@ export default function CoffeeChatPage() {
     const rolesMap = new Map<string, { id: string; role_name: string; access_level: string | null }[]>();
     for (const entry of allRoles ?? []) {
       if (!rolesMap.has(entry.user_id)) rolesMap.set(entry.user_id, []);
-      if (entry.roles) rolesMap.get(entry.user_id)!.push(entry.roles as any);
+      if (entry.roles) rolesMap.get(entry.user_id)!.push(entry.roles as unknown as { id: string; role_name: string; access_level: string | null });
     }
 
     const nameMap = new Map<string, string>();
@@ -170,7 +171,7 @@ export default function CoffeeChatPage() {
     setMembers(memberCards);
 
     setBookings(
-      (myChats ?? []).map((c: any) => ({
+      (myChats ?? []).map((c) => ({
         id: c.id,
         meeting_time: c.meeting_time,
         duration_minutes: c.duration_minutes,
@@ -273,73 +274,57 @@ export default function CoffeeChatPage() {
     return true;
   };
 
-  // Team search over name, roles and interests (interests is free text).
-  const tq = teamQuery.trim().toLowerCase();
-  const shownMembers = tq
-    ? members.filter((m) =>
-        [m.name, ...(m.roles ?? []).map((r) => r.role_name), m.interests ?? ""].some((t) => t.toLowerCase().includes(tq)),
-      )
-    : members;
+  const upcomingBookings = bookings.filter((b) => !b.isPast);
+  // Fetched oldest-first overall; show the most recent past chat first.
+  const pastBookings = bookings.filter((b) => b.isPast).slice().reverse();
 
-  return (
-    <div className="w-full max-w-5xl mx-auto p-6 flex flex-col gap-8">
-      <div className="flex flex-col gap-1">
-        <BackLink href="/" label="Dashboard" />
-        <h1 className="text-2xl font-bold tracking-tight">Coffee Chat</h1>
-        <p className="text-sm text-muted-foreground">Book a 1:1 with a member of our team.</p>
-      </div>
-
-      {!loading && bookings.length > 0 && (() => {
-        const upcomingBookings = bookings.filter((b) => !b.isPast);
-        // Fetched oldest-first overall; show most recent past chat first.
-        const pastBookings = bookings.filter((b) => b.isPast).slice().reverse();
-
-        const renderBooking = (b: Booking) => {
-          const d = new Date(b.meeting_time);
-          return (
-            <div
-              key={b.id}
-              className={`rounded-xl surface p-4 flex items-center justify-between gap-4 flex-wrap ${b.isPast ? "opacity-50" : ""}`}
-            >
-              <div className="flex items-center gap-3 min-w-0">
-                {b.memberAvatarUrl ? (
-                  <img src={b.memberAvatarUrl} alt={b.memberName} className="h-10 w-10 rounded-full object-cover flex-shrink-0" />
+  const renderBooking = (b: Booking) => {
+    const d = new Date(b.meeting_time);
+    return (
+      <div
+        key={b.id}
+        className="group flex items-start justify-between gap-4 rounded-lg px-4 py-3 transition-colors hover:bg-foreground/[0.03]"
+      >
+        <div className="flex items-start gap-3 min-w-0">
+          {b.memberAvatarUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={b.memberAvatarUrl} alt="" className="h-9 w-9 rounded-full object-cover flex-shrink-0" />
+          ) : (
+            <div className="h-9 w-9 rounded-full bg-foreground/10 flex items-center justify-center text-xs font-semibold flex-shrink-0">
+              {initials(b.memberName)}
+            </div>
+          )}
+          <div className="flex flex-col gap-0.5 min-w-0">
+            <PersonName userId={b.memberUserId} name={b.memberName} className="text-sm font-medium" />
+            <p className="text-xs text-muted-foreground">
+              {d.toLocaleString("en-US", {
+                weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+              })}
+              {" · "}
+              {b.duration_minutes} min
+            </p>
+            {b.location && (
+              <p className="flex items-center gap-1 text-xs text-muted-foreground min-w-0">
+                <MapPin size={12} className="flex-shrink-0" aria-hidden />
+                {/^https?:\/\//.test(b.location) ? (
+                  <a href={b.location} target="_blank" rel="noopener noreferrer" className="underline decoration-dotted underline-offset-2 hover:text-foreground truncate">
+                    {b.location}
+                  </a>
                 ) : (
-                  <div className="h-10 w-10 rounded-full bg-foreground/10 flex items-center justify-center text-xs font-semibold flex-shrink-0">
-                    {initials(b.memberName)}
-                  </div>
+                  <span className="truncate">{b.location}</span>
                 )}
-                <div className="flex flex-col gap-1 min-w-0">
-                <PersonName userId={b.memberUserId} name={b.memberName} className="text-sm font-medium" />
-                <p className="text-xs text-muted-foreground">
-                  {d.toLocaleString("en-US", {
-                    weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
-                  })}
-                  {" · "}
-                  {b.duration_minutes} min
-                </p>
-                {b.location && (
-                  <p className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <MapPin size={12} className="flex-shrink-0" />
-                    {/^https?:\/\//.test(b.location) ? (
-                      <a href={b.location} target="_blank" rel="noopener noreferrer" className="underline decoration-dotted underline-offset-2 hover:text-foreground truncate">
-                        {b.location}
-                      </a>
-                    ) : (
-                      <span className="truncate">{b.location}</span>
-                    )}
-                  </p>
-                )}
-                {b.message && (
-                  <p className="text-xs text-muted-foreground">
-                    <span className="font-medium text-foreground">Your message:</span>{" "}
-                    <span className="italic">&ldquo;{b.message}&rdquo;</span>
-                  </p>
-                )}
-                </div>
-              </div>
-              {!b.isPast && (
-                <div className="flex items-center gap-2">
+              </p>
+            )}
+            {b.message && (
+              <p className="text-xs text-muted-foreground italic">&ldquo;{b.message}&rdquo;</p>
+            )}
+          </div>
+        </div>
+        {!b.isPast && (
+          <div className="flex items-center gap-1 flex-shrink-0">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button asChild variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground">
                   <a
                     href={gcalUrl({
                       start: d,
@@ -350,88 +335,84 @@ export default function CoffeeChatPage() {
                     })}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center border rounded-md px-3 py-1.5 text-sm hover:bg-accent transition-colors"
+                    aria-label="Add to Google Calendar"
                   >
-                    Add to Google Calendar
+                    <CalendarPlus />
                   </a>
-                  <button
-                    onClick={() => { setCancelTarget(b); setCancelError(null); }}
-                    className="inline-flex items-center rounded-md px-3 py-1.5 text-sm text-red-500 hover:bg-red-500/10 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              )}
-            </div>
-          );
-        };
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Add to Google Calendar</TooltipContent>
+            </Tooltip>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => { setCancelTarget(b); setCancelError(null); }}
+              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+            >
+              Cancel
+            </Button>
+          </div>
+        )}
+      </div>
+    );
+  };
 
-        return (
-          <>
-            {upcomingBookings.length > 0 && (
-              <section className="flex flex-col gap-3">
-                <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Upcoming Coffee Chats</h2>
-                <div className="flex flex-col gap-3">{upcomingBookings.map(renderBooking)}</div>
-              </section>
-            )}
-            {pastBookings.length > 0 && (
-              <section className="flex flex-col gap-3">
-                <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Past Coffee Chats</h2>
-                <div className="flex flex-col gap-3">{pastBookings.map(renderBooking)}</div>
-              </section>
-            )}
-          </>
-        );
-      })()}
+  return (
+    <div className="w-full max-w-6xl mx-auto p-5 flex flex-col gap-6">
+      <div className="flex flex-col gap-1">
+        <BackLink href="/" label="Dashboard" />
+        <h1 className="text-2xl font-bold tracking-tight">Coffee chat</h1>
+      </div>
 
       {loading ? (
-        <section className="flex flex-col gap-3">
-          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Our Team</h2>
-          <CoffeeTeamSkeleton />
-        </section>
-      ) : members.length > 0 ? (
-        <section className="flex flex-col gap-3">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-              Our Team <span className="text-xs font-normal text-muted-foreground/60">({shownMembers.length})</span>
-            </h2>
-            {/* Name, role or interest: "design", "ML", a first name. */}
-            <div className="relative w-full sm:w-64">
-              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" aria-hidden />
-              <Input
-                value={teamQuery}
-                onChange={(e) => setTeamQuery(e.target.value)}
-                placeholder="Search name, role or interest…"
-                aria-label="Search the team"
-                className="h-8 pl-8 text-sm"
-              />
-            </div>
-          </div>
-          {shownMembers.length === 0 && (
-            <p className="rounded-xl surface px-4 py-8 text-center text-sm text-muted-foreground">
-              Nobody matches &ldquo;{teamQuery.trim()}&rdquo;.
-            </p>
-          )}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 auto-rows-fr gap-4">
-            {shownMembers.map((m, i) => (
-              <div key={m.user_id} className="flex h-full animate-fade-in-up [&>*]:flex-1" style={staggerStyle(i)}>
-              <CoffeeChatCard
-                id={m.user_id}
-                name={m.name}
-                roles={m.roles}
-                avatarUrl={m.avatarUrl}
-                interests={m.interests}
-                disabled={!m.bookable}
-                booked={m.booked}
-                onBook={() => router.push(`/coffee-chat/book/${m.user_id}`)}
-              />
+        <section className="flex flex-col gap-3" aria-hidden>
+          <Skeleton className="h-4 w-24 rounded-full" />
+          <div className="-mx-4 flex flex-col gap-0.5">
+            {Array.from({ length: 2 }, (_, i) => (
+              <div key={i} className="flex items-center gap-3 px-4 py-3">
+                <Skeleton className="h-9 w-9 rounded-full flex-shrink-0" />
+                <div className="flex flex-col gap-1.5 flex-1">
+                  <Skeleton className="h-3.5 w-32 rounded-full" />
+                  <Skeleton className="h-3 w-44 rounded-full" />
+                </div>
               </div>
             ))}
           </div>
         </section>
       ) : (
-        <p className="text-sm text-muted-foreground">No team members available for coffee chats right now.</p>
+        <>
+          {upcomingBookings.length > 0 && (
+            <section className="flex flex-col gap-3">
+              <h2 className="text-base font-semibold tracking-tight">
+                Upcoming<span className="ml-1.5 font-normal text-muted-foreground">{upcomingBookings.length}</span>
+              </h2>
+              <div className="-mx-4 flex flex-col gap-0.5">{upcomingBookings.map(renderBooking)}</div>
+            </section>
+          )}
+          {pastBookings.length > 0 && (
+            <Disclosure label={`Past ${pastBookings.length}`}>
+              <div className="-mx-4 -mt-2 flex flex-col gap-0.5 text-muted-foreground [contain:inline-size]">{pastBookings.map(renderBooking)}</div>
+            </Disclosure>
+          )}
+        </>
       )}
+
+      <CoffeeTeamGrid
+        members={members}
+        loading={loading}
+        renderItem={(m) => (
+          <CoffeeChatCard
+            id={m.user_id}
+            name={m.name}
+            roles={m.roles}
+            avatarUrl={m.avatarUrl}
+            interests={m.interests}
+            disabled={!m.bookable}
+            booked={m.booked}
+            onBook={() => router.push(`/coffee-chat/book/${m.user_id}`)}
+          />
+        )}
+      />
 
       <ConfirmDialog
         open={cancelTarget !== null}
@@ -443,7 +424,7 @@ export default function CoffeeChatPage() {
         confirmLabel="Cancel chat"
         onConfirm={confirmCancel}
       >
-        {cancelError && <p className="text-sm text-red-500">{cancelError}</p>}
+        {cancelError && <p className="text-sm text-destructive">{cancelError}</p>}
       </ConfirmDialog>
     </div>
   );

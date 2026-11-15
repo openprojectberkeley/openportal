@@ -9,7 +9,18 @@ import { PersonName } from "@/components/person-profile-provider";
 import type { ReviewStatus } from "@/components/application-review-modal";
 import { CoffeeChatIndicator, InfosessionIndicator, LateBadge, NoApplicationIndicator, WishlistedByIndicator, type CoffeeState, type WishlistProject } from "@/components/applicant-indicators";
 import { rankLabel } from "@/lib/application-rank";
-import { accentStyle } from "@/lib/portal-color";
+import { accentTint, visibleMarkColor } from "@/lib/portal-color";
+
+// A confirmed pick shows its project as a bar down the left edge over a faint
+// wash, the same mark events use, rather than a full colour fill: a column of
+// picks stays readable and the board doesn't turn into a rainbow.
+function accentStyle(accent: string | null | undefined): React.CSSProperties | undefined {
+  if (!accent) return undefined;
+  return {
+    backgroundColor: accentTint(accent, 7, "hsl(var(--background))"),
+    boxShadow: `inset 3px 0 0 ${visibleMarkColor(accent)}`,
+  };
+}
 
 export type Applicant = { user_id: string; preferred_firstname: string | null; lastname: string | null };
 
@@ -70,7 +81,7 @@ export function ReturningIndicator({ returning }: { returning: boolean }) {
   return (
     <RotateCcw
       size={13}
-      className="shrink-0 text-violet-500 dark:text-violet-400"
+      className="shrink-0 text-info"
       aria-label="Returning member"
     />
   );
@@ -292,7 +303,7 @@ function ApplicantCardInner({
         // CSS fallback for the shared <Tooltip> primitive (components/ui/tooltip):
         // dnd-kit listeners on the card block Radix hover-open, and native title
         // never fires while a drag is armed. Styling is kept in sync with TooltipContent.
-        <span className="relative shrink-0 group/warn text-red-600 dark:text-red-400" aria-label="Missing recruiting requirements. Can still be drafted into projects.">
+        <span className="relative shrink-0 group/warn text-destructive" aria-label="Missing recruiting requirements. Can still be drafted into projects.">
           <AlertTriangle size={14} />
           <span className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-1.5 hidden w-max max-w-xs -translate-x-1/2 flex-col gap-1 rounded-md bg-foreground px-2.5 py-1.5 text-xs leading-snug text-background shadow-lg group-hover/warn:flex">
             <span className="font-medium">
@@ -326,8 +337,8 @@ function ApplicantCardInner({
           padding) as the overlay's star toggle so the two line up exactly, and
           fades out as the overlay fades in. */}
       {isWishlisted && onWishlistToggle && (
-        <span className="flex h-7 w-7 shrink-0 items-center justify-center text-amber-500 transition-opacity group-hover:opacity-0" aria-hidden>
-          <Star size={14} className="fill-amber-500" />
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center text-warning transition-opacity group-hover:opacity-0" aria-hidden>
+          <Star size={14} className="fill-warning" />
         </span>
       )}
 
@@ -367,7 +378,7 @@ function ApplicantCardInner({
             <OverlayButton
               onClick={() => onAddToWishlist(app.id)}
               label="Add to wishlist"
-              className="hover:text-amber-500"
+              className="hover:text-warning"
             >
               <Star size={14} />
             </OverlayButton>
@@ -376,9 +387,9 @@ function ApplicantCardInner({
             <OverlayButton
               onClick={() => onWishlistToggle(app.id)}
               label="Remove from wishlist"
-              className="text-amber-500 hover:text-amber-600"
+              className="text-warning hover:text-warning"
             >
-              <Star size={14} className="fill-amber-500" />
+              <Star size={14} className="fill-warning" />
             </OverlayButton>
           )}
           {onRemove && (

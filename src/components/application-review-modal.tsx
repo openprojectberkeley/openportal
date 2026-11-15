@@ -18,6 +18,7 @@ import { resumeSignedUrl } from "@/lib/resume-upload";
 import { techAreaLabel, techClassLabel } from "@/lib/application-profile";
 import { LateBadge } from "@/components/applicant-indicators";
 import { optimistic } from "@/lib/optimistic";
+import { useConfirm } from "@/components/ui/use-confirm";
 
 export type ReviewStatus = "submitted" | "accepted" | "rejected";
 
@@ -33,7 +34,7 @@ export type FocusSection = "areas" | "classes" | "essay";
 const DECISIONS_ENABLED = false;
 
 // Transient highlight on a section the modal was opened straight to.
-const FLASH_RING = "ring-2 ring-sky-400 ring-offset-4 ring-offset-background";
+const FLASH_RING = "ring-2 ring-ring ring-offset-4 ring-offset-background";
 
 const PROJECT_TYPE_LABELS: Record<string, string> = {
   studio: "OP Studio",
@@ -99,6 +100,7 @@ export function ApplicationReviewModal({
   // draft flow, not manual accept/reject).
   readOnly?: boolean;
 }) {
+  const { ask, dialog: confirmDialog } = useConfirm();
   const [loading, setLoading] = useState(true);
   const [rankings, setRankings] = useState<RankingRow[]>([]);
   const [answersByRanking, setAnswersByRanking] = useState<Record<string, AnswerRow[]>>({});
@@ -276,12 +278,17 @@ export function ApplicationReviewModal({
   };
 
   const reject = () => {
-    if (!window.confirm(`Reject ${applicantName}'s application?`)) return;
-    decide("rejected", null);
+    ask({
+      title: `Reject ${applicantName}'s application?`,
+      confirmLabel: "Reject",
+      destructive: true,
+      run: () => decide("rejected", null),
+    });
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
+      {confirmDialog}
       <DialogContent ref={contentRef} className="max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
@@ -316,8 +323,8 @@ export function ApplicationReviewModal({
                   )}
                 >
                   <div className="flex items-center gap-2">
-                    <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-foreground/10 text-xs font-semibold tabular-nums">
-                      {r.rank}
+                    <span className="w-4 font-mono text-xs font-semibold text-muted-foreground tabular-nums">
+                      {r.rank}.
                     </span>
                     <span className="text-sm font-semibold">{r.project?.name ?? "Unknown project"}</span>
                     {r.project?.type && (
@@ -350,7 +357,7 @@ export function ApplicationReviewModal({
               ))
             )}
 
-            {error && <p className="text-sm text-red-500">{error}</p>}
+            {error && <p className="text-sm text-destructive">{error}</p>}
 
             {!readOnly && (
             <div className="flex flex-wrap items-center justify-end gap-2 pt-2">
@@ -460,11 +467,17 @@ function ApplicantDetails({
               )}
             >
               <span className="text-xs font-medium text-muted-foreground">Technical areas of interest</span>
-              <div className="flex flex-wrap gap-1.5">
+              {/* A row per area with a five-dot meter instead of pills. */}
+              <div className="grid grid-cols-1 gap-x-6 gap-y-1 sm:grid-cols-2">
                 {ratedAreas.map(([key, v]) => (
-                  <span key={key} className="inline-flex items-center gap-1 rounded-full bg-foreground/10 px-2 py-0.5 text-xs">
-                    {techAreaLabel(key)} <span className="tabular-nums text-muted-foreground">{v}/5</span>
-                  </span>
+                  <div key={key} className="flex items-center justify-between gap-3 text-sm">
+                    <span className="min-w-0 truncate">{techAreaLabel(key)}</span>
+                    <span className="flex shrink-0 items-center gap-0.5" aria-label={`${v} of 5`}>
+                      {[1, 2, 3, 4, 5].map((n) => (
+                        <span key={n} className={cn("h-1.5 w-1.5 rounded-full", n <= Number(v) ? "bg-foreground" : "bg-foreground/15")} />
+                      ))}
+                    </span>
+                  </div>
                 ))}
               </div>
             </div>
@@ -479,12 +492,9 @@ function ApplicantDetails({
               )}
             >
               <span className="text-xs font-medium text-muted-foreground">Tech classes</span>
-              <div className="flex flex-wrap gap-1.5">
-                {classes.map((c) => (
-                  <span key={c} className="rounded-full bg-foreground/10 px-2 py-0.5 text-xs">{techClassLabel(c)}</span>
-                ))}
-              </div>
-              {other && <p className="text-sm text-foreground/90">Other: {other}</p>}
+              <p className="text-sm">
+                {[...classes.map((c) => techClassLabel(c)), ...(other ? [other] : [])].join(", ")}
+              </p>
             </div>
           )}
 
@@ -495,7 +505,7 @@ function ApplicantDetails({
                 type="button"
                 onClick={onOpenResume}
                 disabled={resumeOpening}
-                className="inline-flex items-center gap-1.5 self-start rounded-md border bg-background px-3 py-1.5 text-sm hover:bg-accent transition-colors disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 self-start text-sm underline-offset-2 hover:underline disabled:opacity-50"
               >
                 <FileText size={14} className="text-muted-foreground" />
                 {resumeOpening ? "Opening…" : profile?.resume_filename || "View resume"}

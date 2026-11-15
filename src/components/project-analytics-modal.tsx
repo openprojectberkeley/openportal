@@ -100,7 +100,7 @@ export function ProjectAnalyticsBody({ periodId }: { periodId: string | null }) 
   return (
     <>
       {rows === null ? (
-        <div className="h-64 rounded-xl bg-muted animate-pulse" />
+        <div className="h-64 rounded-xl bg-foreground/[0.09] animate-pulse" />
       ) : (
         <div className="flex flex-col gap-5">
           <p className="text-xs text-muted-foreground">

@@ -29,6 +29,8 @@ import {
 } from "@/lib/application";
 import { optimistic } from "@/lib/optimistic";
 import { Combobox } from "@/components/ui/combobox";
+import { useConfirm } from "@/components/ui/use-confirm";
+import { Textarea } from "@/components/ui/textarea";
 
 type Props = {
   projectId: string;
@@ -58,6 +60,7 @@ function serializeAnswers(map: Record<string, AnswerValue>): string {
 // (prompt/required set per-project, 150-200 words suggested), then its custom
 // questions. Persists to the current draft.
 export function ProjectApplicationModal({ projectId, projectName, rankingId, open, onOpenChange, onSaved }: Props) {
+  const { ask, dialog: confirmDialog } = useConfirm();
   const [loading, setLoading] = useState(true);
   const [questions, setQuestions] = useState<ProjectQuestion[]>([]);
   const [essayPrompt, setEssayPrompt] = useState("Why do you want to work on this project?");
@@ -179,13 +182,21 @@ export function ProjectApplicationModal({ projectId, projectName, rankingId, ope
   // before discarding unsaved edits. Saving closes via onOpenChange directly.
   const handleOpenChange = (next: boolean) => {
     if (!next && !loading && isDirty()) {
-      if (!window.confirm("You have unsaved changes to this application. Discard them?")) return;
+      ask({
+        title: "Discard your changes?",
+        description: "You have unsaved changes to this application.",
+        confirmLabel: "Discard",
+        destructive: true,
+        run: () => onOpenChange(false),
+      });
+      return;
     }
     onOpenChange(next);
   };
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
+      {confirmDialog}
       <DialogContent className="max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{projectName}</DialogTitle>
@@ -198,24 +209,20 @@ export function ProjectApplicationModal({ projectId, projectName, rankingId, ope
             {/* Essay: prompt/required are per-project, editable via ProjectQuestionsDialog */}
             <div className="flex flex-col gap-1">
               <Label htmlFor="app-essay" className="mb-1.5 whitespace-pre-wrap">
-                {essayPrompt} {essayRequired && <span className="text-red-500">*</span>}
+                {essayPrompt} {essayRequired && <span className="text-destructive">*</span>}
               </Label>
-              <textarea
+              <Textarea
                 id="app-essay"
                 rows={6}
                 value={essay}
                 onChange={(e) => setEssay(e.target.value)}
                 placeholder={`${ESSAY_MIN_WORDS}–${ESSAY_MAX_WORDS} words suggested`}
-                className="border rounded-md px-3 py-2 text-sm w-full resize-y bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+                className="resize-y"
               />
-              <span className="text-xs tabular-nums text-muted-foreground">
-                {essayWords} word{essayWords === 1 ? "" : "s"} · {ESSAY_MIN_WORDS}–{ESSAY_MAX_WORDS} suggested
+              {/* One counter line; it turns amber while the essay is short. */}
+              <span className={`text-xs tabular-nums ${essayShort ? "text-warning" : "text-muted-foreground"}`}>
+                {essayWords} / {ESSAY_MIN_WORDS}–{ESSAY_MAX_WORDS} words{essayShort ? " · a bit short, but you can still save" : ""}
               </span>
-              {essayShort && (
-                <span className="text-xs text-amber-600 dark:text-amber-500">
-                  This is a bit short — {ESSAY_MIN_WORDS}–{ESSAY_MAX_WORDS} words is suggested. You can still save it.
-                </span>
-              )}
             </div>
 
             {/* Custom questions */}
@@ -224,7 +231,7 @@ export function ProjectApplicationModal({ projectId, projectName, rankingId, ope
               return (
                 <div key={q.id} className="flex flex-col gap-2.5">
                   <Label className="whitespace-pre-wrap">
-                    {q.prompt} {q.required && <span className="text-red-500">*</span>}
+                    {q.prompt} {q.required && <span className="text-destructive">*</span>}
                   </Label>
 
                   {q.type === "short_answer" && (
@@ -232,11 +239,11 @@ export function ProjectApplicationModal({ projectId, projectName, rankingId, ope
                   )}
 
                   {q.type === "long_answer" && (
-                    <textarea
+                    <Textarea
                       rows={4}
                       value={v.text}
                       onChange={(e) => setText(q.id, e.target.value)}
-                      className="border rounded-md px-3 py-2 text-sm w-full resize-y bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+                      className="resize-y"
                     />
                   )}
 
@@ -271,7 +278,7 @@ export function ProjectApplicationModal({ projectId, projectName, rankingId, ope
                     ) : (
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <button className="flex items-center justify-between gap-2 border border-input rounded-md px-3 py-2 text-sm bg-transparent hover:bg-accent transition-colors">
+                          <button className="flex h-9 items-center justify-between gap-2 rounded-md border border-input bg-transparent px-3 text-sm shadow-sm hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
                             {v.options[0] ?? <span className="text-muted-foreground">Select…</span>}
                             <ChevronDown size={14} className="text-muted-foreground" />
                           </button>
@@ -304,7 +311,7 @@ export function ProjectApplicationModal({ projectId, projectName, rankingId, ope
               );
             })}
 
-            {error && <p className="text-sm text-red-500">{error}</p>}
+            {error && <p className="text-sm text-destructive">{error}</p>}
 
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" onClick={() => handleOpenChange(false)}>Cancel</Button>

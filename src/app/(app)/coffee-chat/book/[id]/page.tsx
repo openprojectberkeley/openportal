@@ -8,9 +8,14 @@ import { loadCoffeeChatWindowBounds, earliestBookableIso } from "@/lib/coffee-ch
 import { bucketOpenSlots, groupSlotsByDay, keepSelectionIfOpen, type DayGroup } from "@/lib/coffee-chat-slots";
 import { AvailabilitySkeleton } from "@/components/skeletons";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { PersonName } from "@/components/person-profile-provider";
-import { MapPin, Info } from "lucide-react";
+import { MapPin } from "lucide-react";
 import { BackLink } from "@/components/back-link";
+import { HostHeader } from "@/components/coffee-host-header";
+import { InfoHint } from "@/components/ui/info-hint";
+import { Disclosure } from "@/components/ui/disclosure";
+import { Textarea } from "@/components/ui/textarea";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 
 type PersonInfo = {
   name: string;
@@ -41,6 +46,14 @@ function BookingPageInner() {
   const [loading, setLoading] = useState(true);
   const [booking, setBooking] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Shown once by "Select a time"; read on the client so SSR can't disagree.
+  const [timeZone, setTimeZone] = useState<string | null>(null);
+  useEffect(() => {
+    const part = new Intl.DateTimeFormat("en-US", { timeZoneName: "short" })
+      .formatToParts(new Date())
+      .find((p) => p.type === "timeZoneName");
+    setTimeZone(part?.value ?? Intl.DateTimeFormat().resolvedOptions().timeZone);
+  }, []);
 
   const loadSlots = useCallback(async () => {
     const supabase = createClient();
@@ -106,7 +119,10 @@ function BookingPageInner() {
 
       setPerson({
         name: [profile?.preferred_firstname, profile?.lastname].filter(Boolean).join(" ") || "Member",
-        roles: (roleRows ?? []).flatMap((r: any) => (r.roles ? [r.roles] : [])),
+        roles: (roleRows ?? []).flatMap((r) => {
+          const role = r.roles as unknown as { id: string; role_name: string } | null;
+          return role ? [role] : [];
+        }),
         avatarUrl: profile?.avatar_url ?? null,
         interests: profile?.interests ?? null,
         defaultLocation: profile?.default_chat_location ?? null,
@@ -191,208 +207,183 @@ function BookingPageInner() {
     router.push("/coffee-chat");
   };
 
-  const initials = person?.name
-    .split(" ")
-    .map((w) => w[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase() ?? "";
 
   const firstName = person?.name.split(" ")[0] ?? "them";
 
   // The currently selected slot object (for its duration, capacity, attendees).
-  const selectedSlot = selected
-    ? days.flatMap((d) => d.slots).find((s) => s.meeting_time === selected) ?? null
-    : null;
+  const allSlots = days.flatMap((d) => d.slots);
+  const selectedSlot = selected ? allSlots.find((s) => s.meeting_time === selected) ?? null : null;
+
+  // Radiogroup keyboard: arrows move through every time in order (across
+  // days) and select as they go; Home/End jump to the ends.
+  const onSlotKey = (e: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
+    let next = -1;
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") next = (index + 1) % allSlots.length;
+    else if (e.key === "ArrowLeft" || e.key === "ArrowUp") next = (index - 1 + allSlots.length) % allSlots.length;
+    else if (e.key === "Home") next = 0;
+    else if (e.key === "End") next = allSlots.length - 1;
+    if (next < 0) return;
+    e.preventDefault();
+    setSelected(allSlots[next].meeting_time);
+    document.querySelector<HTMLButtonElement>(`[data-slot-index="${next}"]`)?.focus();
+  };
+  // The focusable radio: the selected one, else the first.
+  const tabStop = Math.max(0, allSlots.findIndex((s) => s.meeting_time === selected));
+  let slotIndex = -1;
 
   return (
-    <div className="w-full max-w-5xl mx-auto p-6 flex flex-col gap-6">
+    <div className="w-full max-w-6xl mx-auto p-5 flex flex-col gap-6">
       <BackLink href="/coffee-chat" label="Coffee chat" />
-
-      {/* Always-on explainer for the filled/capacity badge and shared (group) slots. */}
-      <div className="flex items-start gap-2.5 rounded-lg surface p-3 text-sm text-muted-foreground">
-        <Info size={16} className="mt-0.5 flex-shrink-0" />
-        <p className="leading-snug">
-          <span className="font-medium text-foreground">Some time slots are shared.</span>{" "}
-          The badge on a time (like <span className="tabular-nums font-medium text-foreground">2/3</span>)
-          shows how many seats are already booked out of the total. A slot with more than one seat — or
-          one that already has bookings — is a <span className="font-medium text-foreground">group chat</span>,
-          so you may be meeting people you don&apos;t know yet. Times with no badge are one-on-one.
-        </p>
-      </div>
 
       <div className="flex flex-col md:flex-row gap-8 md:items-start">
         {/* Left: host header + time selection (two-thirds). */}
-        <div className="flex flex-col gap-8 md:w-2/3">
-          {person && (
-            <div className="flex items-center gap-4">
-              {person.avatarUrl ? (
-                <img src={person.avatarUrl} alt={person.name} className="h-14 w-14 rounded-full object-cover flex-shrink-0" />
-              ) : (
-                <div className="h-14 w-14 rounded-full bg-foreground/10 flex items-center justify-center text-sm font-semibold flex-shrink-0">
-                  {initials}
-                </div>
-              )}
-              <div className="flex flex-col gap-1.5">
-                <PersonName
-                  userId={id}
-                  name={person.name}
-                  preloaded={{ roles: person.roles, avatar_url: person.avatarUrl, interests: person.interests }}
-                  className="font-semibold"
-                />
-                <div className="flex flex-wrap gap-1">
-                  {person.roles.map((r) => (
-                    <span key={r.id} className="px-2 py-0.5 rounded-full bg-foreground/10 text-xs font-medium">
-                      {r.role_name}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
+        <div className="flex flex-col gap-8 md:w-2/3 min-w-0">
+          <HostHeader userId={id} host={person} />
 
-          <div className="flex flex-col gap-6">
-            <h2 className="font-semibold">Select a time</h2>
+          <section className="flex flex-col gap-5">
+            <div className="flex items-center gap-1.5">
+              <h2 id="select-time" className="text-base font-semibold tracking-tight">Select a time</h2>
+              <InfoHint label="About shared times">
+                Some times are shared. A badge like 2/3 is seats booked out of the total; a time with more than
+                one seat is a group chat, so you may meet people you don&apos;t know yet. No badge means one-on-one.
+              </InfoHint>
+              {timeZone && days.length > 0 && <span className="ml-auto text-xs text-muted-foreground">Times in {timeZone}</span>}
+            </div>
             {loading ? (
               <AvailabilitySkeleton />
             ) : days.length === 0 ? (
               <p className="text-sm text-muted-foreground">No open times right now. Check back later.</p>
             ) : (
-              days.map((day) => (
-                <div key={day.label} className="flex flex-col gap-2">
-                  <p className="text-sm font-medium text-muted-foreground">{day.label}</p>
-                  <div className="flex flex-wrap gap-2">
-                    {day.slots.map((slot) => {
-                      const isSelected = selected === slot.meeting_time;
-                      const slotButton = (
-                        <button
-                          onClick={() => setSelected(slot.meeting_time)}
-                          className={`flex flex-col items-center px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                            isSelected
-                              ? "bg-foreground text-background"
-                              : "bg-foreground/[0.05] hover:bg-foreground/[0.09]"
-                          }`}
-                        >
-                          {slot.timeLabel}
-                          <span className={`flex items-center gap-1.5 text-[11px] font-normal ${isSelected ? "opacity-80" : "text-muted-foreground"}`}>
-                            <span>{slot.duration_minutes} min</span>
-                            {slot.capacity > 1 && (
-                              <>
-                                <span className="h-1 w-1 rounded-full bg-current" />
-                                <span className="tabular-nums">{slot.filled}/{slot.capacity}</span>
-                              </>
-                            )}
-                          </span>
-                        </button>
-                      );
-                      if (slot.attendees.length === 0) {
-                        return cloneElement(slotButton, { key: slot.meeting_time });
-                      }
-                      return (
-                        <Tooltip key={slot.meeting_time}>
-                          <TooltipTrigger asChild>{slotButton}</TooltipTrigger>
-                          <TooltipContent side="top" className="flex max-w-[14rem] flex-col gap-0.5">
-                            <span className="font-semibold">
-                              Booking with {slot.filled} other{slot.filled === 1 ? "" : "s"}
+              <div role="radiogroup" aria-labelledby="select-time" className="flex flex-col gap-5">
+                {days.map((day) => (
+                  <div key={day.label} role="group" aria-label={day.label} className="flex flex-col gap-2">
+                    <p className="text-sm font-medium text-muted-foreground">{day.label}</p>
+                    <div className="flex flex-wrap gap-2">
+                      {day.slots.map((slot) => {
+                        const i = ++slotIndex;
+                        const isSelected = selected === slot.meeting_time;
+                        const slotButton = (
+                          <button
+                            type="button"
+                            role="radio"
+                            aria-checked={isSelected}
+                            tabIndex={i === tabStop ? 0 : -1}
+                            data-slot-index={i}
+                            onClick={() => setSelected(slot.meeting_time)}
+                            onKeyDown={(e) => onSlotKey(e, i)}
+                            className={`flex flex-col items-center rounded-lg px-4 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background ${
+                              isSelected
+                                ? "bg-foreground text-background"
+                                : "bg-foreground/[0.05] hover:bg-foreground/[0.09]"
+                            }`}
+                          >
+                            {slot.timeLabel}
+                            <span className={`flex items-center gap-1.5 text-[11px] font-normal ${isSelected ? "opacity-80" : "text-muted-foreground"}`}>
+                              <span>{slot.duration_minutes} min</span>
+                              {slot.capacity > 1 && (
+                                <>
+                                  <span className="h-1 w-1 rounded-full bg-current" />
+                                  <span>{slot.filled}/{slot.capacity}</span>
+                                </>
+                              )}
                             </span>
-                            <span className="opacity-90">
-                              {slot.attendees.map((a) => a.name).join(", ")}
-                            </span>
-                          </TooltipContent>
-                        </Tooltip>
-                      );
-                    })}
+                          </button>
+                        );
+                        if (slot.attendees.length === 0) {
+                          return cloneElement(slotButton, { key: slot.meeting_time });
+                        }
+                        return (
+                          <Tooltip key={slot.meeting_time}>
+                            <TooltipTrigger asChild>{slotButton}</TooltipTrigger>
+                            <TooltipContent side="top" className="flex max-w-[14rem] flex-col gap-0.5">
+                              <span className="font-semibold">
+                                Booking with {slot.filled} other{slot.filled === 1 ? "" : "s"}
+                              </span>
+                              <span className="opacity-90">{slot.attendees.map((a) => a.name).join(", ")}</span>
+                            </TooltipContent>
+                          </Tooltip>
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
-              ))
+                ))}
+              </div>
             )}
-          </div>
+          </section>
         </div>
 
-        {/* Right: about the host + selected-time details + booking (one-third, sticky). */}
-        <div className="flex flex-col gap-6 md:w-1/3 md:sticky md:top-6 self-start rounded-xl surface p-4">
-          {person && (
-            <div className="flex flex-col gap-3">
-              <h3 className="text-sm font-semibold">About {firstName}&apos;s coffee chats</h3>
-              <div className="flex items-start gap-1.5 text-sm text-muted-foreground">
-                <MapPin size={14} className="mt-0.5 flex-shrink-0" />
-                {person.defaultLocation ? (
-                  /^https?:\/\//.test(person.defaultLocation) ? (
-                    <a
-                      href={person.defaultLocation}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="underline decoration-dotted underline-offset-2 hover:text-foreground break-all"
-                    >
-                      {person.defaultLocation}
-                    </a>
-                  ) : (
-                    <span className="break-words">{person.defaultLocation}</span>
-                  )
+        {/* Right: where, the selected time, and booking (one-third, sticky). */}
+        <aside className="flex flex-col gap-5 md:w-1/3 md:sticky md:top-6 self-start w-full rounded-xl surface p-4">
+          {person ? (
+            <div className="flex items-start gap-1.5 text-sm text-muted-foreground">
+              <MapPin size={14} className="mt-0.5 flex-shrink-0" aria-label="Location" />
+              {person.defaultLocation ? (
+                /^https?:\/\//.test(person.defaultLocation) ? (
+                  <a
+                    href={person.defaultLocation}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline decoration-dotted underline-offset-2 hover:text-foreground break-all"
+                  >
+                    {person.defaultLocation}
+                  </a>
                 ) : (
-                  <span className="italic">No location set yet — check with {firstName}</span>
-                )}
-              </div>
-              {person.interests && (
-                <div className="flex flex-col gap-1">
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Interests</p>
-                  <p className="text-sm text-muted-foreground leading-snug">{person.interests}</p>
-                </div>
+                  <span className="break-words">{person.defaultLocation}</span>
+                )
+              ) : (
+                <span>No location set yet. Check with {firstName}.</span>
               )}
             </div>
+          ) : (
+            <Skeleton className="h-3.5 w-3/4 rounded-full" />
           )}
 
-          {days.length > 0 && (
-            <div className="flex flex-col gap-3 pt-2">
+          {loading ? (
+            <div className="flex flex-col gap-3" aria-hidden>
+              <Skeleton className="h-3.5 w-40 rounded-full" />
+              <Skeleton className="h-3 w-16 rounded-full" />
+              <Skeleton className="h-9 w-full" />
+            </div>
+          ) : days.length > 0 ? (
+            <div className="flex flex-col gap-4">
               {selected ? (
-                <>
-                  <div className="flex flex-col gap-1">
-                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Selected time</p>
-                    <p className="text-sm font-medium text-foreground">
-                      {new Date(selected).toLocaleString("en-US", {
-                        weekday: "long", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
-                        timeZoneName: "short",
-                      })}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {selectedSlot?.duration_minutes ?? 30} min · {Intl.DateTimeFormat().resolvedOptions().timeZone}
-                    </p>
-                  </div>
+                <div className="flex flex-col gap-0.5">
+                  <p className="text-sm font-medium">
+                    {new Date(selected).toLocaleString("en-US", {
+                      weekday: "long", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+                    })}
+                  </p>
+                  <p className="text-xs text-muted-foreground">{selectedSlot?.duration_minutes ?? 30} min</p>
                   {selectedSlot && selectedSlot.filled > 0 && (
-                    <p className="text-xs text-muted-foreground leading-snug">
-                      You&apos;ll be joining {selectedSlot.filled} other{selectedSlot.filled === 1 ? "" : "s"}:{" "}
-                      <span className="text-foreground">{selectedSlot.attendees.map((a) => a.name).join(", ")}</span>
+                    <p className="pt-1 text-xs text-muted-foreground leading-snug">
+                      With {selectedSlot.attendees.map((a) => a.name).join(", ")}
                     </p>
                   )}
-                  <div className="flex flex-col gap-1">
-                    <label htmlFor="book-message" className="text-sm font-medium">
-                      Add a message <span className="font-normal text-muted-foreground">(optional)</span>
-                    </label>
-                    <textarea
-                      id="book-message"
-                      value={message}
-                      onChange={(e) => setMessage(e.target.value)}
-                      maxLength={500}
-                      rows={3}
-                      placeholder={`Anything you'd like ${firstName} to know before the chat?`}
-                      className="border bg-transparent rounded-md px-3 py-2 text-sm w-full resize-none"
-                    />
-                  </div>
-                </>
+                </div>
               ) : (
-                <p className="text-sm text-muted-foreground">Select a time to continue.</p>
+                <p className="text-sm text-muted-foreground">Pick a time to book.</p>
               )}
-              {error && <p className="text-sm text-red-500">{error}</p>}
-              <button
-                disabled={!selected || booking}
-                onClick={handleBook}
-                className="w-full rounded-md bg-foreground text-background px-4 py-2.5 text-sm font-medium hover:opacity-80 transition-opacity disabled:opacity-30"
-              >
-                {booking ? "Booking…" : "Book Meeting"}
-              </button>
+              {selected && (
+                <Disclosure label="Add a message" defaultOpen={message.trim() !== ""}>
+                  <Textarea
+                    id="book-message"
+                    aria-label="Message"
+                    value={message}
+                    onChange={(e) => setMessage(e.target.value)}
+                    maxLength={500}
+                    rows={3}
+                    placeholder={`Anything you'd like ${firstName} to know before the chat?`}
+                    className="resize-none"
+                  />
+                </Disclosure>
+              )}
+              {error && <p className="text-sm text-destructive">{error}</p>}
+              <Button disabled={!selected || booking} onClick={handleBook} className="w-full">
+                {booking ? "Booking…" : "Book a chat"}
+              </Button>
             </div>
-          )}
-        </div>
+          ) : null}
+        </aside>
       </div>
     </div>
   );

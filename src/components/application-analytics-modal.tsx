@@ -221,14 +221,14 @@ export function RecruitingAnalyticsBody({
     {rows === null ? (
       <div className="flex flex-col gap-4">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div className="h-56 rounded-xl bg-muted animate-pulse" />
-          <div className="h-56 rounded-xl bg-muted animate-pulse" />
+          <div className="h-56 rounded-xl bg-foreground/[0.09] animate-pulse" />
+          <div className="h-56 rounded-xl bg-foreground/[0.09] animate-pulse" />
         </div>
-        <div className="h-40 rounded-xl bg-muted animate-pulse" />
+        <div className="h-40 rounded-xl bg-foreground/[0.09] animate-pulse" />
       </div>
     ) : (
       <div className="flex flex-col gap-5">
-        {error && <p className="text-sm text-red-500">{error}</p>}
+        {error && <p className="text-sm text-destructive">{error}</p>}
 
         {selected ? (
           <>
@@ -367,13 +367,13 @@ export function RecruitingAnalyticsBody({
           </DialogTitle>
         </DialogHeader>
 
-        {invalidError && <p className="text-sm text-red-500">{invalidError}</p>}
+        {invalidError && <p className="text-sm text-destructive">{invalidError}</p>}
 
         {invalidRows === null ? (
           <div className="flex flex-col gap-2">
-            <div className="h-10 rounded-lg bg-muted animate-pulse" />
-            <div className="h-10 rounded-lg bg-muted animate-pulse" />
-            <div className="h-10 rounded-lg bg-muted animate-pulse" />
+            <div className="h-10 rounded-lg bg-foreground/[0.09] animate-pulse" />
+            <div className="h-10 rounded-lg bg-foreground/[0.09] animate-pulse" />
+            <div className="h-10 rounded-lg bg-foreground/[0.09] animate-pulse" />
           </div>
         ) : invalidRows.length === 0 ? (
           <p className="text-sm text-muted-foreground">Everyone submitted is valid.</p>

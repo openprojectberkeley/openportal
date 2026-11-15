@@ -400,6 +400,7 @@ export function ProjectsPanel({ members }: Props) {
             )}
             <RosterList
               label="Members"
+              expectedCount={p.member_count}
               rows={p.members?.map((m) => ({ id: m.user_id, name: m.name, crown: m.is_pm })) ?? null}
               crownTitle={(r) => (r.crown ? "PM — click to remove" : "Make PM")}
               onToggleCrown={(r) => {

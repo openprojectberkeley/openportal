@@ -197,12 +197,18 @@ export default {
           "0%, 100%": { transform: "translateY(0)" },
           "50%": { transform: "translateY(3px)" },
         },
+        // A thin bar sliding across while a page of rows loads.
+        indeterminate: {
+          from: { transform: "translateX(-100%)" },
+          to: { transform: "translateX(300%)" },
+        },
       },
       animation: {
         "slow-flash": "slow-flash 1.8s ease-in-out infinite",
         shimmer: "shimmer 1.1s var(--ease-out-expo) 1",
         "fade-in-up": "fade-in-up var(--dur-2) var(--ease-out-quart) both",
         pop: "pop var(--dur-2) var(--ease-out-quart) both",
+        indeterminate: "indeterminate 1s var(--ease-in-out-cubic) infinite",
         nudge: "nudge 600ms var(--ease-in-out-cubic) 2",
         expand: "expand-rows var(--dur-3) var(--ease-out-quart) both",
         // `backwards`, not `both`: once it has played, the bar's own

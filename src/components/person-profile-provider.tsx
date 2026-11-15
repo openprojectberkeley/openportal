@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useRef, useState } from "react";
 import { Crown } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { ProfileModal } from "@/components/profile-modal";
 import { cn } from "@/lib/utils";
@@ -156,9 +157,16 @@ export function PersonName({ userId, name, preloaded, className }: PersonNamePro
       </HoverCardTrigger>
       <HoverCardContent>
         <div className="flex items-center gap-3">
-          <div className="h-11 w-11 rounded-full bg-foreground/10 flex items-center justify-center text-xs font-semibold flex-shrink-0">
-            {initials(name)}
-          </div>
+          {cached?.avatar_url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={cached.avatar_url} alt="" className="h-11 w-11 rounded-full object-cover flex-shrink-0" />
+          ) : cached ? (
+            <div className="h-11 w-11 rounded-full bg-foreground/10 flex items-center justify-center text-xs font-semibold flex-shrink-0">
+              {initials(name)}
+            </div>
+          ) : (
+            <Skeleton className="h-11 w-11 rounded-full flex-shrink-0" />
+          )}
           <div className="flex flex-col gap-1.5 min-w-0">
             <div className="flex items-center gap-1.5 min-w-0">
               <span className="font-semibold text-sm truncate">{name}</span>
@@ -166,6 +174,13 @@ export function PersonName({ userId, name, preloaded, className }: PersonNamePro
               <InfosessionIndicator attended={cached?.infosession_attended} />
               <SubmittedApplicationIndicator submitted={cached?.submitted_application} />
             </div>
+            {/* Not loaded yet: assume roles and a project are coming. */}
+            {!cached && roles.length === 0 && projects.length === 0 && (
+              <div aria-hidden className="flex gap-1">
+                <Skeleton className="h-5 w-16 rounded-full" />
+                <Skeleton className="h-5 w-20 rounded-full" />
+              </div>
+            )}
             {(roles.length > 0 || projects.length > 0) && (
               <div className="flex flex-wrap gap-1">
                 {roles.map((r) => (

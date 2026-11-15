@@ -736,7 +736,7 @@ export function AllProjectsBoard({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 flex-col gap-1">
           <div className="flex items-center gap-3">
-            <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Every project</h2>
+            <h2 className="text-base font-semibold tracking-tight">Every project</h2>
             <div className="flex items-center gap-1.5">
               <Switch
                 id="board-show-recruiting-status"
@@ -751,12 +751,13 @@ export function AllProjectsBoard({
               </Label>
             </div>
           </div>
-          <p className="text-sm tabular-nums text-muted-foreground">
-            {counts
-              ? `${counts.applicants} application${counts.applicants === 1 ? "" : "s"} across ${counts.projects} project${counts.projects === 1 ? "" : "s"}.`
-              : "Loading counts…"}{" "}
-            Scroll sideways for the rest.
-          </p>
+          {counts ? (
+            <p className="text-sm tabular-nums text-muted-foreground">
+              {counts.applicants} application{counts.applicants === 1 ? "" : "s"} · {counts.projects} project{counts.projects === 1 ? "" : "s"}
+            </p>
+          ) : (
+            <span className="h-3.5 w-40 animate-pulse rounded-full bg-foreground/[0.09]" aria-hidden />
+          )}
         </div>
         <div className="flex items-center gap-2">
           {/* Only offered when this period actually has a draft -- before one is
@@ -782,14 +783,14 @@ export function AllProjectsBoard({
         </div>
       </div>
 
-      {error && <p className="text-sm text-red-500">{error}</p>}
-      {actionError && <p className="text-sm text-red-500">{actionError}</p>}
+      {error && <p className="text-sm text-destructive">{error}</p>}
+      {actionError && <p className="text-sm text-destructive">{actionError}</p>}
 
       {columns === null ? (
         <div className="flex gap-4">
           {[0, 1, 2].map((i) => (
             <div key={i} className="flex w-[300px] shrink-0 flex-col gap-4">
-              <div className="h-[62px] rounded-xl bg-muted/50 animate-pulse" />
+              <div className="h-[62px] rounded-xl bg-foreground/[0.09] animate-pulse" />
               <ApplicationListSkeleton rows={3} />
             </div>
           ))}

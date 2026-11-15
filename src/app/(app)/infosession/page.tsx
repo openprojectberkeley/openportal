@@ -2,8 +2,11 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { staggerStyle } from "@/lib/motion";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { BackLink } from "@/components/back-link";
+import { Button } from "@/components/ui/button";
+import { ArrowRight, CalendarPlus, Download } from "lucide-react";
 // ── Update these two dates for each recruitment cycle ──────────────────────
 const SESSIONS = [
   { date: new Date("2026-08-31T20:00:00-07:00"), label: "Monday, August 31, 2026 · 8:00 – 9:30 PM PT · GPBB 100", location: "GPBB 100" },
@@ -71,65 +74,70 @@ export default function InfosessionPage() {
       <div className="flex flex-col gap-1">
         <BackLink href="/" label="Dashboard" />
         <h1 className="text-2xl font-bold tracking-tight">Infosession</h1>
-        <p className="text-sm text-muted-foreground">
-          Attend either session below — both cover the same content.
-        </p>
+        <p className="text-sm text-muted-foreground">Both sessions cover the same content; attend either one.</p>
       </div>
 
-      <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-1">
         {SESSIONS.map((session, i) => {
+          const [day, ...rest] = session.label.split(" · ");
           return (
-            <div key={i} className="rounded-xl surface p-5 flex flex-col gap-4">
-              <p className="font-medium">{session.label}</p>
-              <div className="flex gap-2 flex-wrap">
-                <a
-                  href={gcalUrl(session)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center border rounded-md px-3 py-1.5 text-sm hover:bg-accent transition-colors"
-                >
-                  Add to Google Calendar
-                </a>
-                <button
-                  onClick={() => downloadIcs(session)}
-                  className="inline-flex items-center border rounded-md px-3 py-1.5 text-sm hover:bg-accent transition-colors"
-                >
-                  Download .ics
-                </button>
+            <div
+              key={i}
+              className="flex items-center gap-4 rounded-lg px-4 py-3 -mx-4 hover:bg-foreground/[0.03] animate-fade-in-up"
+              style={staggerStyle(i)}
+            >
+              <span aria-hidden className="w-1 self-stretch rounded-full bg-foreground/80" />
+              <div className="flex min-w-0 flex-1 flex-col">
+                <span className="font-medium">{day}</span>
+                <span className="text-sm text-muted-foreground">{rest.join(" · ")}</span>
               </div>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button asChild variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground">
+                    <a href={gcalUrl(session)} target="_blank" rel="noopener noreferrer" aria-label="Add to Google Calendar">
+                      <CalendarPlus size={16} />
+                    </a>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Add to Google Calendar</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                    onClick={() => downloadIcs(session)}
+                    aria-label="Download .ics"
+                  >
+                    <Download size={16} />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Download .ics</TooltipContent>
+              </Tooltip>
             </div>
           );
         })}
       </div>
 
-      <div className="flex flex-col gap-2">
-        <p className="text-sm text-muted-foreground">
-          Attended an infosession? Submit your attendance below.
-        </p>
-        {attendanceOpen ? (
-          <button
-            onClick={() => router.push("/infosession/attend")}
-            className="w-full rounded-md bg-foreground text-background px-4 py-2.5 text-sm font-medium hover:opacity-80 transition-opacity"
-          >
-            Submit Attendance
-          </button>
-        ) : (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              {/* Wrapper div is the trigger: the disabled button emits no pointer events. */}
-              <div className="w-full">
-                <button
-                  disabled
-                  className="w-full rounded-md bg-foreground text-background px-4 py-2.5 text-sm font-medium opacity-30 cursor-not-allowed"
-                >
-                  Submit Attendance
-                </button>
-              </div>
-            </TooltipTrigger>
-            <TooltipContent side="top">Available at infosession time</TooltipContent>
-          </Tooltip>
-        )}
-      </div>
+      {attendanceOpen ? (
+        <Button size="lg" className="group w-full" onClick={() => router.push("/infosession/attend")}>
+          Submit attendance
+          <ArrowRight size={15} className="ml-1.5 transition-transform group-hover:translate-x-0.5" />
+        </Button>
+      ) : (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            {/* Wrapper div is the trigger: the disabled button emits no pointer events. */}
+            <div className="w-full">
+              <Button size="lg" className="w-full" disabled>
+                Submit attendance
+              </Button>
+            </div>
+          </TooltipTrigger>
+          <TooltipContent side="top">Available at infosession time</TooltipContent>
+        </Tooltip>
+      )}
     </div>
   );
 }

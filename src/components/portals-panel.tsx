@@ -389,6 +389,7 @@ export function PortalsPanel({ members, allRoles }: Props) {
                       (locked); explicit extras are editable. */}
                   <RosterList
                     label="Members"
+                    expectedCount={p.member_count}
                     rows={
                       p.members?.map((m) => ({
                         id: m.user_id,

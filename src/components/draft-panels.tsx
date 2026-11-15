@@ -8,6 +8,7 @@ import { accentFill } from "@/lib/portal-color";
 import { Button } from "@/components/ui/button";
 import { StaticApplicantCard, applicantName, type AppRow } from "@/components/applicant-meta";
 import type { PickRow, DraftPhase, CurrentTurn, MyPosition } from "@/lib/use-draft-picks";
+import { InfoHint } from "@/components/ui/info-hint";
 
 // Drop target id for the draft-window zone -- a peer drop target of the
 // wishlist on applications/page.tsx (same DndContext). An applicant card can
@@ -48,17 +49,17 @@ function DraftStatus({
     headline = "The draft hasn't started yet";
     sub = "Your draft window unlocks once the draft begins. You can build your wishlist in the meantime.";
   } else if (phase === "complete") {
-    dot = "bg-sky-500";
+    dot = "bg-info";
     headline = "The draft is complete";
     sub = "Confirmed picks have been placed on their projects.";
   } else if (canUnsubmitCurrent) {
     // Submitted, but the exec hasn't advanced to the next pick yet -- still a
     // window to revise before it's someone else's turn.
-    dot = "bg-green-500";
+    dot = "bg-success";
     headline = "Submitted — still your turn";
     sub = `You can send Round ${currentTurn?.roundNumber ?? ""} back to staged to keep editing until the exec moves on.`;
   } else if (isMyTurn && nextRound) {
-    dot = "bg-green-500";
+    dot = "bg-success";
     headline = "It's your turn to pick";
     sub = `Submit up to ${nextRound.pick_count} pick${nextRound.pick_count === 1 ? "" : "s"} for Round ${nextRound.round_number}.`;
   } else if (!nextRound) {
@@ -66,7 +67,7 @@ function DraftStatus({
     headline = "No more picks for your project";
     sub = currentTurn ? `Currently picking: ${currentTurn.projectName} (Round ${currentTurn.roundNumber}).` : null;
   } else {
-    dot = "bg-amber-500";
+    dot = "bg-warning";
     headline = currentTurn ? `On the clock: ${currentTurn.projectName}` : "Another project is picking";
     const n = myPosition?.picksUntilTurn ?? 0;
     sub = `${currentTurn ? `Round ${currentTurn.roundNumber}. ` : ""}${
@@ -177,14 +178,15 @@ export function DraftWindowPanel({
       {/* Confirmed */}
       <div className="flex flex-col gap-2.5">
         <div className="flex items-center justify-between gap-2">
-          <div className="flex flex-col gap-0.5">
-            <h2 className="text-xs font-semibold uppercase tracking-wide tabular-nums text-muted-foreground">
-              Confirmed{confirmedPicks.length ? ` (${confirmedPicks.length})` : ""}
+          <div className="flex items-center gap-1.5">
+            <h2 className="text-base font-semibold tracking-tight">
+              Confirmed
+              {confirmedPicks.length > 0 && <span className="ml-1.5 font-normal text-muted-foreground tabular-nums">{confirmedPicks.length}</span>}
             </h2>
             {confirmedPicks.length > 0 && (
-              <p className="text-xs text-muted-foreground">
-                Locked in, but not yet team members — that happens once the draft is completed.
-              </p>
+              <InfoHint label="About confirmed picks">
+                Locked in, but not yet team members; that happens once the draft is completed.
+              </InfoHint>
             )}
           </div>
           {canUnsubmitCurrent && (
@@ -230,8 +232,11 @@ export function DraftWindowPanel({
       {/* Draft window */}
       <div className="flex flex-col gap-2.5">
         <div className="flex items-center justify-between gap-2">
-          <h2 className="text-xs font-semibold uppercase tracking-wide tabular-nums text-muted-foreground">
-            Draft window{canStage && nextRound ? ` (${draftWindowPicks.length}/${nextRound.pick_count})` : ""}
+          <h2 className="text-base font-semibold tracking-tight">
+            Draft window
+            {canStage && nextRound && (
+              <span className="ml-1.5 font-normal text-muted-foreground tabular-nums">{draftWindowPicks.length}/{nextRound.pick_count}</span>
+            )}
           </h2>
           {phase === "in_progress" && nextRound && (
             <Button

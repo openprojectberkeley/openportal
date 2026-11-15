@@ -502,12 +502,12 @@ export default function HomePage() {
       <Skeleton className="h-9 w-48" />
       <div className="flex flex-col lg:flex-row gap-6">
         <div className="flex-1 min-w-0 flex flex-col gap-3">
-          <Skeleton className="h-3 w-20" />
+          <Skeleton className="h-3 w-20 rounded-full" />
           <PortalGridSkeleton />
         </div>
         <div className="w-full lg:w-80 lg:flex-shrink-0 flex flex-col gap-6">
           <div className="flex flex-col gap-3">
-            <Skeleton className="h-3 w-20" />
+            <Skeleton className="h-3 w-20 rounded-full" />
             <CalendarSkeleton />
           </div>
           <ScoreboardCompactSkeleton />

@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/supabase/client";
 import { useCallback, useEffect, useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { Check, ChevronDown, Copy } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   DropdownMenu,
@@ -106,8 +106,9 @@ function CopyButton({ text, label }: { text: string; label: string }) {
     }
   };
   return (
-    <Button size="sm" variant="outline" onClick={copy}>
-      {copied ? "Copied!" : label}
+    <Button size="sm" variant="outline" onClick={copy} className="gap-1.5">
+      {copied ? <Check size={14} className="text-success" /> : <Copy size={14} />}
+      {copied ? "Copied" : label}
     </Button>
   );
 }
@@ -121,7 +122,7 @@ function RecipientsBlock({ emails }: { emails: string[] }) {
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between gap-3">
         <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Recipients ({emails.length})
+          Recipients <span className="font-normal tabular-nums">{emails.length}</span>
         </span>
         <CopyButton text={list} label="Copy emails" />
       </div>
@@ -129,7 +130,7 @@ function RecipientsBlock({ emails }: { emails: string[] }) {
         readOnly
         value={list}
         rows={4}
-        className="w-full border rounded-md px-3 py-2 text-xs font-mono bg-muted resize-none focus:outline-none"
+        className="w-full resize-none rounded-md bg-foreground/[0.04] px-3 py-2 font-mono text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
         onFocus={(e) => e.currentTarget.select()}
       />
     </div>
@@ -149,7 +150,7 @@ function ScriptBlock({ script }: { script: string }) {
         readOnly
         value={script}
         rows={10}
-        className="w-full border rounded-md px-3 py-2 text-sm bg-muted resize-none focus:outline-none"
+        className="w-full resize-none rounded-md bg-foreground/[0.04] px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
         onFocus={(e) => e.currentTarget.select()}
       />
     </div>
@@ -178,15 +179,15 @@ function TabBody({
     <div className="flex flex-col gap-4">
       {children}
 
-      {error && <p className="text-sm text-red-500">{error}</p>}
+      {error && <p className="text-sm text-destructive">{error}</p>}
 
       {rows === null ? (
         <div className="flex flex-col gap-2">
-          <div className="h-20 rounded-xl bg-muted animate-pulse" />
-          <div className="h-40 rounded-xl bg-muted animate-pulse" />
+          <div className="h-20 rounded-xl bg-foreground/[0.09] animate-pulse" />
+          <div className="h-40 rounded-xl bg-foreground/[0.09] animate-pulse" />
         </div>
       ) : rows.length === 0 ? (
-        <div className="px-4 py-8 text-center text-sm text-muted-foreground border rounded-xl">
+        <div className="px-4 py-8 text-center text-sm text-muted-foreground rounded-xl surface">
           {emptyLabel}
         </div>
       ) : (

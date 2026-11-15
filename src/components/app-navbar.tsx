@@ -124,9 +124,6 @@ export function AppNavbar({ tabs = true }: { tabs?: boolean } = {}) {
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem onSelect={() => router.push("/")}>
-                  Home
-                </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => setProfileOpen(true)}>
                   Profile
                 </DropdownMenuItem>

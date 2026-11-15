@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Search, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -23,9 +23,17 @@ export type RosterRow = {
 /**
  * One roster style for every member/role list (admin portals and projects,
  * the portal members modal): a search box, a scrollable list that stays inside
- * its panel, and rows of name · crown toggle · remove. No pills. `rows === null`
- * renders skeleton rows while the roster loads.
+ * its panel, and rows of name · crown toggle · remove. No pills.
+ *
+ * `rows === null` renders skeleton rows while the roster loads: as many as
+ * `expectedCount` (up to a full scroll area), so the panel opens at its
+ * largest and only ever shrinks to fit once the real rows arrive.
  */
+const ROW_PX = 28;
+const MAX_ROWS = 9;
+/** The default scroll area's cap (max-h-64): a long roster's skeleton fills it exactly. */
+const FULL_PX = 256;
+
 export function RosterList({
   rows,
   label,
@@ -36,6 +44,7 @@ export function RosterList({
   addControl,
   emptyText = "No members yet.",
   maxHeight = "max-h-64",
+  expectedCount,
 }: {
   rows: RosterRow[] | null;
   /** Heading, e.g. "Members". */
@@ -49,6 +58,8 @@ export function RosterList({
   addControl?: React.ReactNode;
   emptyText?: string;
   maxHeight?: string;
+  /** How many rows are coming (e.g. a member_count), to size the skeleton. */
+  expectedCount?: number;
 }) {
   const [query, setQuery] = useState("");
   const q = query.trim().toLowerCase();
@@ -56,6 +67,26 @@ export function RosterList({
     () => (rows && q ? rows.filter((r) => r.name.toLowerCase().includes(q)) : rows),
     [rows, q],
   );
+
+  // Height: fixed to the skeleton while loading, then animated to the real
+  // content's height, then released to auto (so search/add/remove reflow).
+  const loading = rows === null;
+  const skeletonRows = Math.max(1, Math.min(expectedCount ?? 4, MAX_ROWS));
+  const contentRef = useRef<HTMLDivElement>(null);
+  const skeletonPx = (expectedCount ?? 0) > MAX_ROWS ? FULL_PX : skeletonRows * ROW_PX;
+  const [height, setHeight] = useState<number | "auto">(loading ? skeletonPx : "auto");
+  const wasLoading = useRef(loading);
+  useLayoutEffect(() => {
+    if (loading) {
+      wasLoading.current = true;
+      setHeight(skeletonPx);
+      return;
+    }
+    if (!wasLoading.current) return;
+    wasLoading.current = false;
+    const target = contentRef.current?.offsetHeight ?? 0;
+    setHeight((prev) => (prev === target ? "auto" : target));
+  }, [loading, skeletonPx]);
 
   return (
     <div className="flex flex-col gap-2">
@@ -76,10 +107,21 @@ export function RosterList({
           </div>
         )}
       </div>
+      <div
+        style={{ height }}
+        onTransitionEnd={(e) => { if (e.target === e.currentTarget && !loading) setHeight("auto"); }}
+        className="overflow-hidden transition-[height] duration-3 ease-out-quart motion-reduce:transition-none"
+      >
+      <div ref={contentRef}>
       {shown === null ? (
-        <div className="flex flex-col gap-2 py-1">
-          {Array.from({ length: 4 }, (_, i) => (
-            <Skeleton key={i} className="h-4" style={{ width: `${60 - i * 8}%` }} />
+        <div aria-hidden className="flex flex-col pr-2">
+          {Array.from({ length: skeletonRows }, (_, i) => (
+            <div key={i} className="flex h-7 items-center gap-2">
+              <Skeleton className="h-3.5 rounded-full" style={{ width: `${[46, 38, 52, 34, 42, 30, 48, 36, 40][i % 9]}%` }} />
+              <span className="flex-1" />
+              <Skeleton className="h-3.5 w-3.5 rounded-sm" />
+              <span className="w-4" />
+            </div>
           ))}
         </div>
       ) : shown.length === 0 ? (
@@ -124,6 +166,8 @@ export function RosterList({
           </div>
         </ScrollArea>
       )}
+      </div>
+      </div>
     </div>
   );
 }

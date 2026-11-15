@@ -5,6 +5,7 @@ import { getEffectiveRoleNames } from "@/lib/roles-server";
 import { canReviewAllProjects } from "@/lib/roles";
 import { DraftRoundsManager } from "@/components/draft-rounds-manager";
 import { BackLink } from "@/components/back-link";
+import { InfoHint } from "@/components/ui/info-hint";
 
 export default async function DraftPage() {
   await connection();
@@ -20,10 +21,12 @@ export default async function DraftPage() {
     <div className="w-full max-w-6xl mx-auto p-6 flex flex-col gap-10">
       <div className="flex flex-col gap-1">
         <BackLink href="/manager/applications?project=all" label="Applications" />
-        <h1 className="text-2xl font-bold tracking-tight">Draft</h1>
-        <p className="text-sm text-muted-foreground">
-          Set up draft rounds: the order projects pick in and how many applicants each may take, per round.
-        </p>
+        <div className="flex items-center gap-2">
+          <h1 className="text-2xl font-bold tracking-tight">Draft</h1>
+          <InfoHint label="About the draft">
+            Set up draft rounds: the order projects pick in and how many applicants each may take, per round.
+          </InfoHint>
+        </div>
       </div>
 
       <DraftRoundsManager />

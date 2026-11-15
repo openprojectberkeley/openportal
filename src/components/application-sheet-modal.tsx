@@ -241,7 +241,6 @@ function HeaderMenu({
     >
       <DropdownMenuTrigger asChild>
         <button
-          title={title}
           className={cn(
             "flex w-full items-center gap-1 text-left hover:text-foreground transition-colors",
             (sorted || active) && "text-foreground",
@@ -249,7 +248,7 @@ function HeaderMenu({
           )}
         >
           <span className="truncate">{label}</span>
-          {active && <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-sky-500" aria-hidden />}
+          {active && <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-foreground" aria-label="Filtered" />}
           {sorted ? (
             sort.dir === "asc" ? (
               <ArrowUp size={11} className="flex-shrink-0" />
@@ -262,6 +261,8 @@ function HeaderMenu({
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="max-h-72">
+        {/* What the column means, in its own menu rather than a native title. */}
+        {title && <p className="max-w-[15rem] px-2 py-1.5 text-xs leading-snug text-muted-foreground">{title}</p>}
         {columnKey && (
           <>
             <DropdownMenuItem className="text-xs" onSelect={() => onSort({ key: columnKey, dir: "asc" })}>
@@ -1188,7 +1189,7 @@ export function ApplicationSheetModal({
           </DialogTitle>
         </DialogHeader>
 
-        {error && <p className="text-sm text-red-500">{error}</p>}
+        {error && <p className="text-sm text-destructive">{error}</p>}
 
         {/* Toolbar. The pager (all-applicants overview, then one page per
             project) sits outside the table so an empty page doesn't strand the
@@ -1250,7 +1251,7 @@ export function ApplicationSheetModal({
             className="h-7 px-2 text-xs"
             disabled={filtered.length === 0}
             onClick={exportCsv}
-            title="Download the rows below, with full essay and answer text"
+            aria-label="Export CSV: the rows below, with full essay and answer text"
           >
             <Download size={13} className="mr-1" />
             Export CSV
@@ -1262,7 +1263,7 @@ export function ApplicationSheetModal({
             <p className="text-sm text-muted-foreground">No projects to review.</p>
           </div>
         ) : rows === null ? (
-          <div className="flex-1 min-h-[20rem] rounded-lg border bg-muted animate-pulse" />
+          <div className="flex-1 min-h-[20rem] rounded-lg border bg-foreground/[0.09] animate-pulse" />
         ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center gap-3 py-10">
             <p className="text-sm text-muted-foreground">
@@ -1565,7 +1566,7 @@ export function ApplicationSheetModal({
                             }
                           />
                         ) : r.returning ? (
-                          <span className="text-indigo-600">Yes</span>
+                          <span className="font-medium text-foreground">Yes</span>
                         ) : (
                           <span className="text-muted-foreground">No</span>
                         )}
@@ -1591,11 +1592,11 @@ export function ApplicationSheetModal({
                             // Launch project: no PM chat requirement to report.
                             <span className="text-muted-foreground">—</span>
                           ) : r.projectCoffee === "met" ? (
-                            <span className="inline-flex items-center gap-0.5 text-green-600" title="Completed coffee with a project PM">
+                            <span className="inline-flex items-center gap-0.5 text-success" aria-label="Completed coffee with a project PM">
                               <Check size={14} className="stroke-[3]" /> Met
                             </span>
                           ) : (
-                            <span className="inline-flex items-center gap-0.5 text-muted-foreground" title="No completed coffee with a project PM">
+                            <span className="inline-flex items-center gap-0.5 text-muted-foreground" aria-label="No completed coffee with a project PM">
                               <X size={14} /> Missing
                             </span>
                           )}
@@ -1618,10 +1619,7 @@ export function ApplicationSheetModal({
                       </td>
                       <td className={td}>
                         {r.valid ? (
-                          <span
-                            className="inline-flex items-center gap-0.5 text-green-600"
-                            title="Board/exec, or: coffee chat done or returning, and attended an info session"
-                          >
+                          <span className="inline-flex items-center gap-0.5 text-success">
                             <Check size={14} className="stroke-[3]" /> Valid
                           </span>
                         ) : (
@@ -1660,7 +1658,7 @@ export function ApplicationSheetModal({
                             href={r.portfolioUrl}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="text-sky-600 hover:underline"
+                            className="text-foreground underline underline-offset-2 hover:text-foreground/70"
                           >
                             Link
                           </a>
@@ -1817,7 +1815,7 @@ export function ApplicationSheetModal({
         <>
           This marks the application as rejected and clears any project placement.
           Their submitted answers and data are kept — nothing is deleted.
-          {dropError && <span className="mt-2 block text-red-500">{dropError}</span>}
+          {dropError && <span className="mt-2 block text-destructive">{dropError}</span>}
         </>
       }
       confirmLabel="Drop application"

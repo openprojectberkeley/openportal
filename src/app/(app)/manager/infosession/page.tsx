@@ -3,11 +3,15 @@
 import { createClient } from "@/lib/supabase/client";
 import { useCallback, useEffect, useState } from "react";
 import { CodesTableSkeleton } from "@/components/skeletons";
-import { ScrollArea } from "@/components/overlay-scrollbar";
 import { PersonName } from "@/components/person-profile-provider";
 import { optimistic } from "@/lib/optimistic";
 import { BackLink } from "@/components/back-link";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Copy, Trash2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { InfoHint } from "@/components/ui/info-hint";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { staggerStyle } from "@/lib/motion";
+import { useConfirm } from "@/components/ui/use-confirm";
 
 const PAGE_SIZE = 20;
 
@@ -31,6 +35,7 @@ type CodeRow = {
 };
 
 export default function ManagerInfosessionPage() {
+  const { ask, dialog: confirmDialog } = useConfirm();
   const [userId, setUserId] = useState<string | null>(null);
   const [rows, setRows] = useState<CodeRow[]>([]);
   const [total, setTotal] = useState(0);
@@ -41,7 +46,6 @@ export default function ManagerInfosessionPage() {
   const [genError, setGenError] = useState<string | null>(null);
   const [newCode, setNewCode] = useState<string | null>(null);
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
-  const deletingId: string | null = null; // deletes are optimistic: the row leaves at once
 
   const load = useCallback(async (uid: string, pageArg: number) => {
     setLoading(true);
@@ -138,15 +142,22 @@ export default function ManagerInfosessionPage() {
     setGenerating(false);
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = (id: string) => {
     if (!userId) return;
     const row = rows.find((r) => r.id === id);
 
-    const message = row?.claimedBy
-      ? `Delete code ${row.code}? ${row.claimedBy} has already checked in with it — this removes their attendance record. This can't be undone.`
-      : `Delete code ${row?.code ?? "this code"}? This can't be undone.`;
-    if (!window.confirm(message)) return;
-
+    ask({
+      title: row?.claimedBy ? `Delete code ${row.code}?` : `Delete code ${row?.code ?? "this code"}?`,
+      description: row?.claimedBy
+        ? `${row.claimedBy} has already checked in with it; this removes their attendance record. This can't be undone.`
+        : "This can't be undone.",
+      confirmLabel: "Delete code",
+      destructive: true,
+      run: () => runDelete(id, row),
+    });
+  };
+  const runDelete = (id: string, row: (typeof rows)[number] | undefined) => {
+    if (!userId) return;
     // The row leaves the table at once; the delete runs behind it and the
     // page reloads once it lands. A refusal puts the row back.
     const supabase = createClient();
@@ -186,157 +197,121 @@ export default function ManagerInfosessionPage() {
   };
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const pager = (
+    <nav aria-label="Code pages" className="flex items-center gap-2 text-xs text-muted-foreground">
+      <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => goToPage(page - 1)} disabled={page === 0} aria-label="Previous page">
+        <ChevronLeft size={14} />
+      </Button>
+      <span className="tabular-nums">{page + 1} / {totalPages}</span>
+      <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => goToPage(page + 1)} disabled={page + 1 >= totalPages} aria-label="Next page">
+        <ChevronRight size={14} />
+      </Button>
+    </nav>
+  );
 
   return (
     <div className="w-full max-w-3xl mx-auto p-6 flex flex-col gap-10">
+      {confirmDialog}
       <div className="flex flex-col gap-1">
         <BackLink href="/manager" label="Manager" />
-        <h1 className="text-2xl font-bold tracking-tight">Infosession Attendance</h1>
-        <p className="text-sm text-muted-foreground">
-          Generate a code, then read it out to an applicant so they can record their attendance.
-        </p>
+        <div className="flex items-center gap-2">
+          <h1 className="text-2xl font-bold tracking-tight">Infosession attendance</h1>
+          <InfoHint label="How codes work">
+            Generate a code, then read it out to an applicant so they can record their attendance. Each code works once.
+          </InfoHint>
+        </div>
       </div>
 
-      {/* Generate */}
-      <div className="flex flex-col gap-4">
-        <button
-          onClick={handleGenerate}
-          disabled={generating || !userId}
-          className="w-full sm:w-auto self-start rounded-md bg-foreground text-background px-4 py-2.5 text-sm font-medium hover:opacity-80 transition-opacity disabled:opacity-30"
-        >
+      {/* Generate: the newest code shows large, click to copy. */}
+      <div className="flex flex-wrap items-center gap-4">
+        <Button size="lg" onClick={handleGenerate} disabled={generating || !userId}>
           {generating ? "Generating…" : "Generate new code"}
-        </button>
-
+        </Button>
         {newCode && (
           <button
             type="button"
             onClick={() => copyCode(newCode)}
-            title="Click to copy"
-            className="group relative self-start flex items-center gap-3 rounded-xl border px-5 py-3 hover:bg-accent transition-colors"
+            aria-label={`Copy code ${newCode}`}
+            title={newCode}
+            className="group flex min-w-0 max-w-full items-center gap-3 rounded-xl surface px-5 py-2.5 animate-pop"
           >
-            <span className="font-mono text-2xl font-bold tracking-[0.3em]">{newCode}</span>
-            <span className="text-xs text-muted-foreground">{copiedCode === newCode ? "Copied!" : "Click to copy"}</span>
+            {/* One line: a long code is cut off; the copy still takes all of it. */}
+            <span className="min-w-0 truncate whitespace-nowrap font-mono text-2xl font-bold tracking-[0.3em]">{newCode}</span>
+            <span className="shrink-0 text-muted-foreground transition-colors group-hover:text-foreground">
+              {copiedCode === newCode ? <Check size={16} className="text-success" /> : <Copy size={16} />}
+            </span>
           </button>
         )}
-
-        {genError && <p className="text-sm text-red-500">{genError}</p>}
+        {genError && <p className="w-full text-sm text-destructive">{genError}</p>}
       </div>
 
       {/* Your codes */}
-      <div className="flex flex-col gap-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Your codes</h2>
-          {total > 0 && <span className="text-xs text-muted-foreground tabular-nums">{total} total</span>}
+      <section className="flex flex-col gap-3">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-base font-semibold tracking-tight">
+            Your codes
+            {total > 0 && <span className="ml-1.5 font-normal text-muted-foreground tabular-nums">{total}</span>}
+          </h2>
+          {totalPages > 1 && pager}
         </div>
 
         {loading ? (
           <CodesTableSkeleton />
         ) : rows.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No codes yet. Generate one above.</p>
+          <p className="rounded-xl surface px-4 py-8 text-center text-sm text-muted-foreground">No codes yet</p>
         ) : (
-          <>
-            <ScrollArea orientation="horizontal" className="border rounded-xl overflow-hidden">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b text-left text-xs text-muted-foreground uppercase tracking-wide">
-                    <th className="px-4 py-2.5 font-medium">Code</th>
-                    <th className="px-4 py-2.5 font-medium">Created</th>
-                    <th className="px-4 py-2.5 font-medium">Claimed by</th>
-                    <th className="px-4 py-2.5 font-medium sr-only">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((r) => (
-                    <tr key={r.id} className="border-b last:border-0">
-                      <td className="px-4 py-2.5">
-                        <button
-                          type="button"
-                          onClick={() => copyCode(r.code)}
-                          title="Click to copy"
-                          className="font-mono font-medium tracking-wider hover:underline"
-                        >
-                          {r.code}
-                        </button>
-                        {copiedCode === r.code && (
-                          <span className="ml-2 text-xs text-muted-foreground">Copied!</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-2.5 text-muted-foreground whitespace-nowrap">
-                        {new Date(r.created_at).toLocaleString("en-US", {
-                          month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
-                        })}
-                      </td>
-                      <td className="px-4 py-2.5">
-                        {r.claimedBy ? (
-                          <PersonName userId={r.claimedById} name={r.claimedBy} className="font-medium" />
-                        ) : (
-                          <span className="text-muted-foreground">Unclaimed</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-2.5 text-right">
-                        <button
-                          type="button"
-                          onClick={() => handleDelete(r.id)}
-                          disabled={deletingId === r.id}
-                          title="Delete code"
-                          aria-label={`Delete code ${r.code}`}
-                          className="text-muted-foreground hover:text-red-500 transition-colors disabled:opacity-30"
-                        >
-                          {deletingId === r.id ? (
-                            <span className="text-xs">Deleting…</span>
-                          ) : (
-                            <svg
-                              xmlns="http://www.w3.org/2000/svg"
-                              width="16"
-                              height="16"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              aria-hidden="true"
-                            >
-                              <path d="M3 6h18" />
-                              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                              <line x1="10" y1="11" x2="10" y2="17" />
-                              <line x1="14" y1="11" x2="14" y2="17" />
-                            </svg>
-                          )}
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </ScrollArea>
-
-            {totalPages > 1 && (
-              <div className="flex items-center justify-between">
-                <button
-                  onClick={() => goToPage(page - 1)}
-                  disabled={page === 0}
-                  aria-label="Previous page"
-                  className="flex h-7 w-7 items-center justify-center rounded-md border hover:bg-accent transition-colors disabled:opacity-30"
-                >
-                  <ChevronLeft size={14} />
-                </button>
-                <span className="text-sm text-muted-foreground tabular-nums">
-                  Page {page + 1} of {totalPages}
+          <div className="-mx-4 flex flex-col gap-0.5">
+            {rows.map((r, i) => (
+              <div
+                key={r.id}
+                className="group grid grid-cols-[minmax(0,9rem)_minmax(0,1fr)_auto] items-center gap-4 rounded-lg px-4 py-2.5 text-sm hover:bg-foreground/[0.03] sm:grid-cols-[minmax(0,9rem)_9rem_minmax(0,1fr)_auto] animate-fade-in-up"
+                style={staggerStyle(i)}
+              >
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={() => copyCode(r.code)}
+                      aria-label={`Copy code ${r.code}`}
+                      className="flex min-w-0 max-w-full items-center gap-1.5 justify-self-start font-mono font-medium tracking-wider hover:underline underline-offset-2"
+                    >
+                      <span className="min-w-0 truncate whitespace-nowrap">{r.code}</span>
+                      {copiedCode === r.code && <Check size={13} className="shrink-0 text-success" />}
+                    </button>
+                  </TooltipTrigger>
+                  {/* The full code, even when the cell cuts it off. */}
+                  <TooltipContent className="max-w-xs break-all font-mono">
+                    {r.code}
+                    <span className="ml-2 font-sans text-muted-foreground">{copiedCode === r.code ? "Copied" : "Click to copy"}</span>
+                  </TooltipContent>
+                </Tooltip>
+                <span className="hidden whitespace-nowrap text-muted-foreground sm:block">
+                  {new Date(r.created_at).toLocaleString("en-US", {
+                    month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+                  })}
                 </span>
-                <button
-                  onClick={() => goToPage(page + 1)}
-                  disabled={page + 1 >= totalPages}
-                  aria-label="Next page"
-                  className="flex h-7 w-7 items-center justify-center rounded-md border hover:bg-accent transition-colors disabled:opacity-30"
+                <span className="min-w-0 truncate">
+                  {r.claimedBy ? (
+                    <PersonName userId={r.claimedById} name={r.claimedBy} className="font-medium" />
+                  ) : (
+                    <span className="text-muted-foreground">Unclaimed</span>
+                  )}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => handleDelete(r.id)}
+                  aria-label={`Delete code ${r.code}`}
+                  className="h-7 w-7 text-muted-foreground opacity-0 hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
                 >
-                  <ChevronRight size={14} />
-                </button>
+                  <Trash2 size={14} />
+                </Button>
               </div>
-            )}
-          </>
+            ))}
+          </div>
         )}
-      </div>
+        {!loading && totalPages > 1 && <div className="flex justify-end">{pager}</div>}
+      </section>
     </div>
   );
 }

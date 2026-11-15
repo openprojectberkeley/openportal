@@ -25,10 +25,10 @@ export function ApplicationStats({ stats }: { stats: Stats | null }) {
       <div className="flex flex-col gap-2">
         <div className="grid grid-cols-3 gap-3">
           {[0, 1, 2].map((i) => (
-            <div key={i} className="h-[4.75rem] rounded-xl bg-muted animate-pulse" />
+            <div key={i} className="h-[4.75rem] rounded-xl bg-foreground/[0.09] animate-pulse" />
           ))}
         </div>
-        <div className="h-3 w-48 rounded bg-muted animate-pulse" />
+        <div className="h-3 w-48 rounded bg-foreground/[0.09] animate-pulse" />
       </div>
     );
   }
