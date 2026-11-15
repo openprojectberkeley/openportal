@@ -28,7 +28,7 @@ export function parseSocial(kind: Kind, raw: string | null | undefined): { handl
 
 // Brand marks drawn in currentColor (one colour, following the text: white in
 // dark mode, near-black in light).
-function GithubMark({ size = 14, className }: { size?: number; className?: string }) {
+export function GithubMark({ size = 14, className }: { size?: number; className?: string }) {
   return (
     <svg width={size} height={size} viewBox="0 0 256 248" fill="currentColor" className={className} aria-hidden>
       <g transform="matrix(2.666667,0,0,2.666667,-43.2,-45.333333)">

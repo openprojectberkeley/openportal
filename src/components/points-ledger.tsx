@@ -104,7 +104,7 @@ export function PointsLedger({
               placeholder="Search project, family, reason…"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              className="h-8 w-56 text-xs"
+              className="h-8 w-72 max-w-full text-xs md:text-xs"
             />
           </>
         )}

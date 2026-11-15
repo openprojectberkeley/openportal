@@ -4,6 +4,8 @@ export type Announcement = {
   color: string;
   starts_at: string;
   ends_at: string;
+  /** Optional moment the banner counts down to (0110). */
+  countdown_at?: string | null;
 };
 
 export type AnnouncementStatus = "scheduled" | "live" | "ended";
@@ -35,4 +37,17 @@ export function isoToDateInput(iso: string): string {
 
 export function formatAnnouncementDate(iso: string): string {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+// <input type="datetime-local"> value (YYYY-MM-DDTHH:mm) <-> ISO, local time.
+export function isoToDateTimeLocal(iso: string): string {
+  const d = new Date(iso);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/** Null for an empty or unparseable value (toISOString would throw). */
+export function dateTimeLocalToIso(v: string): string | null {
+  const d = new Date(v);
+  return v && !Number.isNaN(d.getTime()) ? d.toISOString() : null;
 }

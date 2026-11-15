@@ -196,6 +196,17 @@ export default {
           "0%, 100%": { transform: "translateY(0)" },
           "50%": { transform: "translateY(3px)" },
         },
+        // A Save button confirming: a quick bump, so a click reads as landed.
+        "save-pop": {
+          "0%": { transform: "scale(1)" },
+          "40%": { transform: "scale(1.08)" },
+          "100%": { transform: "scale(1)" },
+        },
+        // The edited card answering the save: a success ring that swells and fades.
+        "save-ring": {
+          "0%": { boxShadow: "0 0 0 0 hsl(var(--success) / 0.55)" },
+          "100%": { boxShadow: "0 0 0 8px hsl(var(--success) / 0)" },
+        },
         // A thin bar sliding across while a page of rows loads.
         indeterminate: {
           from: { transform: "translateX(-100%)" },
@@ -206,6 +217,8 @@ export default {
         "slow-flash": "slow-flash 1.8s ease-in-out infinite",
         "fade-in-up": "fade-in-up var(--dur-2) var(--ease-out-quart) both",
         pop: "pop var(--dur-2) var(--ease-out-quart) both",
+        "save-pop": "save-pop var(--dur-3) var(--ease-out-quart)",
+        "save-ring": "save-ring 600ms var(--ease-out-quart)",
         indeterminate: "indeterminate 1s var(--ease-in-out-cubic) infinite",
         nudge: "nudge 600ms var(--ease-in-out-cubic) 2",
         expand: "expand-rows var(--dur-3) var(--ease-out-quart) both",

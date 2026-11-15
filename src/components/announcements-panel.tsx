@@ -1,24 +1,27 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Pencil, PlusCircle, X } from "lucide-react";
+import { Pencil, PlusCircle, Timer, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { ColorPicker } from "@/components/color-picker";
+import { ColorPicker, TEXT_BG_PRESETS } from "@/components/color-picker";
 import { PanelListSkeleton } from "@/components/skeletons";
 import { AnnouncementBanner } from "@/components/announcement-banners";
 import { cn } from "@/lib/utils";
 import { staggerStyle } from "@/lib/motion";
-import { accentRing } from "@/lib/portal-color";
+import { accentRing, readableContrast } from "@/lib/portal-color";
 import { optimistic } from "@/lib/optimistic";
 import { InfoHint } from "@/components/ui/info-hint";
 import {
   announcementStatus,
   dateInputToEndIso,
+  dateTimeLocalToIso,
+  isoToDateTimeLocal,
   dateInputToStartIso,
   formatAnnouncementDate,
   isoToDateInput,
@@ -26,10 +29,13 @@ import {
   type AnnouncementStatus,
 } from "@/lib/announcements";
 import { Disclosure } from "@/components/ui/disclosure";
+import { toastSaved } from "@/lib/saved-toast";
 
-type Fields = { message: string; color: string; start: string; end: string };
+// `countdown` is a datetime-local value, used only while `timer` is on.
+type Fields = { message: string; color: string; start: string; end: string; timer: boolean; countdown: string };
 
-const DEFAULT_COLOR = "#3B82F6";
+// Blue-700: white text at 6.7:1 (the old blue-500 was 3.7:1).
+const DEFAULT_COLOR = "#1D4ED8";
 const HEX_RE = /^#[0-9A-Fa-f]{6}$/;
 
 const STATUS_STYLE: Record<AnnouncementStatus, string> = {
@@ -38,9 +44,13 @@ const STATUS_STYLE: Record<AnnouncementStatus, string> = {
   ended: "text-muted-foreground",
 };
 
+// The timer's default target: the end date's last minute, when the banner
+// itself comes down (matches dateInputToEndIso).
+const endOfDay = (date: string) => (date ? `${date}T23:59` : "");
+
 function emptyFields(): Fields {
   const today = isoToDateInput(new Date().toISOString());
-  return { message: "", color: DEFAULT_COLOR, start: today, end: today };
+  return { message: "", color: DEFAULT_COLOR, start: today, end: today, timer: false, countdown: "" };
 }
 
 export function AnnouncementsPanel({ onCountChange }: { onCountChange?: (n: number) => void }) {
@@ -56,7 +66,7 @@ export function AnnouncementsPanel({ onCountChange }: { onCountChange?: (n: numb
   const reload = useCallback(async () => {
     const { data, error: loadError } = await createClient()
       .from("announcements")
-      .select("id, message, color, starts_at, ends_at")
+      .select("id, message, color, starts_at, ends_at, countdown_at")
       .order("starts_at", { ascending: false });
     if (loadError) {
       setError(loadError.message);
@@ -86,6 +96,8 @@ export function AnnouncementsPanel({ onCountChange }: { onCountChange?: (n: numb
       color: a.color,
       start: isoToDateInput(a.starts_at),
       end: isoToDateInput(a.ends_at),
+      timer: !!a.countdown_at,
+      countdown: a.countdown_at ? isoToDateTimeLocal(a.countdown_at) : "",
     });
     setFormError(null);
     setDialogOpen(true);
@@ -97,6 +109,7 @@ export function AnnouncementsPanel({ onCountChange }: { onCountChange?: (n: numb
     if (!HEX_RE.test(fields.color)) return setFormError("Pick a color.");
     if (!fields.start || !fields.end) return setFormError("Start and end dates are required.");
     if (fields.end < fields.start) return setFormError("End date must be on or after the start date.");
+    if (fields.timer && !dateTimeLocalToIso(fields.countdown)) return setFormError("Pick when the timer counts down to.");
 
     setFormError(null);
     const supabase = createClient();
@@ -105,6 +118,7 @@ export function AnnouncementsPanel({ onCountChange }: { onCountChange?: (n: numb
       color: fields.color,
       starts_at: dateInputToStartIso(fields.start),
       ends_at: dateInputToEndIso(fields.end),
+      countdown_at: fields.timer ? dateTimeLocalToIso(fields.countdown) : null,
     };
     // Shown in the list and the dialog closed at once; the write follows. A
     // new one sits under a temp id until the reload brings the real row.
@@ -121,6 +135,7 @@ export function AnnouncementsPanel({ onCountChange }: { onCountChange?: (n: numb
             : [next, ...(prev ?? [])],
         );
         setDialogOpen(false);
+        toastSaved(editingId ? "Announcement saved" : "Announcement posted");
       },
       rollback: () => setItems(before),
       commit: () =>
@@ -194,6 +209,12 @@ export function AnnouncementsPanel({ onCountChange }: { onCountChange?: (n: numb
                 <span className="truncate text-sm font-medium">{a.message}</span>
                 <span className="text-xs text-muted-foreground">
                   {formatAnnouncementDate(a.starts_at)} – {formatAnnouncementDate(a.ends_at)}
+                  {a.countdown_at && (
+                    <span className="ml-2 inline-flex items-center gap-1">
+                      <Timer size={11} aria-hidden />
+                      {new Date(a.countdown_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+                    </span>
+                  )}
                 </span>
               </div>
               {/* Status as dot + word, not a pill. */}
@@ -244,7 +265,49 @@ export function AnnouncementsPanel({ onCountChange }: { onCountChange?: (n: numb
             </div>
             <div className="flex flex-col gap-1">
               <Label>Color</Label>
-              <ColorPicker required value={fields.color} onChange={(v) => setFields((f) => ({ ...f, color: v }))} />
+              <ColorPicker
+                required
+                presets={TEXT_BG_PRESETS}
+                showTextSample
+                value={fields.color}
+                onChange={(v) => setFields((f) => ({ ...f, color: v }))}
+              />
+              {/* The better of black/white always clears AA (~4.6:1), so AA
+                  can't flag anything. Mid-tones near the crossover (blue/red/
+                  violet 500s, 4.7–6:1) still read muddy; every preset is ≥ 6.4. */}
+              {HEX_RE.test(fields.color) && (readableContrast(fields.color) ?? 21) < 6 && (
+                <p className="text-xs text-warning">
+                  Text may be hard to read on this colour. Try a darker or lighter shade.
+                </p>
+              )}
+            </div>
+            {/* Optional live countdown, like the application-deadline band. */}
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between gap-3">
+                <Label htmlFor="announcement-timer" className="flex items-center gap-1.5">
+                  <Timer size={14} className="text-muted-foreground" aria-hidden /> Countdown timer
+                </Label>
+                <Switch
+                  id="announcement-timer"
+                  checked={fields.timer}
+                  onCheckedChange={(on) =>
+                    setFields((f) => ({ ...f, timer: on, countdown: on && !f.countdown ? endOfDay(f.end) : f.countdown }))
+                  }
+                />
+              </div>
+              {fields.timer && (
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="announcement-countdown" className="text-xs text-muted-foreground">
+                    Counts down to
+                  </Label>
+                  <Input
+                    id="announcement-countdown"
+                    type="datetime-local"
+                    value={fields.countdown}
+                    onChange={(e) => setFields((f) => ({ ...f, countdown: e.target.value }))}
+                  />
+                </div>
+              )}
             </div>
             {/* Dates default to today; open them to schedule ahead or run longer. */}
             <Disclosure
@@ -270,7 +333,14 @@ export function AnnouncementsPanel({ onCountChange }: { onCountChange?: (n: numb
                     type="date"
                     value={fields.end}
                     min={fields.start || undefined}
-                    onChange={(e) => setFields((f) => ({ ...f, end: e.target.value }))}
+                    onChange={(e) =>
+                      setFields((f) => ({
+                        ...f,
+                        end: e.target.value,
+                        // Follow the end date while the timer is still on its default.
+                        countdown: f.countdown === endOfDay(f.end) ? endOfDay(e.target.value) : f.countdown,
+                      }))
+                    }
                   />
                 </div>
               </div>
@@ -278,7 +348,11 @@ export function AnnouncementsPanel({ onCountChange }: { onCountChange?: (n: numb
             {fields.message.trim() && HEX_RE.test(fields.color) && (
               <div className="flex flex-col gap-1">
                 <Label>Preview</Label>
-                <AnnouncementBanner message={fields.message.trim()} color={fields.color} />
+                <AnnouncementBanner
+                  message={fields.message.trim()}
+                  color={fields.color}
+                  countdownAt={fields.timer ? dateTimeLocalToIso(fields.countdown) : null}
+                />
               </div>
             )}
             {formError && <p className="text-sm text-destructive">{formError}</p>}

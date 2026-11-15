@@ -26,6 +26,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { type Difficulty, DIFFICULTY_LABELS } from "@/lib/projects";
 import { ProjectIcon } from "@/components/project-icon";
 import { uploadResume, deleteResume, resumeSignedUrl } from "@/lib/resume-upload";
+import { TechAreaIcon } from "@/components/tech-area-icon";
 import { OTHER_CLASS_SUGGESTIONS, TECH_AREAS, TECH_CLASSES, TECH_CLASS_NA } from "@/lib/application-profile";
 import { MultiCombobox, joinList, splitList } from "@/components/ui/combobox";
 import { BackLink } from "@/components/back-link";
@@ -729,7 +730,10 @@ export default function ApplicationPage() {
           <div className="flex flex-col">
             {TECH_AREAS.map((a) => (
               <div key={a.key} className="flex items-center justify-between gap-3 py-2">
-                <span className="text-sm">{a.label}</span>
+                <span className="flex min-w-0 items-center gap-2 text-sm">
+                  <TechAreaIcon areaKey={a.key} className="shrink-0 text-muted-foreground" />
+                  {a.label}
+                </span>
                 <RatingScale value={techAreas[a.key] ?? 0} onChange={(v) => setRating(a.key, v)} />
               </div>
             ))}

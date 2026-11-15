@@ -17,6 +17,7 @@ import { optimistic } from "@/lib/optimistic";
 import { CommandPicker } from "@/components/ui/combobox";
 import { AdminCrown } from "@/components/admin-crown";
 import { useConfirm } from "@/components/ui/use-confirm";
+import { toastSaved } from "@/lib/saved-toast";
 
 export type PortalMeta = { name: string; icon: string; iconUrl: string | null; color: string; description: string };
 
@@ -115,6 +116,7 @@ export function PortalSettingsModal({ portalId, open, onOpenChange, initial, onM
           description: payload.description ?? "",
         });
         onOpenChange(false);
+        toastSaved("Portal saved");
       },
       rollback: () => broadcast(before),
       commit: () =>

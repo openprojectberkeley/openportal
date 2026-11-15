@@ -4,7 +4,17 @@ import { createClient } from "@/lib/supabase/client";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
-import { CalendarDays, LayoutDashboard, Trophy } from "lucide-react";
+import {
+  CalendarDays,
+  ClipboardCheck,
+  FileText,
+  Inbox,
+  LayoutDashboard,
+  LogOut,
+  ShieldCheck,
+  Trophy,
+  UserRound,
+} from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -16,7 +26,7 @@ import { useRoleSim } from "@/components/role-simulation-provider";
 import { NotificationBell } from "@/components/notification-bell";
 import { OpenPortalBrandIcon } from "@/components/open-portal-brand-icon";
 import { NavTabs, NavTabsFallback, type NavTabSpec } from "@/components/nav-tab";
-import { HeaderAnnouncements } from "@/components/announcement-banners";
+import { DockedHeaderBanners } from "@/components/header-banners";
 
 // The header's primary navigation. Adding a destination is one line here; the
 // hover underline and the active-route block come with NavTabs.
@@ -78,9 +88,9 @@ export function AppNavbar({ tabs = true }: { tabs?: boolean } = {}) {
 
   return (
     <>
-      {/* One sticky unit: the header bar plus any live announcement strip
-          hanging off its bottom edge, so they scroll as one. data-app-header
-          lets the overlay scrollbar start below both. */}
+      {/* One sticky unit: the header bar, with the docked banner strip
+          (header-banners.tsx) hanging absolutely off its bottom edge.
+          data-app-header lets the overlay scrollbar start below the bar. */}
       <div data-app-header className="sticky top-0 z-40 w-full">
       <nav className="glass-bar relative w-full flex justify-center h-16">
         {/* Bottom rule. The active tab's block and the hover underline sit on it. */}
@@ -125,25 +135,31 @@ export function AppNavbar({ tabs = true }: { tabs?: boolean } = {}) {
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuItem onSelect={() => setProfileOpen(true)}>
+                  <UserRound />
                   Profile
                 </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => router.push("/attendance")}>
+                  <ClipboardCheck />
                   Attendance
                 </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => router.push("/resume-review")}>
+                  <FileText />
                   Resume Review
                 </DropdownMenuItem>
                 {isBoardOrExec && (
                   <DropdownMenuItem onSelect={() => router.push("/manager")}>
+                    <Inbox />
                     Application Manager
                   </DropdownMenuItem>
                 )}
                 {isExec && (
                   <DropdownMenuItem onSelect={() => router.push("/admin")}>
+                    <ShieldCheck />
                     Admin
                   </DropdownMenuItem>
                 )}
                 <DropdownMenuItem onSelect={logout} className="text-red-500 focus:text-red-500">
+                  <LogOut />
                   Logout
                 </DropdownMenuItem>
               </DropdownMenuContent>
@@ -152,7 +168,7 @@ export function AppNavbar({ tabs = true }: { tabs?: boolean } = {}) {
           )}
         </div>
       </nav>
-      {tabs && <HeaderAnnouncements />}
+      {tabs && <DockedHeaderBanners />}
       </div>
       {member && (
         <ProfileDialog

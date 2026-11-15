@@ -11,6 +11,7 @@ import { isReturningMember, type MemberStatus } from "@/lib/member-status";
 import { cn } from "@/lib/utils";
 import { optimistic } from "@/lib/optimistic";
 import { Segmented } from "@/components/ui/segmented";
+import { toastSaved } from "@/lib/saved-toast";
 
 type HostOption = { user_id: string; name: string };
 
@@ -121,6 +122,7 @@ export function SheetCoffeeCell({
           coffeeHostIds: status === "none" || !hostId ? [] : [hostId],
         });
         setOpen(false);
+        toastSaved();
       },
       rollback: () => onSaved(before),
       commit: () =>

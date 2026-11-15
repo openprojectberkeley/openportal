@@ -26,6 +26,7 @@ import { staggerStyle } from "@/lib/motion";
 import { optimistic } from "@/lib/optimistic";
 import { CommandPicker } from "@/components/ui/combobox";
 import { Disclosure } from "@/components/ui/disclosure";
+import { toastSaved } from "@/lib/saved-toast";
 
 // `iconUrl` is a real public URL when editing (IconPicker uploads immediately,
 // keyed by the family id) and a local preview URL when creating — a new family
@@ -148,6 +149,7 @@ export function FamiliesPanel() {
       const patch = { ...payload, icon_url: fields.iconUrl || null };
       setSaving(false);
       setDialogOpen(false);
+      toastSaved("Family saved");
       void optimistic({
         label: "family",
         key: `family:${id}`,

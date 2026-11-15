@@ -89,6 +89,8 @@ export async function optimistic<R extends CommitResult>(opts: OptimisticOptions
 
   opts.rollback();
   opts.onFailed?.(message);
+  // Take back an instant "Saved" cue (saved-toast.ts) for this change.
+  toast.dismiss("saved");
   toast.error(`Couldn't save ${opts.label}`, {
     description: message,
     action: { label: "Retry", onClick: () => void optimistic(opts) },

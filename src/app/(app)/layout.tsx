@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import { AppNavbar } from "@/components/app-navbar";
-import { DeadlineCountdownBanner } from "@/components/deadline-countdown-banner";
+import { BannerRouteSync, HeaderBanners, HeaderBannersProvider } from "@/components/header-banners";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { PortalMetaProvider } from "@/components/portal-meta-provider";
 import { NotificationsProvider } from "@/components/notifications-provider";
@@ -16,13 +16,16 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <NotificationsProvider>
       <TimezoneSync />
       <main className="flex min-h-svh flex-col">
-        <AppNavbar />
-        {/* usePathname() inside the banner is dynamic; a Suspense boundary lets
-            the rest of the route prerender (fallback is null since the banner
-            renders nothing until mounted anyway). */}
-        <Suspense fallback={null}>
-          <DeadlineCountdownBanner />
-        </Suspense>
+        {/* Announcements + the deadline countdown: full size under the header,
+            docking as a slim strip on the header once scrolled past. */}
+        <HeaderBannersProvider>
+          <AppNavbar />
+          {/* usePathname() is dynamic; Suspense lets the rest prerender. */}
+          <Suspense fallback={null}>
+            <BannerRouteSync />
+          </Suspense>
+          <HeaderBanners />
+        </HeaderBannersProvider>
         {/* Content region fills the space between the sticky header and the
             footer. Fit pages use `flex-1` to fill/center it (no scroll); taller
             pages grow it and the window scrolls. */}

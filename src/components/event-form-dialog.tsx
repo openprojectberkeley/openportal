@@ -19,6 +19,7 @@ import {
 import { optimistic, sessionUserId } from "@/lib/optimistic";
 import { Combobox } from "@/components/ui/combobox";
 import { Disclosure } from "@/components/ui/disclosure";
+import { toastSaved } from "@/lib/saved-toast";
 
 // The shape a saved event round-trips as. Superset used by every caller: the
 // calendar needs the `portals(name, color)` embed for tinting; the attendance
@@ -226,7 +227,10 @@ export function EventFormFields({ event, portalId, portals, allowClubEvent, club
       void optimistic({
         label: "event",
         key: `event:${original.id}`,
-        apply: () => onSaved({ ...original, ...updatePayload } as EventFormValue),
+        apply: () => {
+          onSaved({ ...original, ...updatePayload } as EventFormValue);
+          toastSaved("Event saved");
+        },
         rollback: () => onSaved(original),
         commit: () =>
           supabase

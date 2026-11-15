@@ -12,6 +12,7 @@ import {
   hasUnsavedContent,
   normalizePortalContent,
 } from "@/lib/portal-content";
+import { toastSaved } from "@/lib/saved-toast";
 
 // SECURITY: react-markdown builds a React element tree, never an HTML string,
 // and raw HTML in the source is dropped because rehype-raw is deliberately
@@ -50,6 +51,10 @@ type Props = {
   // Lifts the saved value back to the page so portal.content stays the single
   // source of truth (mirrors PortalSettingsModal's onMetaSaved).
   onSaved: (content: string | null) => void;
+  // Edit mode is owned by the page: the Edit button lives in its header, and
+  // the header's link icons follow the same mode.
+  editing: boolean;
+  onEditingChange: (editing: boolean) => void;
 };
 
 // The portal's free-form markdown page — the main column of the portal detail
@@ -57,8 +62,7 @@ type Props = {
 // the markdown source. Deliberately a plain textarea rather than a rich-text
 // editor: the browser's native Ctrl+Z / Ctrl+Shift+Z is the entire undo story,
 // and nothing here intercepts those keys.
-export function PortalContent({ portalId, canEdit, content, onSaved }: Props) {
-  const [editing, setEditing] = useState(false);
+export function PortalContent({ portalId, canEdit, content, onSaved, editing, onEditingChange: setEditing }: Props) {
   const [draft, setDraft] = useState(content ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -69,7 +73,17 @@ export function PortalContent({ portalId, canEdit, content, onSaved }: Props) {
   // someone in an editor they can no longer save from.
   useEffect(() => {
     if (!canEdit) setEditing(false);
-  }, [canEdit]);
+  }, [canEdit, setEditing]);
+
+  // Entering edit mode (from the page header or "Add page") starts the draft
+  // from the saved page.
+  useEffect(() => {
+    if (!editing) return;
+    setDraft(content ?? "");
+    setError(null);
+    // Only on entering edit mode — not when content changes mid-edit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing]);
 
   // Auto-grow so the editor is as tall as the document and the *page* scrolls,
   // matching how the rendered view behaves. Runs before paint to avoid a jump.
@@ -80,11 +94,7 @@ export function PortalContent({ portalId, canEdit, content, onSaved }: Props) {
     el.style.height = `${el.scrollHeight}px`;
   }, [draft, editing]);
 
-  const startEdit = () => {
-    setDraft(content ?? "");
-    setError(null);
-    setEditing(true);
-  };
+  const startEdit = () => setEditing(true);
 
   const cancel = () => {
     if (hasUnsavedContent(draft, content)) {
@@ -125,6 +135,7 @@ export function PortalContent({ portalId, canEdit, content, onSaved }: Props) {
     }
     onSaved((data.content as string | null) ?? null);
     setEditing(false);
+    toastSaved("Page saved");
   };
 
   return (
@@ -153,15 +164,6 @@ export function PortalContent({ portalId, canEdit, content, onSaved }: Props) {
         </>
       ) : (
         <>
-          {canEdit && content && (
-            <button
-              onClick={startEdit}
-              className="flex items-center gap-1 self-end text-xs text-muted-foreground hover:text-foreground transition-colors"
-            >
-              <Pencil size={13} /> Edit
-            </button>
-          )}
-
           {content ? (
             // max-w-none overrides prose's own ~65ch cap so tables and code can
             // use the full column; the prose-* modifiers then put a readable

@@ -11,6 +11,7 @@ import { usePersonProfile, initials } from "@/components/person-profile-provider
 import { ScrollArea } from "@/components/overlay-scrollbar";
 import { BookedChatsSkeleton } from "@/components/skeletons";
 import { Button } from "@/components/ui/button";
+import { SaveButton, useSaveFlash } from "@/components/ui/save-button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Disclosure } from "@/components/ui/disclosure";
@@ -29,6 +30,7 @@ import { toast } from "sonner";
 import { Segmented } from "@/components/ui/segmented";
 import { InfoHint } from "@/components/ui/info-hint";
 import { BackLink } from "@/components/back-link";
+import { toastSaved } from "@/lib/saved-toast";
 
 const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
 
@@ -203,6 +205,7 @@ export default function ManagerCoffeeChatsPage() {
   // hour stay editable at the hour's (now frozen) duration.
   const [bookedSubSlots, setBookedSubSlots] = useState<Map<string, Duration>>(new Map());
   const [saving, setSaving] = useState(false);
+  const { saved: availabilitySaved, flash: flashAvailabilitySaved } = useSaveFlash();
   // Total coffee chats booked with this host in the current window (every row
   // with an applicant, not just upcoming ones) — drives the Saturday/close
   // warnings below.
@@ -463,6 +466,7 @@ export default function ManagerCoffeeChatsPage() {
         setRangeStart(start);
         setRangeEnd(end);
         setWeekOffset((w) => Math.min(weekCountFor(start, end) - 1, Math.max(0, w)));
+        toastSaved("Window saved");
       },
       rollback: () => {
         setRangeStart(prevStart);
@@ -731,6 +735,9 @@ export default function ManagerCoffeeChatsPage() {
       toast.error("Couldn't save availability", {
         description: "Some slots didn't save; the grid now shows what's actually saved.",
       });
+    } else {
+      // Confirm as soon as the writes land, before the reload below.
+      flashAvailabilitySaved();
     }
     // Re-fetch so the upcoming list (and, after a failure, the grid) reflects
     // the server's state.
@@ -963,7 +970,10 @@ export default function ManagerCoffeeChatsPage() {
     void optimistic({
       label: "default location",
       key: "coffee-default-location",
-      apply: () => setDefaultLocation(value ?? ""),
+      apply: () => {
+        setDefaultLocation(value ?? "");
+        toastSaved("Default location saved");
+      },
       rollback: () => setDefaultLocation(previous),
       commit: () => supabase.rpc("set_default_chat_location", { p_location: value }),
       onCommitted: () => void load(),
@@ -1200,9 +1210,7 @@ export default function ManagerCoffeeChatsPage() {
               onChange={(v) => setBrushDuration(Number(v) as Duration)}
               options={DURATIONS.map((d) => ({ value: String(d), label: `${d}m` }))}
             />
-            <Button size="sm" onClick={handleSave} disabled={!hasChanges || saving}>
-              Save
-            </Button>
+            <SaveButton size="sm" saved={availabilitySaved} onClick={handleSave} disabled={!hasChanges || saving} />
             <Popover onOpenChange={(o) => { if (o) setDraftDefaultLocation(defaultLocation); }}>
               <Tooltip>
                 <TooltipTrigger asChild>

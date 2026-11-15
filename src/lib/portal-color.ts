@@ -124,6 +124,15 @@ export function readableTextColor(color: string | null | undefined): string {
   return luminance > 0.179 ? "#000000" : "#ffffff";
 }
 
+// WCAG contrast ratio (1–21) between `color` and the text readableTextColor
+// picks for it. Null for missing/invalid colors. Never below ~4.58 (the
+// black/white crossover), so useful thresholds sit above the AA 4.5.
+export function readableContrast(color: string | null | undefined): number | null {
+  const l = accentLuminance(color);
+  if (l === null) return null;
+  return l > 0.179 ? (l + 0.05) / 0.05 : 1.05 / (l + 0.05);
+}
+
 // Text/icon color to lay over a card's hover swipe — the higher-contrast of
 // black/white against whichever accent backs the swipe. With no color the swipe
 // falls back to `DEFAULT_ACCENT` (a light gray in both themes), so this resolves

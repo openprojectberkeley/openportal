@@ -8,6 +8,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { SaveButton, useSaveFlash } from "@/components/ui/save-button";
+import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/overlay-scrollbar";
 import { optimistic } from "@/lib/optimistic";
 import { Segmented } from "@/components/ui/segmented";
@@ -439,6 +441,7 @@ function PeriodRow({
   const [status, setStatus] = useState<PeriodStatus>(period.status);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { saved, flash } = useSaveFlash();
 
   const dirty =
     name !== period.name ||
@@ -451,6 +454,10 @@ function PeriodRow({
     if (!name.trim()) { setError("Name is required."); return; }
     if (!start || !end) { setError("Pick a start and end."); return; }
     if (start >= end) { setError("Start must be before end."); return; }
+    // Confirm on click: the write is optimistic, and a refusal rolls back + toasts.
+    flash();
+    // Match what's stored, so the row isn't left dirty over trailing spaces.
+    setName(name.trim());
     // The fields already show the edit; the write runs behind and the list
     // refreshes once it lands. A refusal puts the period back and toasts.
     const supabase = createClient();
@@ -496,7 +503,12 @@ function PeriodRow({
   };
 
   return (
-    <div className="flex flex-col gap-2.5 rounded-lg surface p-3">
+    <div
+      className={cn(
+        "flex flex-col gap-2.5 rounded-lg surface p-3",
+        saved > 0 && "animate-save-ring motion-reduce:animate-none",
+      )}
+    >
       <div className="flex items-center gap-2">
         <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Period name" />
         <Button
@@ -535,9 +547,7 @@ function PeriodRow({
           Status
           <StatusPicker value={status} onChange={setStatus} />
         </div>
-        <Button size="sm" onClick={save} disabled={!dirty}>
-          Save
-        </Button>
+        <SaveButton saved={saved} onClick={save} disabled={!dirty} className="h-9" />
       </div>
       {error && <p className="text-sm text-destructive">{error}</p>}
       {canManageExtendedAccess && <ExtendedAccessSection periodId={period.id} allMembers={allMembers} />}
@@ -603,8 +613,9 @@ function NewPeriodForm({ onChanged }: { onChanged: () => void }) {
             className={DATETIME_CLASS}
           />
         </label>
-        <Button size="sm" onClick={create} disabled={saving}>
-          <Plus size={14} className="mr-1" />
+        {/* h-9 to sit level with the date fields (Button sm is h-8). */}
+        <Button onClick={create} disabled={saving}>
+          <Plus size={14} />
           {saving ? "Creating…" : "Create"}
         </Button>
       </div>

@@ -26,6 +26,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { InfoHint } from "@/components/ui/info-hint";
 import { PronounsPicker } from "@/components/pronouns-field";
+import { toastSaved } from "@/lib/saved-toast";
 
 // LinkedIn/GitHub are edited as handles behind a fixed prefix. Stored values
 // may be full URLs, "linkedin.com/in/…" or bare handles; anything that isn't
@@ -167,6 +168,7 @@ export function ProfileDialog({ open, onOpenChange, userId, onSave }: Props) {
       apply: () => {
         onSave?.(saved.fields, saved.avatarUrl);
         onOpenChange(false);
+        toastSaved("Profile saved");
       },
       rollback: () => {
         if (before) onSave?.(before.fields, before.avatarUrl);

@@ -20,6 +20,7 @@ import { ProjectQuestionsDialog } from "@/components/project-questions-dialog";
 import { type Difficulty, DIFFICULTIES, DIFFICULTY_LABELS } from "@/lib/projects";
 import { familyLabel, NO_FAMILY_LABEL, useFamilyOptions } from "@/lib/use-families";
 import { Disclosure } from "@/components/ui/disclosure";
+import { toastSaved } from "@/lib/saved-toast";
 
 type ProjectType = "studio" | "launch";
 
@@ -145,6 +146,7 @@ export function ProjectEditDialog({
     setSaving(false);
     onSaved?.();
     onOpenChange(false);
+    toastSaved("Project saved");
   };
 
   return (

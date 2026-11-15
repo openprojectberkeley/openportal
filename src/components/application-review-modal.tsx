@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 
 import { ProjectApplicationModalSkeleton } from "@/components/skeletons";
 import { resumeSignedUrl } from "@/lib/resume-upload";
+import { TechAreaIcon } from "@/components/tech-area-icon";
 import { techAreaLabel, techClassLabel } from "@/lib/application-profile";
 import { LateBadge } from "@/components/applicant-indicators";
 import { coffeeChatLabel, type CoffeeState } from "@/lib/coffee-chat-indicator";
@@ -529,7 +530,10 @@ function ApplicantDetails({
               <div className="grid grid-cols-1 gap-x-6 gap-y-1 sm:grid-cols-2">
                 {ratedAreas.map(([key, v]) => (
                   <div key={key} className="flex items-center justify-between gap-3 text-sm">
-                    <span className="min-w-0 truncate">{techAreaLabel(key)}</span>
+                    <span className="flex min-w-0 items-center gap-2">
+                      <TechAreaIcon areaKey={key} size={14} className="shrink-0 text-muted-foreground" />
+                      <span className="truncate">{techAreaLabel(key)}</span>
+                    </span>
                     <span className="flex shrink-0 items-center gap-0.5" aria-label={`${v} of 5`}>
                       {[1, 2, 3, 4, 5].map((n) => (
                         <span key={n} className={cn("h-1.5 w-1.5 rounded-full", n <= Number(v) ? "bg-foreground" : "bg-foreground/15")} />

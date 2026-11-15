@@ -32,6 +32,7 @@ import { Disclosure } from "@/components/ui/disclosure";
 import { Combobox } from "@/components/ui/combobox";
 import { InfoHint } from "@/components/ui/info-hint";
 import { useSemesters } from "@/lib/use-semesters";
+import { toastSaved } from "@/lib/saved-toast";
 
 type ProjectMember = { user_id: string; name: string; is_pm: boolean };
 
@@ -237,6 +238,7 @@ export function ProjectsPanel({ members }: Props) {
       const payload = { ...base, icon_url: fields.iconUrl || null };
       setSaving(false);
       setDialogOpen(false);
+      toastSaved("Project saved");
       mutate(
         "project",
         `project:${id}`,

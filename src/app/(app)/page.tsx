@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
-import { ShieldCheck, ArrowRight, Check, Coffee, FileText, Users, X } from "lucide-react";
+import { Inbox, ArrowRight, Check, Coffee, FileText, Users, X } from "lucide-react";
 import { useRoleSim } from "@/components/role-simulation-provider";
 import { initials, PersonName } from "@/components/person-profile-provider";
 import { PortalCard, type PortalSummary } from "@/components/portal-card";
@@ -319,29 +319,6 @@ export default function HomePage() {
   if (view === "dashboard") {
     return (
       <div className="w-full max-w-6xl mx-auto p-5 flex flex-col gap-6">
-        {/* Board/exec shortcut into the application manager, shown only while a
-            period is open; the profile menu carries it the rest of the year. A
-            secondary pill; on hover the foreground colour swipes in from the
-            left (like the nav tabs) and the text inverts. It doesn't scale:
-            the hovered element itself shouldn't move. */}
-        {isBoardOrExec && periodOpen && (
-          <Link
-            href="/manager"
-            aria-label="Application Manager"
-            className="group relative self-center inline-flex items-center gap-2 overflow-hidden rounded-full bg-secondary px-4 py-2 text-sm font-medium text-secondary-foreground shadow-sm"
-          >
-            {/* White accent wipes in from the left on hover. */}
-            <span
-              aria-hidden
-              className="absolute inset-0 z-0 origin-left scale-x-0 bg-foreground transition-transform duration-3 ease-out-quart group-hover:scale-x-100 motion-reduce:transition-none"
-            />
-            <span className="relative z-10 inline-flex items-center gap-2 whitespace-nowrap transition-colors duration-3 ease-out-quart group-hover:text-background">
-              <ShieldCheck size={18} className="shrink-0" />
-              Application Manager
-            </span>
-          </Link>
-        )}
-
         {/* Greeting and the resume pointer share one row; the card wraps under
             the greeting on narrow screens. */}
         <div className="flex flex-wrap items-end justify-between gap-4">
@@ -350,7 +327,27 @@ export default function HomePage() {
           ) : (
             <Skeleton className="h-10 w-56" />
           )}
-          <ResumeReviewPanel compact className="w-full animate-fade-in-up sm:w-72" />
+          <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row">
+            {/* Board/exec shortcut into the application manager, shown only
+                while a period is open; the profile menu carries it the rest of
+                the year. Same card as the resume pointer beside it. */}
+            {isBoardOrExec && periodOpen && (
+              <Link
+                href="/manager"
+                className="group flex w-full items-center gap-3 rounded-xl surface rim-card px-3 py-2.5 transition-colors hover:bg-foreground/[0.07] animate-fade-in-up sm:w-72"
+              >
+                <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-foreground/5 text-foreground/70">
+                  <Inbox size={15} />
+                </span>
+                <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <span className="truncate text-sm font-semibold">Application Manager</span>
+                  <span className="truncate text-xs text-muted-foreground">Recruiting is open</span>
+                </div>
+                <ArrowRight size={16} className="flex-shrink-0 text-muted-foreground/50 transition-[transform,color] duration-instant ease-out-quart group-hover:translate-x-0.5 group-hover:text-muted-foreground" />
+              </Link>
+            )}
+            <ResumeReviewPanel compact className="w-full animate-fade-in-up sm:w-72" />
+          </div>
         </div>
 
         {pendingChats && pendingChats.length > 0 && (

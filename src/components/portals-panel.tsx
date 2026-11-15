@@ -21,6 +21,7 @@ import { useConfirm } from "@/components/ui/use-confirm";
 import { staggerStyle } from "@/lib/motion";
 import { optimistic } from "@/lib/optimistic";
 import { CommandPicker } from "@/components/ui/combobox";
+import { toastSaved } from "@/lib/saved-toast";
 
 export type MemberOption = { user_id: string; name: string };
 export type RoleOption = { id: string; role_name: string };
@@ -146,6 +147,7 @@ export function PortalsPanel({ members, allRoles }: Props) {
       color: fields.color.trim() || null,
     };
     setDialogOpen(false);
+    toastSaved("Portal saved");
     mutate(
       "portal",
       `portal:${id}`,

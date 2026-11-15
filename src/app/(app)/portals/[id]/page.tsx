@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useParams, useRouter } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
-import { ClipboardCheck, Cog, Users } from "lucide-react";
+import { ClipboardCheck, Cog, Pencil, Users } from "lucide-react";
 import { useRoleSim } from "@/components/role-simulation-provider";
 import { CalendarPanel } from "@/components/calendar-panel";
 import { PortalDetailSkeleton } from "@/components/skeletons";
@@ -15,6 +15,8 @@ import { PortalAttendanceModal } from "@/components/portal-attendance-modal";
 import { PortalDefaultIcon } from "@/components/portal-default-icon";
 import { PortalContent } from "@/components/portal-content";
 import { BackLink } from "@/components/back-link";
+import { PortalLinks, type PortalLinkValues } from "@/components/portal-links";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 type Portal = {
   id: string;
@@ -24,7 +26,7 @@ type Portal = {
   icon_url: string | null;
   color: string | null;
   content: string | null;
-};
+} & PortalLinkValues;
 
 // useParams() reads uncached route data; cacheComponents requires it to sit
 // inside a Suspense boundary so the page shell can still prerender.
@@ -47,6 +49,7 @@ function PortalDetail() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [membersOpen, setMembersOpen] = useState(false);
   const [attendanceOpen, setAttendanceOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
 
   useEffect(() => {
     const supabase = createClient();
@@ -62,7 +65,7 @@ function PortalDetail() {
       // row means no access.
       const { data: portalRow } = await supabase
         .from("portals")
-        .select("id, name, description, icon, icon_url, color, content")
+        .select("id, name, description, icon, icon_url, color, content, github_url, notion_url, slack_url, linear_url")
         .eq("id", portalId)
         .maybeSingle();
 
@@ -113,38 +116,62 @@ function PortalDetail() {
     <div className="w-full max-w-6xl mx-auto p-5 flex flex-col gap-6">
       <BackLink href="/" label="Dashboard" />
 
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3 min-w-0">
-          {portal.icon_url ? (
-            <span
-              className="flex h-9 w-9 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg bg-foreground/5"
-              style={{ backgroundColor: portal.color || undefined }}
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={portal.icon_url} alt="" className="h-full w-full object-cover" />
-            </span>
-          ) : portal.icon ? (
-            <span className="text-2xl leading-none">{portal.icon}</span>
-          ) : (
-            <PortalDefaultIcon
-              className="h-8 w-8 flex-shrink-0 text-foreground"
-              style={{ color: portal.color || undefined }}
+      <div className="flex flex-col gap-2">
+        {/* Edit sits on its own row above the actions, right-aligned. The row
+            keeps its height while editing so the header doesn't jump. */}
+        {isAdmin && (
+          <div className="flex h-5 justify-end">
+            {!editing && (
+              <button
+                onClick={() => setEditing(true)}
+                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <Pencil size={13} /> Edit
+              </button>
+            )}
+          </div>
+        )}
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            {portal.icon_url ? (
+              <span
+                className="flex h-9 w-9 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg bg-foreground/5"
+                style={{ backgroundColor: portal.color || undefined }}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={portal.icon_url} alt="" className="h-full w-full object-cover" />
+              </span>
+            ) : portal.icon ? (
+              <span className="text-2xl leading-none">{portal.icon}</span>
+            ) : (
+              <PortalDefaultIcon
+                className="h-8 w-8 flex-shrink-0 text-foreground"
+                style={{ color: portal.color || undefined }}
+              />
+            )}
+            {/* truncate clips at the padding box, so leading + pb leave room for
+                descenders (g, j, y) instead of shaving them off. */}
+            <h1 className="text-4xl font-bold tracking-tight truncate leading-[1.2] pb-1 -mb-1">{portal.name}</h1>
+            <PortalLinks
+              portalId={portal.id}
+              links={{
+                github_url: portal.github_url,
+                notion_url: portal.notion_url,
+                slack_url: portal.slack_url,
+                linear_url: portal.linear_url,
+              }}
+              editing={isAdmin && editing}
+              onSaved={(links) => setPortal((p) => (p ? { ...p, ...links } : p))}
             />
-          )}
-          <h1 className="text-4xl font-bold tracking-tight truncate">{portal.name}</h1>
-        </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
-          <Button variant="outline" size="sm" onClick={() => setMembersOpen(true)}>
-            <Users size={15} /> View members
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setAttendanceOpen(true)}>
-            <ClipboardCheck size={15} /> Attendance
-          </Button>
-          {isAdmin && (
-            <Button variant="outline" size="sm" onClick={() => setSettingsOpen(true)}>
-              <Cog size={15} /> Settings
-            </Button>
-          )}
+          </div>
+          {/* Labels drop below md; the icon and tooltip carry them. */}
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <HeaderAction icon={<Users size={15} />} label="View members" onClick={() => setMembersOpen(true)} />
+            <HeaderAction icon={<ClipboardCheck size={15} />} label="Attendance" onClick={() => setAttendanceOpen(true)} />
+            {isAdmin && (
+              <HeaderAction icon={<Cog size={15} />} label="Settings" onClick={() => setSettingsOpen(true)} />
+            )}
+          </div>
         </div>
       </div>
 
@@ -158,6 +185,8 @@ function PortalDetail() {
             canEdit={isAdmin}
             content={portal.content}
             onSaved={(content) => setPortal((p) => (p ? { ...p, content } : p))}
+            editing={editing}
+            onEditingChange={setEditing}
           />
         </div>
 
@@ -198,5 +227,20 @@ function PortalDetail() {
         canManage={isAdmin}
       />
     </div>
+  );
+}
+
+function HeaderAction({ icon, label, onClick }: { icon: React.ReactNode; label: string; onClick: () => void }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button variant="outline" size="sm" onClick={onClick} aria-label={label}>
+          {icon}
+          <span className="hidden md:inline">{label}</span>
+        </Button>
+      </TooltipTrigger>
+      {/* Only needed once the label is hidden. */}
+      <TooltipContent className="md:hidden">{label}</TooltipContent>
+    </Tooltip>
   );
 }
