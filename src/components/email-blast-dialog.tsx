@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { selectInChunks } from "@/lib/postgrest-chunk";
+import { TabStrip } from "@/components/ui/tab-strip";
 
 // One recipient, whichever cohort they came from. `email` may be null — those
 // rows are counted in the intro line but never make it into the copyable list.
@@ -137,7 +138,7 @@ function RecipientsBlock({ emails }: { emails: string[] }) {
 
 function ScriptBlock({ script }: { script: string }) {
   return (
-    <div className="flex flex-col gap-3 border-t pt-4">
+    <div className="flex flex-col gap-3 pt-2">
       <div className="flex items-center justify-between gap-3">
         <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Email script
@@ -351,21 +352,12 @@ export function EmailBlastDialog({
             script and send it yourself.
           </p>
 
-          <div className="flex gap-1 border-b">
-            {TABS.map((t) => (
-              <button
-                key={t.key}
-                onClick={() => setTab(t.key)}
-                className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
-                  tab === t.key
-                    ? "border-foreground text-foreground"
-                    : "border-transparent text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
+          <TabStrip
+            aria-label="Recipient group"
+            value={tab}
+            onChange={setTab}
+            tabs={TABS.map((t) => ({ value: t.key, label: t.label }))}
+          />
 
           {tab === "members" && (
             <TabBody

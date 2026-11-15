@@ -1,21 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, Minus, Plus } from "lucide-react";
+import { Minus, Plus } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { POINT_PRESETS, POINTS_MAX, REASON_MAX, type Semester } from "@/lib/scoring";
 import type { FamilyProject } from "@/lib/use-families";
 import type { Family } from "@/lib/scoring";
+import { Combobox } from "@/components/ui/combobox";
 
 function todayLocal(): string {
   const d = new Date();
@@ -143,29 +138,20 @@ export function AwardPointsDialog({
         <div className="flex flex-col gap-4">
           <div className="flex flex-col gap-1">
             <Label>Project</Label>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button className="flex items-center justify-between gap-2 border rounded-md px-3 py-2 text-sm bg-background hover:bg-accent transition-colors">
-                  <span className="truncate">{selected ? selected.name : "Pick a project"}</span>
-                  <ChevronDown size={14} className="text-muted-foreground flex-shrink-0" />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent
-                align="start"
-                className="w-[--radix-dropdown-menu-trigger-width] max-h-72 overflow-y-auto"
-              >
-                {ordered.map((p) => (
-                  <DropdownMenuItem key={p.id} onSelect={() => setProjectId(p.id)}>
-                    <span className="flex-1 truncate">{p.name}</span>
-                    <span className="ml-2 text-xs text-muted-foreground">
-                      {familyName(p.family_id) ?? "No family"}
-                    </span>
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
+            {/* Search by project or family name. */}
+            <Combobox
+              aria-label="Project"
+              value={selected?.id ?? null}
+              onChange={setProjectId}
+              options={ordered.map((p) => {
+                const family = familyName(p.family_id);
+                return { value: p.id, label: p.name, hint: family ?? "No family", keywords: family ? [family] : [] };
+              })}
+              placeholder="Pick a project"
+              searchPlaceholder="Project or family…"
+            />
             {selected && selected.family_id === null && (
-              <p className="text-xs text-amber-600 dark:text-amber-500">
+              <p className="text-xs text-warning">
                 This project has no family, so these points won&apos;t count on the scoreboard.
               </p>
             )}
@@ -221,7 +207,7 @@ export function AwardPointsDialog({
           <div className="flex flex-col gap-1">
             <div className="flex items-center justify-between">
               <Label htmlFor="award-reason">Reason</Label>
-              <span className="text-[10px] text-muted-foreground/60">
+              <span className="text-[10px] tabular-nums text-muted-foreground/60">
                 {reason.length}/{REASON_MAX}
               </span>
             </div>

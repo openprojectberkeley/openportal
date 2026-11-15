@@ -5,7 +5,7 @@ import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { AlertTriangle, GripVertical, RotateCcw, Star, UserPlus, X } from "lucide-react";
 import { PersonName } from "@/components/person-profile-provider";
-import { Badge } from "@/components/ui/badge";
+
 import type { ReviewStatus } from "@/components/application-review-modal";
 import { CoffeeChatIndicator, InfosessionIndicator, LateBadge, NoApplicationIndicator, WishlistedByIndicator, type CoffeeState, type WishlistProject } from "@/components/applicant-indicators";
 import { rankLabel } from "@/lib/application-rank";
@@ -50,19 +50,18 @@ function invalidReasons(app: AppRow): string[] {
   return issues;
 }
 
+// Status as a dot + coloured word, not a filled pill (DESIGN.md: badges are
+// for controls and the one fact that matters most; this card already carries
+// its project accent).
 function StatusBadge({ status }: { status: ReviewStatus }) {
-  // text-white on both: Badge's default variant sets text-primary-foreground,
-  // which is near-black in dark mode and vanishes on these fills. Rejected uses
-  // an explicit red rather than variant="destructive" because --destructive is
-  // only 30.6% lightness in dark mode — dark enough that even white text on it
-  // reads as muddy next to the green.
-  if (status === "accepted") {
-    return <Badge className="shrink-0 bg-green-600 text-white hover:bg-green-600">Accepted</Badge>;
-  }
-  if (status === "rejected") {
-    return <Badge className="shrink-0 bg-red-500 text-white hover:bg-red-500">Rejected</Badge>;
-  }
-  return null;
+  if (status !== "accepted" && status !== "rejected") return null;
+  const accepted = status === "accepted";
+  return (
+    <span className={`inline-flex shrink-0 items-center gap-1 text-[11px] font-medium ${accepted ? "text-success" : "text-destructive"}`}>
+      <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${accepted ? "bg-success" : "bg-destructive"}`} />
+      {accepted ? "Accepted" : "Rejected"}
+    </span>
+  );
 }
 
 // Small badge marking an applicant who was a member in a previous semester.
@@ -413,17 +412,16 @@ function cardClassName(
     opts?.compact ? "gap-1.5 px-2.5 py-1" : "gap-2 px-3 py-2",
     // A tinted card drops both the normal and the invalid-red background rather
     // than fighting them: "accent" is painted by an inline style, "staged"
-    // by the card token below. --card is only a shade off --background in light
-    // mode and identical in dark, so the outline is what actually carries the
-    // signal -- it has to stay visible in both themes.
+    // by a fill below. Edges are hairline-faint now, so the fill (not the
+    // outline) carries the "staged" signal in both themes.
     opts?.tint === "accent"
       ? ""
       : opts?.tint === "staged"
-      ? "bg-card border-foreground/30"
+      ? "bg-foreground/[0.07] border-foreground/15"
       : opts?.tint === "claimed"
       ? "bg-muted/40 border-muted-foreground/20"
       : invalid
-      ? "border-red-200 bg-red-50/60 dark:border-red-900/50 dark:bg-red-950/20"
+      ? "border-destructive/20 bg-destructive/[0.06]"
       : "bg-background",
     // Only while the sweep plays -- a longer transition-colors on every card
     // would make ordinary hover feedback sluggish.

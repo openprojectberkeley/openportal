@@ -22,6 +22,10 @@ import { FamilyMark } from "@/components/family-mark";
 import { Chip, ChipList } from "@/components/ui/chip";
 import { useFamilies, type FamilyProject } from "@/lib/use-families";
 import { countLabel, type Family } from "@/lib/scoring";
+import { staggerStyle } from "@/lib/motion";
+import { optimistic } from "@/lib/optimistic";
+import { CommandPicker } from "@/components/ui/combobox";
+import { Disclosure } from "@/components/ui/disclosure";
 
 // `iconUrl` is a real public URL when editing (IconPicker uploads immediately,
 // keyed by the family id) and a local preview URL when creating — a new family
@@ -45,7 +49,32 @@ const EMPTY_FIELDS: FamilyFields = {
 };
 
 export function FamiliesPanel() {
-  const { families, projectsByFamily, unassigned, error, reload } = useFamilies();
+  const { families: loadedFamilies, projects, error, reload } = useFamilies();
+  // Optimistic overlays on top of the hook's data: edits show at once and are
+  // dropped once the reload brings the server's version (or on failure, which
+  // reverts them). See lib/optimistic.ts for the pattern.
+  const [familyOverride, setFamilyOverride] = useState<Record<string, string | null>>({});
+  const [familyPatch, setFamilyPatch] = useState<Record<string, Partial<Family>>>({});
+  const [deletedIds, setDeletedIds] = useState<Set<string>>(new Set());
+  const families =
+    loadedFamilies === null
+      ? null
+      : loadedFamilies.filter((f) => !deletedIds.has(f.id)).map((f) => ({ ...f, ...familyPatch[f.id] }));
+  const projectsByFamily = new Map<string, FamilyProject[]>();
+  const unassigned: FamilyProject[] = [];
+  for (const p of projects ?? []) {
+    const familyId = p.id in familyOverride ? familyOverride[p.id] : p.family_id;
+    const placed = { ...p, family_id: familyId };
+    if (familyId === null) unassigned.push(placed);
+    else projectsByFamily.set(familyId, [...(projectsByFamily.get(familyId) ?? []), placed]);
+  }
+  const dropKey = <T,>(set: React.Dispatch<React.SetStateAction<Record<string, T>>>, key: string) =>
+    set((prev) => {
+      if (!(key in prev)) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -114,16 +143,30 @@ export function FamiliesPanel() {
 
     if (editingId) {
       // Edit uses immediate icon upload, so fields.iconUrl is already a real URL.
-      const { error: updateError } = await supabase
-        .from("families")
-        .update({
-          ...payload,
-          icon_url: fields.iconUrl || null,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", editingId);
-      if (updateError) return fail(updateError);
+      // Optimistic: the row updates and the dialog closes at once.
+      const id = editingId;
+      const patch = { ...payload, icon_url: fields.iconUrl || null };
+      setSaving(false);
+      setDialogOpen(false);
+      void optimistic({
+        label: "family",
+        key: `family:${id}`,
+        apply: () => setFamilyPatch((prev) => ({ ...prev, [id]: patch as Partial<Family> })),
+        rollback: () => dropKey(setFamilyPatch, id),
+        commit: () =>
+          supabase
+            .from("families")
+            .update({ ...patch, updated_at: new Date().toISOString() })
+            .eq("id", id)
+            .select("id"),
+        requireRows: true,
+        onCommitted: () => void reload().then(() => dropKey(setFamilyPatch, id)),
+        onFailed: (message) =>
+          setRowError(/23505|duplicate|unique/i.test(message) ? "A family with that name already exists." : message),
+      });
+      return;
     } else {
+      // Create still waits: the deferred icon upload needs the new row's id.
       const { data: created, error: insertError } = await supabase
         .from("families")
         .insert(payload)
@@ -154,33 +197,49 @@ export function FamiliesPanel() {
     await reload();
   };
 
-  const deleteFamily = async (f: Family) => {
+  const deleteFamily = (f: Family) => {
     const supabase = createClient();
-    const { error: deleteError } = await supabase.from("families").delete().eq("id", f.id);
-    if (deleteError) {
-      setRowError(deleteError.message);
-      return false;
-    }
     setRowError(null);
-    await reload();
+    const restore = () =>
+      setDeletedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(f.id);
+        return next;
+      });
+    void optimistic({
+      label: "family deletion",
+      key: `family:${f.id}`,
+      apply: () => setDeletedIds((prev) => new Set(prev).add(f.id)),
+      rollback: restore,
+      commit: () => supabase.from("families").delete().eq("id", f.id).select("id"),
+      requireRows: true,
+      onCommitted: () => void reload(),
+      onFailed: (message) => setRowError(message),
+    });
     return true;
   };
 
   // Assignment is a plain `projects` update; the 0103 trigger rejects it for
   // anyone who isn't exec, so there is no RPC to go through.
-  const setProjectFamily = async (projectId: string, familyId: string | null) => {
+  // The chip moves at once; the overlay clears once the reload agrees.
+  const setProjectFamily = (projectId: string, familyId: string | null) => {
     const supabase = createClient();
-    const { error: updateError } = await supabase
-      .from("projects")
-      .update({ family_id: familyId, updated_at: new Date().toISOString() })
-      .eq("id", projectId);
-
-    if (updateError) {
-      setRowError(updateError.message);
-      return;
-    }
     setRowError(null);
-    await reload();
+    void optimistic({
+      label: "family assignment",
+      key: `project-family:${projectId}`,
+      apply: () => setFamilyOverride((prev) => ({ ...prev, [projectId]: familyId })),
+      rollback: () => dropKey(setFamilyOverride, projectId),
+      commit: () =>
+        supabase
+          .from("projects")
+          .update({ family_id: familyId, updated_at: new Date().toISOString() })
+          .eq("id", projectId)
+          .select("id"),
+      requireRows: true,
+      onCommitted: () => void reload().then(() => dropKey(setFamilyOverride, projectId)),
+      onFailed: (message) => setRowError(message),
+    });
   };
 
   if (families === null) return <PanelListSkeleton rows={4} />;
@@ -200,9 +259,9 @@ export function FamiliesPanel() {
     const mine = projectsByFamily.get(f.id) ?? [];
 
     return (
-      <div key={f.id} className={i > 0 ? "border-t" : ""}>
+      <div key={f.id} className="rounded-lg transition-colors hover:bg-foreground/[0.03] animate-fade-in-up" style={staggerStyle(i)}>
         <div
-          className="flex items-center gap-3 px-4 py-3 hover:bg-accent/50 cursor-pointer"
+          className="flex items-center gap-3 rounded-lg px-4 py-3 cursor-pointer"
           onClick={() => toggle(f.id)}
         >
           <span className="text-muted-foreground flex-shrink-0">
@@ -210,7 +269,7 @@ export function FamiliesPanel() {
           </span>
           <FamilyMark icon={f.icon} iconUrl={f.icon_url} color={f.color} name={f.name} size={24} />
           <div className="flex items-center gap-2 flex-1 min-w-0 flex-wrap">
-            <span className="font-medium text-sm">{f.name}</span>
+            <span className="min-w-0 truncate font-medium text-sm">{f.name}</span>
             <span className="text-xs text-muted-foreground">{countLabel(mine.length, "project")}</span>
           </div>
           <button
@@ -235,32 +294,31 @@ export function FamiliesPanel() {
           </button>
         </div>
         {isOpen && (
-          <div className="px-11 pb-4 pt-3 flex flex-col gap-3 bg-accent/20">
-            {f.description && <p className="text-sm text-muted-foreground">{f.description}</p>}
+          <div className="grid animate-expand">
+          <div className="min-h-0 overflow-hidden">
+          <div className="mx-1 mb-1 flex flex-col gap-3 rounded-lg surface px-10 pb-4 pt-3">
+            {f.description && <p className="break-words text-sm text-muted-foreground">{f.description}</p>}
             <div className="flex flex-col gap-1.5">
               <div className="flex items-center gap-2">
                 <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
                   Projects
                 </span>
                 <span className="text-[10px] font-normal text-muted-foreground/60">({mine.length})</span>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button
-                      className="text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40"
-                      disabled={unassigned.length === 0}
-                      aria-label={`Add a project to ${f.name}`}
-                    >
-                      <PlusCircle size={14} />
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="max-h-72 overflow-y-auto">
-                    {unassigned.map((p) => (
-                      <DropdownMenuItem key={p.id} onSelect={() => setProjectFamily(p.id, f.id)}>
-                        {p.name}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                <CommandPicker
+                  options={unassigned.map((p) => ({ value: p.id, label: p.name }))}
+                  onSelect={(id) => setProjectFamily(id, f.id)}
+                  searchPlaceholder="Search projects…"
+                  emptyText="No unassigned projects"
+                  contentClassName="w-64"
+                >
+                  <button
+                    className="text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40"
+                    disabled={unassigned.length === 0}
+                    aria-label={`Add a project to ${f.name}`}
+                  >
+                    <PlusCircle size={14} />
+                  </button>
+                </CommandPicker>
               </div>
               {/* A family's score is the live sum over its current projects, so a
                   reassignment carries that project's whole history across. */}
@@ -271,6 +329,8 @@ export function FamiliesPanel() {
                 {mine.map((p) => renderProjectChip(p, f.name))}
               </ChipList>
             </div>
+          </div>
+          </div>
           </div>
         )}
       </div>
@@ -290,7 +350,7 @@ export function FamiliesPanel() {
 
       {(error || rowError) && <p className="text-sm text-red-500">{error ?? rowError}</p>}
 
-      <div className="border rounded-lg overflow-hidden">
+      <div className="flex flex-col gap-0.5">
         {families.map((f, i) => renderRow(f, i))}
         {families.length === 0 && (
           <div className="px-4 py-8 text-center text-sm text-muted-foreground">
@@ -351,36 +411,41 @@ export function FamiliesPanel() {
                 onChange={(e) => setFields((f) => ({ ...f, name: e.target.value }))}
               />
             </div>
-            <div className="flex gap-3">
-              <div className="flex flex-col gap-1 w-28">
-                <Label>Icon</Label>
-                <IconPicker
-                  value={fields.icon}
-                  onChange={(v) => setFields((f) => ({ ...f, icon: v }))}
-                  imageUrl={fields.iconUrl}
-                  onImageChange={(url) => setFields((f) => ({ ...f, iconUrl: url }))}
-                  onImageBlob={setIconBlob}
-                  familyId={editingId ?? undefined}
-                />
+            <Disclosure
+              key={editingId ?? "new"}
+              hint="icon, colour, description"
+              defaultOpen={!!(fields.icon || fields.iconUrl || fields.color || fields.description)}
+            >
+              <div className="flex gap-3">
+                <div className="flex flex-col gap-1 w-28">
+                  <Label>Icon</Label>
+                  <IconPicker
+                    value={fields.icon}
+                    onChange={(v) => setFields((f) => ({ ...f, icon: v }))}
+                    imageUrl={fields.iconUrl}
+                    onImageChange={(url) => setFields((f) => ({ ...f, iconUrl: url }))}
+                    onImageBlob={setIconBlob}
+                    familyId={editingId ?? undefined}
+                  />
+                </div>
+                <div className="flex flex-col gap-1 flex-1">
+                  <Label>Accent color</Label>
+                  <ColorPicker
+                    value={fields.color}
+                    onChange={(v) => setFields((f) => ({ ...f, color: v }))}
+                  />
+                </div>
               </div>
-              <div className="flex flex-col gap-1 flex-1">
-                <Label>Accent color</Label>
-                <ColorPicker
-                  value={fields.color}
-                  onChange={(v) => setFields((f) => ({ ...f, color: v }))}
-                />
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="family-description">Description</Label>
+                <Input
+                  id="family-description"
+                  value={fields.description}
+                  onChange={(e) => setFields((f) => ({ ...f, description: e.target.value }))}
+                                />
               </div>
-            </div>
-            <div className="flex flex-col gap-1">
-              <Label htmlFor="family-description">Description</Label>
-              <Input
-                id="family-description"
-                value={fields.description}
-                onChange={(e) => setFields((f) => ({ ...f, description: e.target.value }))}
-                placeholder="Optional"
-              />
-            </div>
-            {formError && <p className="text-sm text-red-500">{formError}</p>}
+            </Disclosure>
+            {formError && <p className="text-sm text-destructive">{formError}</p>}
             <div className="flex justify-end gap-2">
               <Button variant="outline" size="sm" onClick={() => setDialogOpen(false)} disabled={saving}>
                 Cancel

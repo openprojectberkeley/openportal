@@ -1,10 +1,10 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getEffectiveRoleNames } from "@/lib/roles-server";
 import { canReviewAllProjects } from "@/lib/roles";
 import { DraftRoundsManager } from "@/components/draft-rounds-manager";
+import { BackLink } from "@/components/back-link";
 
 export default async function DraftPage() {
   await connection();
@@ -19,8 +19,8 @@ export default async function DraftPage() {
   return (
     <div className="w-full max-w-6xl mx-auto p-6 flex flex-col gap-10">
       <div className="flex flex-col gap-1">
-        <Link href="/manager/applications?project=all" className="text-sm text-muted-foreground hover:text-foreground">← Back</Link>
-        <h1 className="text-2xl font-bold">Draft</h1>
+        <BackLink href="/manager/applications?project=all" label="Applications" />
+        <h1 className="text-2xl font-bold tracking-tight">Draft</h1>
         <p className="text-sm text-muted-foreground">
           Set up draft rounds: the order projects pick in and how many applicants each may take, per round.
         </p>

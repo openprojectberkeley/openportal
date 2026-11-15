@@ -100,7 +100,7 @@ export function ProjectAnalyticsBody({ periodId }: { periodId: string | null }) 
   return (
     <>
       {rows === null ? (
-        <div className="h-64 rounded-xl border bg-muted animate-pulse" />
+        <div className="h-64 rounded-xl bg-muted animate-pulse" />
       ) : (
         <div className="flex flex-col gap-5">
           <p className="text-xs text-muted-foreground">
@@ -113,7 +113,7 @@ export function ProjectAnalyticsBody({ periodId }: { periodId: string | null }) 
           ) : (
             <>
               {/* Demand vs capacity */}
-              <div className="flex flex-col gap-2 rounded-xl border bg-background p-4">
+              <div className="flex flex-col gap-2 rounded-xl surface p-4">
                 <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   Demand vs capacity
                 </h3>

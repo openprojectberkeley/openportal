@@ -1,7 +1,8 @@
 import { flushSync } from "react-dom";
+import { GLIDE } from "@/lib/motion";
 
-const EASING = "cubic-bezier(0.16, 1, 0.3, 1)";
-const DURATION_MS = 320;
+const EASING = GLIDE.easing;
+const DURATION_MS = GLIDE.duration;
 
 export function prefersReducedMotion(): boolean {
   if (typeof window === "undefined" || !window.matchMedia) return false;

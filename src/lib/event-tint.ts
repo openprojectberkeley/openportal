@@ -2,7 +2,7 @@
 // chip and the week block so the same event reads the same colour everywhere.
 
 import { CATEGORY_META, type EventCategory } from "@/lib/event-category";
-import { accentTint } from "@/lib/portal-color";
+import { accentTint, visibleMarkColor } from "@/lib/portal-color";
 
 /**
  * The colour that identifies an event.
@@ -31,12 +31,21 @@ export function eventTintColor(category: EventCategory, portalColor: string | nu
  *
  * This stays a FLAT colour: the event card splices the value into a
  * `linear-gradient(...)` of its own for the hover wash, so a gradient here
- * would nest. The sheen every event surface wears on top is accentSheen(),
- * which is colour-agnostic and layers over this as a backgroundImage.
+ * would nest. Its edge is accentRing() (lib/portal-color.ts) as a box-shadow.
  */
 export function eventSurface(category: EventCategory, portalColor: string | null, pct = 18): string {
   const tint = eventTintColor(category, portalColor);
   return tint
     ? accentTint(tint, pct)!
     : "color-mix(in srgb, hsl(var(--accent)) 40%, hsl(var(--background)))";
+}
+
+/**
+ * Colour of an event's left bar (the event style everywhere: no card, just
+ * the info beside a rounded colour bar). Falls back to the "general" slate for
+ * club-wide general events, which have no portal colour, and lifts very dark
+ * accents so the bar still shows on the dark page.
+ */
+export function eventBarColor(category: EventCategory, portalColor: string | null): string {
+  return visibleMarkColor(eventTintColor(category, portalColor) ?? CATEGORY_META.general.color);
 }

@@ -49,7 +49,7 @@ export function Chip({
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-full bg-foreground/10 py-1 text-xs font-medium text-foreground",
+        "inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-full bg-foreground/10 py-1 text-xs font-medium text-foreground",
         onRemove ? "pl-2.5 pr-1.5" : "px-2.5",
         className,
       )}
@@ -61,7 +61,7 @@ export function Chip({
           type="button"
           onClick={onRemove}
           aria-label={removeLabel}
-          className="flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-red-500"
+          className="flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-destructive"
         >
           <X size={12} />
         </button>

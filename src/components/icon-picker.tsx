@@ -12,16 +12,26 @@ import { PORTAL_ICON_SIZE } from "@/lib/avatar-image";
 import { uploadPortalIcon } from "@/lib/portal-icon-upload";
 import { uploadProjectIcon } from "@/lib/project-icon-upload";
 import { uploadFamilyIcon } from "@/lib/family-icon-upload";
+import { toast } from "sonner";
 
 // Curated emoji set for portal icons — no emoji library needed.
-const PORTAL_EMOJIS = [
-  "🚪", "📁", "💻", "🎨", "📣", "🤝", "📊", "🧠",
-  "🚀", "⚙️", "📅", "🎯", "🏆", "💡", "🔧", "📌",
-  "🌐", "📝", "🎓", "⭐", "🔬", "🎤", "📷", "🎬",
-  "🏗️", "🧩", "📚", "✏️", "🗂️", "💬", "🔔", "🧭",
-  "🏅", "🎟️", "🍕", "☕", "🎵", "🕹️", "🌱", "🔒",
-  "📈", "🛠️", "🧪", "🗓️", "🤖", "🧵", "🏦", "🎉",
+// Each emoji with the words someone would type to find it (the grid has a
+// search box). Order is the grid's order.
+const PORTAL_EMOJI_KEYWORDS: [string, string][] = [
+  ["🚪", "door portal entry"], ["📁", "folder files"], ["💻", "laptop computer code dev"], ["🎨", "art design palette"],
+  ["📣", "megaphone announce marketing"], ["🤝", "handshake partner client"], ["📊", "chart bar analytics data"], ["🧠", "brain ai ml mind"],
+  ["🚀", "rocket launch startup"], ["⚙️", "gear settings engineering"], ["📅", "calendar date events"], ["🎯", "target goal"],
+  ["🏆", "trophy win award"], ["💡", "idea bulb light"], ["🔧", "wrench tool fix"], ["📌", "pin"],
+  ["🌐", "globe web internet world"], ["📝", "memo notes write"], ["🎓", "graduation school education"], ["⭐", "star favorite"],
+  ["🔬", "microscope science research"], ["🎤", "microphone talk speaker"], ["📷", "camera photo"], ["🎬", "film movie video"],
+  ["🏗️", "construction build"], ["🧩", "puzzle piece game"], ["📚", "books library study"], ["✏️", "pencil edit"],
+  ["🗂️", "dividers organize"], ["💬", "chat message speech"], ["🔔", "bell notification"], ["🧭", "compass navigation map"],
+  ["🏅", "medal sports"], ["🎟️", "ticket event"], ["🍕", "pizza food social"], ["☕", "coffee chat cafe"],
+  ["🎵", "music note"], ["🕹️", "joystick game gaming"], ["🌱", "seedling plant growth green"], ["🔒", "lock security private"],
+  ["📈", "chart up growth finance"], ["🛠️", "tools hammer build"], ["🧪", "test tube lab chemistry"], ["🗓️", "calendar schedule"],
+  ["🤖", "robot ai bot"], ["🧵", "thread sewing fashion"], ["🏦", "bank finance money"], ["🎉", "party celebrate"],
 ];
+const PORTAL_EMOJIS = PORTAL_EMOJI_KEYWORDS.map(([e]) => e);
 
 type Props = {
   value: string;
@@ -64,6 +74,14 @@ export function IconPicker({
   familyId,
 }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [emojiQuery, setEmojiQuery] = useState("");
+  const eq = emojiQuery.trim().toLowerCase();
+  const shownEmojis = eq
+    ? PORTAL_EMOJI_KEYWORDS.filter(([, words]) => words.includes(eq)).map(([e]) => e)
+    : PORTAL_EMOJIS;
+  // Shown while an immediate-mode upload is in flight (see handleCropped).
+  const [localPreview, setLocalPreview] = useState<string | null>(null);
+  const shownImage = localPreview ?? imageUrl;
   const [adding, setAdding] = useState(false);
   const [custom, setCustom] = useState("");
   const [customError, setCustomError] = useState<string | null>(null);
@@ -132,14 +150,25 @@ export function IconPicker({
 
   const handleCropped = async (jpeg: Blob) => {
     if (familyId || projectId || portalId) {
-      // Immediate mode: upload now and hand back the public URL.
+      // Immediate mode: preview the crop at once and close; upload behind it
+      // and hand back the public URL when it lands (never the blob: URL).
+      const local = URL.createObjectURL(jpeg);
+      setLocalPreview(local);
       const supabase = createClient();
-      const url = familyId
-        ? await uploadFamilyIcon(supabase, familyId, jpeg)
+      const upload = familyId
+        ? uploadFamilyIcon(supabase, familyId, jpeg)
         : projectId
-          ? await uploadProjectIcon(supabase, projectId, jpeg)
-          : await uploadPortalIcon(supabase, portalId!, jpeg);
-      onImageChange?.(url);
+          ? uploadProjectIcon(supabase, projectId, jpeg)
+          : uploadPortalIcon(supabase, portalId!, jpeg);
+      upload
+        .then((url) => onImageChange?.(url))
+        .catch((err: unknown) =>
+          toast.error("Couldn't upload icon", { description: err instanceof Error ? err.message : undefined }),
+        )
+        .finally(() => {
+          setLocalPreview(null);
+          URL.revokeObjectURL(local);
+        });
     } else {
       // Deferred mode: preview locally now, upload after the row is created.
       onImageChange?.(URL.createObjectURL(jpeg));
@@ -163,9 +192,9 @@ export function IconPicker({
             onClick={() => setMenuOpen((o) => !o)}
             className="h-9 w-full flex items-center justify-between gap-1 rounded-md border border-input bg-transparent px-2 text-sm shadow-sm hover:bg-accent transition-colors focus:outline-none focus:ring-1 focus:ring-ring"
           >
-            {imageUrl ? (
+            {shownImage ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={imageUrl} alt="Portal icon" className="h-6 w-6 rounded object-cover" />
+              <img src={shownImage} alt="Portal icon" className="h-6 w-6 rounded object-cover" />
             ) : value ? (
               <span className="text-lg leading-none">{value}</span>
             ) : (
@@ -175,7 +204,7 @@ export function IconPicker({
           </button>
 
           {menuOpen && (
-            <div className="absolute top-full left-0 mt-1 z-50 w-64 rounded-md border bg-popover p-2 shadow-lg">
+            <div className="absolute top-full left-0 mt-1 z-50 w-64 rounded-md border glass p-2 shadow-overlay">
               {adding ? (
                 <div className="flex flex-col gap-2">
                   <span className="text-xs font-medium text-muted-foreground">Custom emoji</span>
@@ -192,7 +221,7 @@ export function IconPicker({
                     />
                     <Button type="button" size="sm" onClick={addCustom}>Add</Button>
                   </div>
-                  {customError && <p className="text-xs text-red-500">{customError}</p>}
+                  {customError && <p className="text-xs text-destructive">{customError}</p>}
                   <button
                     type="button"
                     onClick={() => { setAdding(false); setCustom(""); }}
@@ -203,8 +232,19 @@ export function IconPicker({
                 </div>
               ) : (
                 <>
+                  <Input
+                    autoFocus
+                    value={emojiQuery}
+                    onChange={(e) => setEmojiQuery(e.target.value)}
+                    placeholder="Search icons (rocket, chart…)"
+                    aria-label="Search icons"
+                    className="mb-2 h-8 text-xs"
+                  />
+                  {shownEmojis.length === 0 && (
+                    <p className="py-3 text-center text-xs text-muted-foreground">No icons match. Paste your own below.</p>
+                  )}
                   <div className="grid grid-cols-8 gap-1">
-                    {PORTAL_EMOJIS.map((emoji) => (
+                    {shownEmojis.map((emoji) => (
                       <button
                         key={emoji}
                         type="button"
@@ -238,7 +278,7 @@ export function IconPicker({
                     <ImageUp size={13} /> {imageUrl ? "Replace image" : "Upload image"}
                   </button>
                   {error && <p className="mt-1 text-xs text-red-500">{error}</p>}
-                  <div className="mt-2 flex justify-end border-t pt-2">
+                  <div className="mt-2 flex justify-end pt-1">
                     <button
                       type="button"
                       onClick={() => pick("")}

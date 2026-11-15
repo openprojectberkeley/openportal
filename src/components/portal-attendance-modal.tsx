@@ -11,10 +11,13 @@ import { PersonName } from "@/components/person-profile-provider";
 import { MemberRosterSkeleton } from "@/components/skeletons";
 import {
   EventFormFields,
-  deletePortalEvent,
+  deletePortalEventOptimistic,
   EVENT_FORM_SELECT,
   type EventFormValue,
 } from "@/components/event-form-dialog";
+import { optimistic, sessionUserId } from "@/lib/optimistic";
+import { Combobox } from "@/components/ui/combobox";
+import { Segmented } from "@/components/ui/segmented";
 
 type Status = "present" | "absent" | "excused";
 
@@ -49,8 +52,6 @@ type Props = {
   fullAccess?: boolean;
 };
 
-const selectClass =
-  "h-8 min-w-0 rounded-md border border-input bg-transparent px-2 text-xs text-foreground shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
 
 const STATUSES: { value: Status; label: string; short: string }[] = [
   { value: "present", label: "Present", short: "P" },
@@ -64,11 +65,22 @@ const STATUS_LABEL: Record<Status, string> = {
   excused: "Excused",
 };
 
-// Selected/legend colors: present = green, absent = red, excused = yellow.
-const STATUS_COLOR: Record<Status, string> = {
-  present: "bg-green-500 text-white hover:bg-green-600",
-  absent: "bg-red-500 text-white hover:bg-red-600",
-  excused: "bg-yellow-400 text-black hover:bg-yellow-500",
+// Status colours from the theme's status tokens: the sliding pill's fill and
+// its text while selected (portal-attendance cells), plus the legend swatches.
+const STATUS_FILL: Record<Status, string> = {
+  present: "bg-success",
+  absent: "bg-destructive",
+  excused: "bg-warning",
+};
+const STATUS_ON_FILL: Record<Status, string> = {
+  present: "text-success-foreground",
+  absent: "text-destructive-foreground",
+  excused: "text-warning-foreground",
+};
+const STATUS_TEXT: Record<Status, string> = {
+  present: "text-success",
+  absent: "text-destructive",
+  excused: "text-warning",
 };
 
 const fullName = (first: string | null | undefined, last: string | null | undefined) =>
@@ -454,38 +466,41 @@ export function PortalAttendanceModal({
         return next;
       });
 
-    // Optimistic: update the map first, roll back on error.
-    setAttendance((m) => {
-      const next = { ...m };
-      if (clearing) delete next[k];
-      else next[k] = status;
-      return next;
-    });
-
     const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { rollback(); return; }
-
-    const { error } = clearing
-      ? await supabase
-          .from("portal_event_attendance")
-          .delete()
-          .eq("event_id", eventId)
-          .eq("user_id", userId)
-      : await supabase
-          .from("portal_event_attendance")
-          .upsert(
-            {
-              event_id: eventId,
-              user_id: userId,
-              status,
-              recorded_by: user.id,
-              updated_at: new Date().toISOString(),
-            },
-            { onConflict: "event_id,user_id" },
-          );
-
-    if (error) rollback();
+    void optimistic({
+      label: "attendance",
+      key: `attendance:${k}`,
+      apply: () =>
+        setAttendance((m) => {
+          const next = { ...m };
+          if (clearing) delete next[k];
+          else next[k] = status;
+          return next;
+        }),
+      rollback,
+      commit: async () => {
+        const recorder = await sessionUserId(supabase);
+        if (!recorder) return { error: { message: "You're signed out." } };
+        return clearing
+          ? supabase
+              .from("portal_event_attendance")
+              .delete()
+              .eq("event_id", eventId)
+              .eq("user_id", userId)
+          : supabase
+              .from("portal_event_attendance")
+              .upsert(
+                {
+                  event_id: eventId,
+                  user_id: userId,
+                  status,
+                  recorded_by: recorder,
+                  updated_at: new Date().toISOString(),
+                },
+                { onConflict: "event_id,user_id" },
+              );
+      },
+    });
   };
 
   const openCreate = () => {
@@ -510,17 +525,26 @@ export function PortalAttendanceModal({
     });
   };
 
-  const deleteEvent = async (ev: EventFormValue) => {
+  const deleteEvent = (ev: EventFormValue) => {
     if (!window.confirm(`Delete "${ev.title}"? This can't be undone.`)) return;
-    const ok = await deletePortalEvent(ev.id);
-    if (!ok) return;
-    setEvents((prev) => prev.filter((e) => e.id !== ev.id));
-    // Drop this event's attendance cells from the map.
-    setAttendance((prev) => {
-      const next: AttendanceMap = {};
-      for (const [k, v] of Object.entries(prev)) if (!k.startsWith(`${ev.id}:`)) next[k] = v;
-      return next;
-    });
+    const eventsBefore = events;
+    const attendanceBefore = attendance;
+    deletePortalEventOptimistic(
+      ev.id,
+      () => {
+        setEvents((prev) => prev.filter((e) => e.id !== ev.id));
+        // Drop this event's attendance cells from the map.
+        setAttendance((prev) => {
+          const next: AttendanceMap = {};
+          for (const [k, v] of Object.entries(prev)) if (!k.startsWith(`${ev.id}:`)) next[k] = v;
+          return next;
+        });
+      },
+      () => {
+        setEvents(eventsBefore);
+        setAttendance(attendanceBefore);
+      },
+    );
   };
 
   return (
@@ -641,7 +665,7 @@ export function PortalAttendanceModal({
               {STATUSES.map((s) => (
                 <span key={s.value} className="flex items-center gap-1">
                   <span
-                    className={`inline-flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-medium ${STATUS_COLOR[s.value]}`}
+                    className={`inline-flex h-4 w-4 items-center justify-center rounded-sm text-[10px] font-medium ${STATUS_FILL[s.value]} ${STATUS_ON_FILL[s.value]}`}
                   >
                     {s.short}
                   </span>
@@ -650,19 +674,18 @@ export function PortalAttendanceModal({
               ))}
               <div className="ml-auto flex items-center gap-2">
                 {!portalId && projects.length > 0 && (
-                  <select
+                  <Combobox
                     aria-label="Filter by project"
-                    className={selectClass}
+                    className="h-8 min-h-8 w-auto min-w-44 py-1 text-xs"
+                    contentClassName="w-60"
                     value={projectFilter}
-                    onChange={(e) => setProjectFilter(e.target.value)}
-                  >
-                    <option value="">{fullAccess ? "All members" : "All my projects"}</option>
-                    {projects.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={setProjectFilter}
+                    options={[
+                      { value: "", label: fullAccess ? "All members" : "All my projects" },
+                      ...projects.map((p) => ({ value: p.id, label: p.name })),
+                    ]}
+                    searchPlaceholder="Search projects…"
+                  />
                 )}
                 {canImport && (
                   <Button size="sm" variant="outline" className="h-8" onClick={openImport}>
@@ -725,24 +748,31 @@ export function PortalAttendanceModal({
                           const current = attendance[key(ev.id, r.user_id)];
                           return (
                             <td key={ev.id} className="border-b border-r px-2 py-1.5">
-                              <div className="flex items-center gap-1">
-                                {STATUSES.map((s) => (
-                                  <button
-                                    key={s.value}
-                                    onClick={() => setStatus(ev.id, r.user_id, s.value)}
-                                    aria-pressed={current === s.value}
-                                    title={s.label}
-                                    aria-label={`${s.label} — ${r.name}`}
-                                    className={`h-6 w-6 flex-shrink-0 rounded-full text-xs font-medium transition-colors ${
-                                      current === s.value
-                                        ? STATUS_COLOR[s.value]
-                                        : "bg-foreground/10 text-foreground hover:bg-foreground/20"
-                                    }`}
-                                  >
-                                    {s.short}
-                                  </button>
-                                ))}
-                              </div>
+                              {/* One P/A/E control per cell: the pill slides
+                                  to the status in its colour; clicking the
+                                  selected one clears it. Arrows only move focus
+                                  here (Space/Enter selects) so moving across
+                                  the grid never writes attendance. */}
+                              <Segmented
+                                aria-label={`Attendance — ${r.name}, ${ev.title}`}
+                                size="xs"
+                                shape="soft"
+                                allowDeselect
+                                selectOnFocus={false}
+                                value={(current ?? "") as Status}
+                                onChange={(v) => {
+                                  // setStatus clears when given the current status.
+                                  const next = (v || current) as Status | undefined;
+                                  if (next) setStatus(ev.id, r.user_id, next);
+                                }}
+                                options={STATUSES.map((s) => ({
+                                  value: s.value,
+                                  label: s.short,
+                                  ariaLabel: s.label,
+                                  indicatorClassName: STATUS_FILL[s.value],
+                                  selectedTextClassName: STATUS_ON_FILL[s.value],
+                                }))}
+                              />
                             </td>
                           );
                         })}
@@ -771,9 +801,8 @@ export function PortalAttendanceModal({
                       <span className="text-xs text-muted-foreground">{formatEventDate(ev.start_time)}</span>
                     </div>
                     {status ? (
-                      <span
-                        className={`px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0 ${STATUS_COLOR[status]}`}
-                      >
+                      <span className={`inline-flex shrink-0 items-center gap-1.5 text-xs font-medium ${STATUS_TEXT[status]}`}>
+                        <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${STATUS_FILL[status]}`} />
                         {STATUS_LABEL[status]}
                       </span>
                     ) : (

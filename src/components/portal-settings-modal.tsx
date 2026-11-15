@@ -4,12 +4,6 @@ import { createClient } from "@/lib/supabase/client";
 import { useEffect, useState } from "react";
 import { PlusCircle, X, Pencil } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -19,6 +13,10 @@ import { ProjectEditDialog } from "@/components/project-edit-dialog";
 import { PortalDefaultIcon } from "@/components/portal-default-icon";
 import { usePortalMeta } from "@/components/portal-meta-provider";
 import { useRoleSim } from "@/components/role-simulation-provider";
+import { optimistic } from "@/lib/optimistic";
+import { CommandPicker } from "@/components/ui/combobox";
+import { AdminCrown } from "@/components/admin-crown";
+import { useConfirm } from "@/components/ui/use-confirm";
 
 export type PortalMeta = { name: string; icon: string; iconUrl: string | null; color: string; description: string };
 
@@ -39,7 +37,6 @@ export function PortalSettingsModal({ portalId, open, onOpenChange, initial, onM
   const { setPortalMeta } = usePortalMeta();
   const { isExec } = useRoleSim();
   const [meta, setMeta] = useState<PortalMeta>(initial);
-  const [savingMeta, setSavingMeta] = useState(false);
   const [metaError, setMetaError] = useState<string | null>(null);
 
   const [roles, setRoles] = useState<PortalRoleRow[]>([]);
@@ -80,10 +77,9 @@ export function PortalSettingsModal({ portalId, open, onOpenChange, initial, onM
     });
   }, [open, portalId]);
 
-  const saveMeta = async () => {
+  const saveMeta = () => {
     const name = meta.name.trim();
     if (!name) { setMetaError("Name is required."); return; }
-    setSavingMeta(true);
     setMetaError(null);
     const supabase = createClient();
     const payload = {
@@ -93,29 +89,42 @@ export function PortalSettingsModal({ portalId, open, onOpenChange, initial, onM
       color: meta.color.trim() || null,
       description: meta.description.trim() || null,
     };
-    const { error } = await supabase
-      .from("portals")
-      .update({ ...payload, updated_at: new Date().toISOString() })
-      .eq("id", portalId);
-    if (error) { setMetaError(error.message); setSavingMeta(false); return; }
-    setSavingMeta(false);
-    // Broadcast to every consumer (cards, calendar tints, header) for an
-    // instant, reload-free update.
-    setPortalMeta(portalId, {
-      name,
-      icon: payload.icon,
-      icon_url: payload.icon_url,
-      color: payload.color,
-      description: payload.description,
+    const before = initial;
+    // Broadcast to every consumer (cards, calendar tints, header) and close at
+    // once; the write confirms in the background. If it's refused, the old
+    // meta is broadcast back and a toast offers Retry.
+    const broadcast = (m: PortalMeta) => {
+      setPortalMeta(portalId, {
+        name: m.name,
+        icon: m.icon || null,
+        icon_url: m.iconUrl,
+        color: m.color || null,
+        description: m.description || null,
+      });
+      onMetaSaved(m);
+    };
+    void optimistic({
+      label: "portal settings",
+      key: `portal-meta:${portalId}`,
+      apply: () => {
+        broadcast({
+          name,
+          icon: payload.icon ?? "",
+          iconUrl: payload.icon_url,
+          color: payload.color ?? "",
+          description: payload.description ?? "",
+        });
+        onOpenChange(false);
+      },
+      rollback: () => broadcast(before),
+      commit: () =>
+        supabase
+          .from("portals")
+          .update({ ...payload, updated_at: new Date().toISOString() })
+          .eq("id", portalId)
+          .select("id"),
+      requireRows: true,
     });
-    onMetaSaved({
-      name,
-      icon: payload.icon ?? "",
-      iconUrl: payload.icon_url,
-      color: payload.color ?? "",
-      description: payload.description ?? "",
-    });
-    onOpenChange(false);
   };
 
   // After editing the linked project, re-read its projected fields and push them
@@ -147,36 +156,63 @@ export function PortalSettingsModal({ portalId, open, onOpenChange, initial, onM
     onMetaSaved(next);
   };
 
-  const addRole = async (role: RoleOption) => {
+  const addRole = (role: RoleOption) => {
     const supabase = createClient();
-    const { error } = await supabase
-      .from("portal_roles")
-      .insert({ portal_id: portalId, role_id: role.id, is_admin: false });
-    if (error) return;
-    setRoles((prev) => [...prev, { role_id: role.id, role_name: role.role_name, is_admin: false }]);
+    void optimistic({
+      label: "role",
+      key: `portal-role:${role.id}`,
+      apply: () =>
+        setRoles((prev) =>
+          prev.some((r) => r.role_id === role.id)
+            ? prev
+            : [...prev, { role_id: role.id, role_name: role.role_name, is_admin: false }],
+        ),
+      rollback: () => setRoles((prev) => prev.filter((r) => r.role_id !== role.id)),
+      commit: () => supabase.from("portal_roles").insert({ portal_id: portalId, role_id: role.id, is_admin: false }),
+    });
   };
 
-  const removeRole = async (role: PortalRoleRow) => {
+  const removeRole = (role: PortalRoleRow) => {
     const supabase = createClient();
-    const { error } = await supabase
-      .from("portal_roles")
-      .delete()
-      .eq("portal_id", portalId)
-      .eq("role_id", role.role_id);
-    if (error) return;
-    setRoles((prev) => prev.filter((r) => r.role_id !== role.role_id));
+    void optimistic({
+      label: "role",
+      key: `portal-role:${role.role_id}`,
+      apply: () => setRoles((prev) => prev.filter((r) => r.role_id !== role.role_id)),
+      rollback: () => setRoles((prev) => (prev.some((r) => r.role_id === role.role_id) ? prev : [...prev, role])),
+      commit: () =>
+        supabase.from("portal_roles").delete().eq("portal_id", portalId).eq("role_id", role.role_id).select("role_id"),
+      requireRows: true,
+    });
   };
 
-  const toggleRoleAdmin = async (role: PortalRoleRow) => {
+  const { ask, dialog: confirmDialog } = useConfirm();
+  const toggleRoleAdmin = (role: PortalRoleRow) => {
     const next = !role.is_admin;
+    ask({
+      title: next ? `Make everyone with ${role.role_name} a portal admin?` : `Make ${role.role_name} regular members?`,
+      confirmLabel: next ? "Make admins" : "Make members",
+      destructive: !next,
+      run: () => applyToggleRoleAdmin(role, next),
+    });
+  };
+  const applyToggleRoleAdmin = (role: PortalRoleRow, next: boolean) => {
     const supabase = createClient();
-    const { error } = await supabase
-      .from("portal_roles")
-      .update({ is_admin: next })
-      .eq("portal_id", portalId)
-      .eq("role_id", role.role_id);
-    if (error) return;
-    setRoles((prev) => prev.map((r) => (r.role_id === role.role_id ? { ...r, is_admin: next } : r)));
+    const setAdmin = (v: boolean) =>
+      setRoles((prev) => prev.map((r) => (r.role_id === role.role_id ? { ...r, is_admin: v } : r)));
+    void optimistic({
+      label: "role access",
+      key: `portal-role-admin:${role.role_id}`,
+      apply: () => setAdmin(next),
+      rollback: () => setAdmin(!next),
+      commit: () =>
+        supabase
+          .from("portal_roles")
+          .update({ is_admin: next })
+          .eq("portal_id", portalId)
+          .eq("role_id", role.role_id)
+          .select("role_id"),
+      requireRows: true,
+    });
   };
 
   const available = allRoles.filter((r) => !roles.some((pr) => pr.role_id === r.id));
@@ -184,6 +220,7 @@ export function PortalSettingsModal({ portalId, open, onOpenChange, initial, onM
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
+        {confirmDialog}
         <DialogHeader>
           <DialogTitle>Portal settings</DialogTitle>
         </DialogHeader>
@@ -256,8 +293,8 @@ export function PortalSettingsModal({ portalId, open, onOpenChange, initial, onM
               </div>
               {metaError && <p className="text-sm text-red-500">{metaError}</p>}
               <div className="flex justify-end">
-                <Button size="sm" onClick={saveMeta} disabled={savingMeta}>
-                  {savingMeta ? "Saving..." : "Save details"}
+                <Button size="sm" onClick={saveMeta}>
+                  Save details
                 </Button>
               </div>
             </div>
@@ -265,7 +302,7 @@ export function PortalSettingsModal({ portalId, open, onOpenChange, initial, onM
 
           {/* Linked project — edit the underlying project's details. */}
           {projectId && (
-            <div className="flex items-center justify-between gap-2 border-t pt-4">
+            <div className="flex items-center justify-between gap-2 pt-2">
               <div className="flex flex-col">
                 <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Project</span>
                 <span className="text-xs text-muted-foreground">Edit the linked project&apos;s details.</span>
@@ -277,29 +314,25 @@ export function PortalSettingsModal({ portalId, open, onOpenChange, initial, onM
           )}
 
           {/* Auto-assign role mappings */}
-          <div className="flex flex-col gap-1.5 border-t pt-4">
+          <div className="flex flex-col gap-1.5 pt-2">
             <div className="flex items-center gap-2">
               <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
                 Auto-assign roles
               </span>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button className="text-muted-foreground hover:text-foreground transition-colors">
-                    <PlusCircle size={14} />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="max-h-64">
-                  {available.length === 0 ? (
-                    <div className="px-2 py-1.5 text-xs text-muted-foreground">No roles left to add</div>
-                  ) : (
-                    available.map((r) => (
-                      <DropdownMenuItem key={r.id} onSelect={() => addRole(r)}>
-                        {r.role_name}
-                      </DropdownMenuItem>
-                    ))
-                  )}
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <CommandPicker
+                options={available.map((r) => ({ value: String(r.id), label: r.role_name }))}
+                onSelect={(id) => {
+                  const r = available.find((x) => String(x.id) === id);
+                  if (r) addRole(r);
+                }}
+                searchPlaceholder="Search roles…"
+                emptyText="No roles left to add"
+                contentClassName="w-56"
+              >
+                <button aria-label="Add auto-assign role" className="text-muted-foreground hover:text-foreground transition-colors">
+                  <PlusCircle size={14} />
+                </button>
+              </CommandPicker>
             </div>
             {loading ? (
               <p className="text-xs text-muted-foreground">Loading...</p>
@@ -312,17 +345,10 @@ export function PortalSettingsModal({ portalId, open, onOpenChange, initial, onM
                 {roles.map((r) => (
                   <div key={r.role_id} className="flex items-center gap-2 text-sm">
                     <span className="flex-1">{r.role_name}</span>
-                    <button
-                      onClick={() => toggleRoleAdmin(r)}
-                      className={`px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${
-                        r.is_admin
-                          ? "bg-foreground text-background"
-                          : "bg-foreground/10 text-foreground hover:bg-foreground/20"
-                      }`}
-                    >
-                      Admin
-                    </button>
-                    <button onClick={() => removeRole(r)} className="text-muted-foreground hover:text-red-500 transition-colors">
+                    <span title={r.is_admin ? "Admins — click to make members" : "Make this role portal admins"} className="inline-flex">
+                      <AdminCrown active={r.is_admin} onToggle={() => toggleRoleAdmin(r)} size={14} />
+                    </span>
+                    <button onClick={() => removeRole(r)} aria-label={`Remove ${r.role_name}`} className="text-muted-foreground hover:text-destructive transition-colors">
                       <X size={13} />
                     </button>
                   </div>

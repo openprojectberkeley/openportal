@@ -214,11 +214,20 @@ export function useDraftPicks(projectId: string | null, periodId: string | null)
   const addToDraftWindow = useCallback(async (applicationId: string) => {
     if (!nextRound) return false;
     if (claimedByOther[applicationId]) return false;
+    // Staged on screen at once under a temp id; the server decides whether the
+    // window has room / the applicant is still free, and a refusal removes it.
+    const tempId = `temp-${applicationId}-${Date.now()}`;
+    setPicks((prev) =>
+      prev.some((p) => p.round_project_id === nextRound.id && p.application_id === applicationId)
+        ? prev
+        : [...prev, { id: tempId, round_project_id: nextRound.id, application_id: applicationId }],
+    );
     const supabase = createClient();
     const { error: insertError } = await supabase
       .from("draft_picks")
       .insert({ round_project_id: nextRound.id, application_id: applicationId });
     if (insertError) {
+      setPicks((prev) => prev.filter((p) => p.id !== tempId));
       const msg = insertError.message ?? "";
       setError(
         /already been claimed/i.test(msg)
@@ -236,9 +245,14 @@ export function useDraftPicks(projectId: string | null, periodId: string | null)
   const removeFromDraftWindow = useCallback(async (applicationId: string) => {
     const pick = draftWindowPicks.find((p) => p.application_id === applicationId);
     if (!pick) return true;
+    setPicks((prev) => prev.filter((p) => p.id !== pick.id));
     const supabase = createClient();
     const { error: deleteError } = await supabase.from("draft_picks").delete().eq("id", pick.id);
-    if (deleteError) { setError("Couldn't remove that applicant from the draft window."); return false; }
+    if (deleteError) {
+      setPicks((prev) => (prev.some((p) => p.id === pick.id) ? prev : [...prev, pick]));
+      setError("Couldn't remove that applicant from the draft window.");
+      return false;
+    }
     await loadAll();
     return true;
   }, [draftWindowPicks, loadAll]);

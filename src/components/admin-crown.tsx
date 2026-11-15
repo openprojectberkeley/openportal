@@ -26,7 +26,7 @@ type Props = {
 //   locked            → dimmed crown with a small lock badge, no hover, inert
 //   read-only display → same as on, not clickable
 export function AdminCrown({ active, owner = false, onToggle, locked = false, hoverInheritFg = false, size = 16 }: Props) {
-  const fillClass = owner ? "text-amber-400 fill-current" : "text-white fill-current";
+  const fillClass = owner ? "text-amber-400 fill-current" : "text-foreground fill-current";
   // On hover, follow the group's hover text color so the crown stays visible.
   const hoverClass = hoverInheritFg ? " transition-colors group-hover:text-[var(--hover-fg)]" : "";
 
@@ -63,7 +63,7 @@ export function AdminCrown({ active, owner = false, onToggle, locked = false, ho
         className={
           active
             ? fillClass
-            : "text-muted-foreground/50 fill-transparent transition-colors group-hover:text-white"
+            : "text-muted-foreground/50 fill-transparent transition-colors group-hover:text-foreground"
         }
       />
     </button>

@@ -52,7 +52,7 @@ export function CalendarSkeleton() {
         ))}
       </div>
 
-      <div className="border-t pt-3 flex flex-col gap-2">
+      <div className="pt-1 flex flex-col gap-2">
         <Skeleton className="h-3 w-32" />
         <EventListSkeleton count={2} />
       </div>
@@ -98,7 +98,8 @@ export function EventListSkeleton({ count = 2 }: { count?: number }) {
   return (
     <div className="flex flex-col gap-2">
       {Array.from({ length: count }, (_, i) => (
-        <div key={i} className="rounded-md bg-accent/40 px-2.5 py-2 flex flex-col gap-1.5">
+        <div key={i} className="relative flex flex-col gap-1.5 py-1.5 pl-4 pr-2.5">
+          <span aria-hidden className="absolute bottom-1.5 left-0 top-1.5 w-[3px] rounded-full bg-foreground/10" />
           <Skeleton className="h-3.5 w-2/5 bg-foreground/10" />
           <Skeleton className="h-2.5 w-1/4 bg-foreground/10" />
         </div>
@@ -149,11 +150,11 @@ export function PanelListSkeleton({ rows = 4 }: { rows?: number }) {
       <div className="flex justify-end">
         <Skeleton className="h-8 w-28 rounded-md" />
       </div>
-      <div className="border rounded-lg overflow-hidden">
+      <div className="flex flex-col gap-0.5">
         {Array.from({ length: rows }, (_, i) => (
           <div
             key={i}
-            className={`flex items-center gap-3 px-4 py-3 ${i > 0 ? "border-t" : ""}`}
+            className="flex items-center gap-3 px-4 py-3"
           >
             <Skeleton className="h-4 w-4 rounded-sm" />
             <Skeleton className="h-5 w-5 rounded-sm" />
@@ -172,7 +173,7 @@ export function AdminPageSkeleton() {
     <div className="p-8 w-full max-w-5xl mx-auto">
       <Skeleton className="h-7 w-28 mb-6" />
       <div className="flex gap-4 mb-6 border-b pb-2">
-        {["members", "projects", "families", "portals"].map((t) => (
+        {["members", "projects", "families", "portals", "announcements"].map((t) => (
           <Skeleton key={t} className="h-4 w-16" />
         ))}
       </div>
@@ -234,7 +235,7 @@ export function ManagerMenuSkeleton() {
         </div>
         <div className="flex flex-col gap-3">
           {Array.from({ length: 3 }, (_, i) => (
-            <div key={i} className="border rounded-xl px-4 py-3.5 flex items-center gap-3.5 bg-background">
+            <div key={i} className="rounded-xl px-4 py-3.5 flex items-center gap-3.5 surface">
               <Skeleton className="h-10 w-10 rounded-full flex-shrink-0" />
               <div className="flex flex-col gap-1.5 min-w-0 flex-1">
                 <Skeleton className="h-4 w-32" />
@@ -269,7 +270,7 @@ export function SlotCardsSkeleton({ count = 3 }: { count?: number }) {
   return (
     <div className="flex flex-col gap-3">
       {Array.from({ length: count }, (_, i) => (
-        <div key={i} className="border rounded-xl p-4 flex items-center justify-between gap-4">
+        <div key={i} className="rounded-xl p-4 flex items-center justify-between gap-4 surface">
           <div className="flex flex-col gap-1.5">
             <Skeleton className="h-4 w-32" />
             <Skeleton className="h-3 w-16" />
@@ -284,7 +285,7 @@ export function SlotCardsSkeleton({ count = 3 }: { count?: number }) {
 // Mirrors CoffeeChatCard: avatar + name/roles and a full-width action button.
 function CoffeeChatCardSkeleton() {
   return (
-    <div className="border rounded-xl p-5 flex flex-col gap-4 bg-background">
+    <div className="rounded-xl p-5 flex flex-col gap-4 surface">
       <div className="flex items-center gap-4">
         <Skeleton className="h-14 w-14 rounded-full" />
         <div className="flex flex-col gap-2 min-w-0">
@@ -311,7 +312,7 @@ export function CoffeeTeamSkeleton({ count = 6 }: { count?: number }) {
 // Mirrors an available project card: grip + name, description + meta lines.
 function AvailableCardSkeleton() {
   return (
-    <div className="border rounded-xl p-3 flex flex-col gap-2 bg-background">
+    <div className="rounded-xl p-3 flex flex-col gap-2 bg-foreground/[0.04]">
       <div className="flex items-center gap-2">
         <Skeleton className="h-3.5 w-3.5 rounded-sm" />
         <Skeleton className="h-4 w-40" />
@@ -325,7 +326,7 @@ function AvailableCardSkeleton() {
 // Mirrors a ranked project card row: grip + rank badge + name + type + actions.
 function RankedCardSkeleton() {
   return (
-    <div className="border rounded-xl p-3 flex items-center gap-2 bg-background">
+    <div className="rounded-xl p-3 flex items-center gap-2 bg-foreground/[0.04]">
       <Skeleton className="h-4 w-4 rounded-sm" />
       <Skeleton className="h-6 w-6 rounded-full" />
       <Skeleton className="h-4 w-36" />
@@ -379,7 +380,7 @@ export function ApplicationPageSkeleton() {
       </div>
 
       {/* Submit bar. */}
-      <div className="border-t pt-6 flex justify-end">
+      <div className="pt-4 flex justify-end">
         <Skeleton className="h-9 w-40 rounded-md" />
       </div>
     </div>
@@ -407,7 +408,7 @@ export function ProjectApplicationModalSkeleton() {
       ))}
 
       {/* Footer actions. */}
-      <div className="flex justify-end gap-2 border-t pt-4">
+      <div className="flex justify-end gap-2 pt-2">
         <Skeleton className="h-9 w-20 rounded-md" />
         <Skeleton className="h-9 w-24 rounded-md" />
       </div>
@@ -422,7 +423,7 @@ export function ApplicationListSkeleton({ rows = 4 }: { rows?: number }) {
   return (
     <div className="flex flex-col gap-2.5">
       {Array.from({ length: rows }, (_, i) => (
-        <div key={i} className="flex items-center gap-3 border rounded-xl px-4 py-3">
+        <div key={i} className="flex items-center gap-3 rounded-xl px-4 py-3 surface">
           <div className="flex flex-col gap-1.5 min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <Skeleton className={`h-4 ${APP_ROW_NAME_WIDTHS[i % APP_ROW_NAME_WIDTHS.length]}`} />
@@ -506,29 +507,27 @@ export function LedgerSkeleton({ rows = 6 }: { rows?: number }) {
   );
 }
 
-// Mirrors the /scoreboard page: a 2-1-3 podium of uneven cards, then the
-// ranked rows with their bars.
+// Mirrors the /scoreboard page: the meta line, then one ranked line per family
+// (rank, mark, name, inline bar, total), with the bar under the name on phones.
 export function ScoreboardSkeleton({ rows = 4 }: { rows?: number }) {
   return (
     <div className="flex flex-col gap-6">
-      <div className="grid grid-cols-3 gap-3 items-end">
-        <Skeleton className="h-36 rounded-xl" />
-        <Skeleton className="h-44 rounded-xl" />
-        <Skeleton className="h-36 rounded-xl" />
-      </div>
-      <div className="border rounded-xl">
+      <Skeleton className="h-3.5 w-64" />
+      <div className="flex flex-col">
         {Array.from({ length: rows }, (_, i) => (
-          <div
-            key={i}
-            className={`px-4 py-3 flex flex-col gap-2 ${i < rows - 1 ? "border-b" : ""}`}
-          >
+          <div key={i} className="px-4 py-3 flex flex-col gap-2">
             <div className="flex items-center gap-3">
               <Skeleton className="h-4 w-4" />
-              <Skeleton className="h-8 w-8 rounded-lg" />
-              <Skeleton className="h-3.5 w-32" />
-              <Skeleton className="ml-auto h-5 w-12" />
+              <Skeleton className="h-3 w-5" />
+              <Skeleton className="h-7 w-7 rounded-lg" />
+              <div className="flex min-w-0 flex-1 flex-col gap-1.5 sm:w-56 sm:flex-none">
+                <Skeleton className="h-3.5 w-28" />
+                <Skeleton className="h-3 w-36" />
+              </div>
+              <Skeleton className="hidden h-1.5 flex-1 rounded-full sm:block" />
+              <Skeleton className="h-5 w-10" />
             </div>
-            <Skeleton className="h-2 w-full rounded-full" />
+            <Skeleton className="h-1.5 w-full rounded-full sm:hidden" />
           </div>
         ))}
       </div>
@@ -540,7 +539,7 @@ export function ScoreboardSkeleton({ rows = 4 }: { rows?: number }) {
 // ranked rows each over a thin bar.
 export function ScoreboardCompactSkeleton({ rows = 4 }: { rows?: number }) {
   return (
-    <div className="border rounded-xl p-4 flex flex-col gap-3">
+    <div className="rounded-xl p-4 flex flex-col gap-3 surface">
       <div className="flex items-center justify-between">
         <Skeleton className="h-3 w-20" />
         <Skeleton className="h-3 w-12" />

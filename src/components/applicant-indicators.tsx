@@ -1,7 +1,7 @@
 "use client";
 
 import { Coffee, Check, Clock, Presentation, FileCheck, FileQuestion, AlertTriangle, Star } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn, isLate, daysLate } from "@/lib/utils";
 import { coffeeChatLabel, type CoffeeState } from "@/lib/coffee-chat-indicator";
@@ -71,10 +71,13 @@ export function NoApplicationIndicator({ execAdded }: { execAdded?: boolean | nu
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Badge variant="outline" className="shrink-0 gap-1 border-dashed text-muted-foreground">
-          <FileQuestion size={11} />
-          No application
-        </Badge>
+        <span
+          role="img"
+          aria-label="No application"
+          className="inline-flex shrink-0 items-center text-muted-foreground"
+        >
+          <FileQuestion size={13} />
+        </span>
       </TooltipTrigger>
       <TooltipContent side="top" className="max-w-[16rem]">
         Added to the draft by an exec. They never submitted a written application, so there are no
@@ -84,7 +87,7 @@ export function NoApplicationIndicator({ execAdded }: { execAdded?: boolean | nu
   );
 }
 
-// Amber "Late" pill shown when an application was submitted after its period's
+// Amber clock + "Nd late" (text, not a pill) when an application was submitted after its period's
 // deadline (ends_at); nothing otherwise. Renders null unless the submission is
 // actually late, so callers can drop it into a badge cluster unconditionally.
 export function LateBadge({
@@ -99,13 +102,13 @@ export function LateBadge({
   if (!isLate(submittedAt, endsAt)) return null;
   const days = daysLate(submittedAt, endsAt);
   return (
-    <Badge
-      className={cn("gap-1 bg-amber-600 text-white hover:bg-amber-600", className)}
-      title="Submitted after the period deadline"
+    <span
+      className={cn("inline-flex shrink-0 items-center gap-0.5 text-[11px] font-medium text-warning", className)}
+      title={`Submitted ${days} ${days === 1 ? "day" : "days"} after the period deadline`}
     >
-      <Clock size={11} />
-      Late - {days} {days === 1 ? "day" : "days"}
-    </Badge>
+      <Clock size={11} aria-hidden />
+      {days}d late
+    </span>
   );
 }
 
@@ -158,7 +161,7 @@ export function WishlistedByIndicator({ projects }: { projects?: WishlistProject
     >
       <Star size={14} className="fill-amber-500/80" />
       {projects.length > 1 && (
-        <span className="absolute -right-1 -top-1 flex h-3 min-w-3 items-center justify-center rounded-full bg-amber-500 px-0.5 text-[8px] font-semibold leading-none text-white">
+        <span className="absolute -right-1 -top-1 flex h-3 min-w-3 items-center justify-center rounded-full bg-amber-500 px-0.5 text-[8px] font-semibold tabular-nums leading-none text-white">
           {projects.length}
         </span>
       )}

@@ -8,6 +8,10 @@ import { useRefreshOnReturn } from "@/lib/use-refresh-on-return";
 import { loadCoffeeChatWindowBounds } from "@/lib/coffee-chat-window";
 import { CoffeeTeamSkeleton } from "@/components/skeletons";
 import { roleRank, sortRoles } from "@/lib/role-order";
+import { staggerStyle } from "@/lib/motion";
+import { Search } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { BackLink } from "@/components/back-link";
 
 type MemberCard = {
   user_id: string;
@@ -25,6 +29,7 @@ type MemberCard = {
 // (coffee-chat/page.tsx) minus every booking/cancel path.
 export default function EveryoneAvailabilityPage() {
   const [members, setMembers] = useState<MemberCard[]>([]);
+  const [teamQuery, setTeamQuery] = useState("");
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
@@ -139,11 +144,19 @@ export default function EveryoneAvailabilityPage() {
 
   useRefreshOnReturn(load);
 
+  // Team search over name, roles and interests (interests is free text).
+  const tq = teamQuery.trim().toLowerCase();
+  const shownMembers = tq
+    ? members.filter((m) =>
+        [m.name, ...(m.roles ?? []).map((r) => r.role_name), m.interests ?? ""].some((t) => t.toLowerCase().includes(tq)),
+      )
+    : members;
+
   return (
     <div className="w-full max-w-5xl mx-auto p-6 flex flex-col gap-8">
       <div className="flex flex-col gap-1">
-        <Link href="/manager/coffee-chats" className="text-sm text-muted-foreground hover:text-foreground">← Back</Link>
-        <h1 className="text-2xl font-bold">Everyone&apos;s Availability</h1>
+        <BackLink href="/manager/coffee-chats" label="Coffee chats" />
+        <h1 className="text-2xl font-bold tracking-tight">Everyone&apos;s Availability</h1>
         <p className="text-sm text-muted-foreground">
           Every board member&apos;s coffee-chat availability, view-only. Tap a person to see their times.
         </p>
@@ -156,15 +169,34 @@ export default function EveryoneAvailabilityPage() {
         </section>
       ) : members.length > 0 ? (
         <section className="flex flex-col gap-3">
-          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-            Our Team <span className="text-xs font-normal text-muted-foreground/60">({members.length})</span>
-          </h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {members.map((m) => (
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+              Our Team <span className="text-xs font-normal text-muted-foreground/60">({shownMembers.length})</span>
+            </h2>
+            {/* Name, role or interest: "design", "ML", a first name. */}
+            <div className="relative w-full sm:w-64">
+              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" aria-hidden />
+              <Input
+                value={teamQuery}
+                onChange={(e) => setTeamQuery(e.target.value)}
+                placeholder="Search name, role or interest…"
+                aria-label="Search the team"
+                className="h-8 pl-8 text-sm"
+              />
+            </div>
+          </div>
+          {shownMembers.length === 0 && (
+            <p className="rounded-xl surface px-4 py-8 text-center text-sm text-muted-foreground">
+              Nobody matches &ldquo;{teamQuery.trim()}&rdquo;.
+            </p>
+          )}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 auto-rows-fr gap-4">
+            {shownMembers.map((m, i) => (
               <Link
                 key={m.user_id}
                 href={`/manager/coffee-chats/all/${m.user_id}`}
-                className="rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                style={staggerStyle(i)}
+                className="flex h-full animate-fade-in-up rounded-xl [&>*]:flex-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <CoffeeChatCard
                   id={m.user_id}

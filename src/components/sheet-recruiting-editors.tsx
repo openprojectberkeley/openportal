@@ -9,6 +9,7 @@ import { ScrollArea } from "@/components/overlay-scrollbar";
 import { CoffeeChatIndicator, InfosessionIndicator, type CoffeeState } from "@/components/applicant-indicators";
 import { isReturningMember, type MemberStatus } from "@/lib/member-status";
 import { cn } from "@/lib/utils";
+import { optimistic } from "@/lib/optimistic";
 
 type HostOption = { user_id: string; name: string };
 
@@ -73,7 +74,7 @@ export function SheetCoffeeCell({
   const [hostId, setHostId] = useState<string | null>(hostIds[0] ?? null);
   const [hosts, setHosts] = useState<HostOption[] | null>(null);
   const [search, setSearch] = useState("");
-  const [saving, setSaving] = useState(false);
+  const saving = false;
   const [error, setError] = useState<string | null>(null);
 
   const primaryHostId = hostIds[0] ?? null;
@@ -105,26 +106,30 @@ export function SheetCoffeeCell({
       setError("Pick who coffee chatted them");
       return;
     }
-    setSaving(true);
     setError(null);
     const supabase = createClient();
-    const { error: rpcError } = await supabase.rpc("set_applicant_coffee_chat", {
-      p_applicant_id: applicantId,
-      p_status: status,
-      p_host_id: status === "none" ? null : hostId,
-    });
-    setSaving(false);
-    if (rpcError) {
-      setError(rpcError.message);
-      return;
-    }
     const hostName = hosts?.find((h) => h.user_id === hostId)?.name;
-    onSaved({
-      coffee: status,
-      coffeeWith: status === "none" || !hostName ? [] : [hostName],
-      coffeeHostIds: status === "none" || !hostId ? [] : [hostId],
+    const before: CoffeeEditResult = { coffee: state, coffeeWith: withNames, coffeeHostIds: hostIds };
+    // The cell updates and the popover closes at once; the RPC confirms behind.
+    void optimistic({
+      label: "coffee chat status",
+      key: `sheet-coffee:${applicantId}`,
+      apply: () => {
+        onSaved({
+          coffee: status,
+          coffeeWith: status === "none" || !hostName ? [] : [hostName],
+          coffeeHostIds: status === "none" || !hostId ? [] : [hostId],
+        });
+        setOpen(false);
+      },
+      rollback: () => onSaved(before),
+      commit: () =>
+        supabase.rpc("set_applicant_coffee_chat", {
+          p_applicant_id: applicantId,
+          p_status: status,
+          p_host_id: status === "none" ? null : hostId,
+        }),
     });
-    setOpen(false);
   };
 
   return (
@@ -218,7 +223,7 @@ export function SheetInfosessionCell({
   const { dialogContainer, probeRef } = useDialogContainer();
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState(attended);
-  const [saving, setSaving] = useState(false);
+  const saving = false;
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -227,21 +232,20 @@ export function SheetInfosessionCell({
     setError(null);
   }, [open, attended]);
 
-  const save = async () => {
-    setSaving(true);
+  const save = () => {
     setError(null);
     const supabase = createClient();
-    const { error: rpcError } = await supabase.rpc("set_applicant_infosession", {
-      p_applicant_id: applicantId,
-      p_attended: value,
+    const before = attended;
+    void optimistic({
+      label: "info session status",
+      key: `sheet-infosession:${applicantId}`,
+      apply: () => {
+        onSaved(value);
+        setOpen(false);
+      },
+      rollback: () => onSaved(before),
+      commit: () => supabase.rpc("set_applicant_infosession", { p_applicant_id: applicantId, p_attended: value }),
     });
-    setSaving(false);
-    if (rpcError) {
-      setError(rpcError.message);
-      return;
-    }
-    onSaved(value);
-    setOpen(false);
   };
 
   return (
@@ -300,7 +304,7 @@ export function SheetReturningCell({
   const { dialogContainer, probeRef } = useDialogContainer();
   const [open, setOpen] = useState(false);
   const [value, setValue] = useState(returning);
-  const [saving, setSaving] = useState(false);
+  const saving = false;
   const [error, setError] = useState<string | null>(null);
 
   const editable = memberStatus === "non_member" || memberStatus === "inactive";
@@ -318,20 +322,19 @@ export function SheetReturningCell({
       setOpen(false);
       return;
     }
-    setSaving(true);
     setError(null);
     const supabase = createClient();
-    const { error: rpcError } = await supabase.rpc("set_member_status", {
-      p_user_id: applicantId,
-      p_status: nextStatus,
+    const beforeStatus = memberStatus;
+    void optimistic({
+      label: "member status",
+      key: `status:${applicantId}`,
+      apply: () => {
+        onSaved(isReturningMember(nextStatus), nextStatus);
+        setOpen(false);
+      },
+      rollback: () => onSaved(isReturningMember(beforeStatus), beforeStatus),
+      commit: () => supabase.rpc("set_member_status", { p_user_id: applicantId, p_status: nextStatus }),
     });
-    setSaving(false);
-    if (rpcError) {
-      setError(rpcError.message);
-      return;
-    }
-    onSaved(isReturningMember(nextStatus), nextStatus);
-    setOpen(false);
   };
 
   const display = returning ? (

@@ -1,21 +1,18 @@
 "use client";
 
 import { createClient } from "@/lib/supabase/client";
-import { useRef, useState } from "react";
-import { PlusCircle, ChevronDown } from "lucide-react";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuCheckboxItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { useCallback, useRef, useState } from "react";
+import { PlusCircle } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { IconPicker } from "@/components/icon-picker";
 import { ColorPicker } from "@/components/color-picker";
+import { MultiCombobox } from "@/components/ui/combobox";
 import { uploadPortalIcon } from "@/lib/portal-icon-upload";
+import { Segmented } from "@/components/ui/segmented";
+import { Disclosure } from "@/components/ui/disclosure";
 
 export type PortalType = "general" | "project" | "exec";
 export type MemberOption = { user_id: string; name: string };
@@ -72,6 +69,12 @@ export function PortalCreateDialog({
   const [adminIds, setAdminIds] = useState<Set<string>>(new Set());
   const [adminRoleIds, setAdminRoleIds] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
+  // Portal the admin pickers into this dialog so they stay inside its focus
+  // scope and pointer-events region.
+  const [dialogContainer, setDialogContainer] = useState<HTMLElement | null>(null);
+  const probeRef = useCallback((node: HTMLSpanElement | null) => {
+    if (node) setDialogContainer(node.closest<HTMLElement>("[role='dialog']"));
+  }, []);
   const [error, setError] = useState<string | null>(null);
   // Remembers a portal already inserted this session so an icon-upload retry
   // updates it instead of creating a duplicate row.
@@ -94,20 +97,6 @@ export function PortalCreateDialog({
     reset();
     setOpen(true);
   };
-
-  const toggleAdmin = (id: string) =>
-    setAdminIds((prev) => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
-
-  const toggleAdminRole = (id: string) =>
-    setAdminRoleIds((prev) => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
 
   const save = async () => {
     const trimmed = name.trim();
@@ -194,22 +183,14 @@ export function PortalCreateDialog({
             {allowedTypes.length > 1 && (
               <div className="flex flex-col gap-1">
                 <Label>Type</Label>
-                <div className="flex gap-1 rounded-md border p-0.5 w-fit">
-                  {allowedTypes.map((t) => (
-                    <button
-                      key={t}
-                      type="button"
-                      onClick={() => setType(t)}
-                      className={`px-3 py-1 rounded text-sm font-medium transition-colors ${
-                        type === t
-                          ? "bg-foreground text-background"
-                          : "text-muted-foreground hover:text-foreground"
-                      }`}
-                    >
-                      {TYPE_LABELS[t]}
-                    </button>
-                  ))}
-                </div>
+                <Segmented
+                  aria-label="Portal type"
+                  size="md"
+                  className="w-fit"
+                  value={type}
+                  onChange={setType}
+                  options={allowedTypes.map((t) => ({ value: t, label: TYPE_LABELS[t] }))}
+                />
               </div>
             )}
 
@@ -222,93 +203,70 @@ export function PortalCreateDialog({
               />
             </div>
 
-            <div className="flex gap-3">
-              <div className="flex flex-col gap-1 w-28">
-                <Label>Icon</Label>
-                <IconPicker
-                  value={icon}
-                  onChange={setIcon}
-                  imageUrl={iconUrl}
-                  onImageChange={setIconUrl}
-                  onImageBlob={setIconBlob}
+            {/* Name and type are all a portal needs; the rest is optional. */}
+            <Disclosure hint="icon, colour, description, admins">
+              <div className="flex gap-3">
+                <div className="flex flex-col gap-1 w-28">
+                  <Label>Icon</Label>
+                  <IconPicker
+                    value={icon}
+                    onChange={setIcon}
+                    imageUrl={iconUrl}
+                    onImageChange={setIconUrl}
+                    onImageBlob={setIconBlob}
+                  />
+                </div>
+                <div className="flex flex-col gap-1 flex-1">
+                  <Label>Accent color</Label>
+                  <ColorPicker value={color} onChange={setColor} />
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="new-portal-description">Description</Label>
+                <textarea
+                  id="new-portal-description"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  rows={3}
+                  className="border rounded-md px-3 py-2 text-sm w-full resize-none bg-background focus:outline-none focus:ring-1 focus:ring-ring"
                 />
               </div>
-              <div className="flex flex-col gap-1 flex-1">
-                <Label>Accent color</Label>
-                <ColorPicker value={color} onChange={setColor} />
-              </div>
-            </div>
 
-            <div className="flex flex-col gap-1">
-              <Label htmlFor="new-portal-description">Description</Label>
-              <textarea
-                id="new-portal-description"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                rows={3}
-                className="border rounded-md px-3 py-2 text-sm w-full resize-none bg-background focus:outline-none focus:ring-1 focus:ring-ring"
-              />
-            </div>
+              {/* Optional admins: searchable multi-selects, picks shown as chips. */}
+              <span ref={probeRef} className="hidden" aria-hidden />
+              {memberOptions && memberOptions.length > 0 && (
+                <div className="flex flex-col gap-1">
+                  <Label>Admins</Label>
+                  <MultiCombobox
+                    aria-label="Admins"
+                    container={dialogContainer}
+                    value={[...adminIds]}
+                    onChange={(v) => setAdminIds(new Set(v))}
+                    options={memberOptions.map((m) => ({ value: m.user_id, label: m.name }))}
+                    placeholder="None"
+                    searchPlaceholder="Search members…"
+                  />
+                </div>
+              )}
 
-            {/* Optional admin members */}
-            {memberOptions && memberOptions.length > 0 && (
-              <div className="flex flex-col gap-1">
-                <Label>Admins (optional)</Label>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button className="flex items-center justify-between gap-2 border rounded-md px-3 py-2 text-sm hover:bg-accent transition-colors w-full text-left">
-                      <span className={adminIds.size ? "" : "text-muted-foreground"}>
-                        {adminIds.size ? `${adminIds.size} selected` : "None"}
-                      </span>
-                      <ChevronDown size={15} className="text-muted-foreground flex-shrink-0" />
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="max-h-64">
-                    {memberOptions.map((m) => (
-                      <DropdownMenuCheckboxItem
-                        key={m.user_id}
-                        checked={adminIds.has(m.user_id)}
-                        onCheckedChange={() => toggleAdmin(m.user_id)}
-                        onSelect={(e) => e.preventDefault()}
-                      >
-                        {m.name}
-                      </DropdownMenuCheckboxItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            )}
+              {roleOptions && roleOptions.length > 0 && (
+                <div className="flex flex-col gap-1">
+                  <Label>Admin roles</Label>
+                  <MultiCombobox
+                    aria-label="Admin roles"
+                    container={dialogContainer}
+                    value={[...adminRoleIds].map(String)}
+                    onChange={(v) => setAdminRoleIds(new Set(v))}
+                    options={roleOptions.map((r) => ({ value: String(r.id), label: r.role_name }))}
+                    placeholder="None"
+                    searchPlaceholder="Search roles…"
+                  />
+                </div>
+              )}
+            </Disclosure>
 
-            {/* Optional admin roles */}
-            {roleOptions && roleOptions.length > 0 && (
-              <div className="flex flex-col gap-1">
-                <Label>Admin roles (optional)</Label>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button className="flex items-center justify-between gap-2 border rounded-md px-3 py-2 text-sm hover:bg-accent transition-colors w-full text-left">
-                      <span className={adminRoleIds.size ? "" : "text-muted-foreground"}>
-                        {adminRoleIds.size ? `${adminRoleIds.size} selected` : "None"}
-                      </span>
-                      <ChevronDown size={15} className="text-muted-foreground flex-shrink-0" />
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="max-h-64">
-                    {roleOptions.map((r) => (
-                      <DropdownMenuCheckboxItem
-                        key={r.id}
-                        checked={adminRoleIds.has(r.id)}
-                        onCheckedChange={() => toggleAdminRole(r.id)}
-                        onSelect={(e) => e.preventDefault()}
-                      >
-                        {r.role_name}
-                      </DropdownMenuCheckboxItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            )}
-
-            {error && <p className="text-sm text-red-500">{error}</p>}
+            {error && <p className="text-sm text-destructive">{error}</p>}
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setOpen(false)}>
                 Cancel

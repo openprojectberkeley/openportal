@@ -19,6 +19,7 @@ import { ColorPicker } from "@/components/color-picker";
 import { ProjectQuestionsDialog } from "@/components/project-questions-dialog";
 import { type Difficulty, DIFFICULTIES, DIFFICULTY_LABELS } from "@/lib/projects";
 import { familyLabel, NO_FAMILY_LABEL, useFamilyOptions } from "@/lib/use-families";
+import { Disclosure } from "@/components/ui/disclosure";
 
 type ProjectType = "studio" | "launch";
 
@@ -164,22 +165,6 @@ export function ProjectEditDialog({
                 onChange={(e) => setFields((f) => (f ? { ...f, name: e.target.value } : f))}
               />
             </div>
-            <div className="flex gap-3">
-              <div className="flex flex-col gap-1 w-28">
-                <Label>Icon</Label>
-                <IconPicker
-                  value={fields.icon}
-                  onChange={(v) => setFields((f) => (f ? { ...f, icon: v } : f))}
-                  imageUrl={fields.iconUrl}
-                  onImageChange={(url) => setFields((f) => (f ? { ...f, iconUrl: url } : f))}
-                  projectId={projectId}
-                />
-              </div>
-              <div className="flex flex-col gap-1 flex-1">
-                <Label>Accent color</Label>
-                <ColorPicker value={fields.color} onChange={(v) => setFields((f) => (f ? { ...f, color: v } : f))} />
-              </div>
-            </div>
             <div className="flex flex-col gap-1">
               <Label>Type</Label>
               {canEditType ? (
@@ -237,7 +222,7 @@ export function ProjectEditDialog({
               )}
             </div>
             <div className="flex flex-col gap-1">
-              <Label htmlFor="pe-client">Client{fields.type === "studio" && <span className="text-red-500"> *</span>}</Label>
+              <Label htmlFor="pe-client">Client{fields.type === "studio" && <span className="text-destructive"> *</span>}</Label>
               <Input
                 id="pe-client"
                 value={fields.client}
@@ -264,60 +249,81 @@ export function ProjectEditDialog({
                 />
               </div>
             )}
-            <div className="grid grid-cols-3 gap-3">
-              <div className="flex flex-col gap-1">
-                <Label>Difficulty</Label>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button className="flex items-center justify-between gap-2 border rounded-md px-3 py-2 text-sm bg-background hover:bg-accent transition-colors">
-                      {fields.difficulty ? DIFFICULTY_LABELS[fields.difficulty] : "—"}
-                      <ChevronDown size={14} className="text-muted-foreground" />
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start">
-                    <DropdownMenuItem onSelect={() => setFields((f) => (f ? { ...f, difficulty: "" } : f))}>—</DropdownMenuItem>
-                    {DIFFICULTIES.map((d) => (
-                      <DropdownMenuItem key={d} onSelect={() => setFields((f) => (f ? { ...f, difficulty: d } : f))}>
-                        {DIFFICULTY_LABELS[d]}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
+            <Disclosure
+              hint="icon, colour, size, description"
+              defaultOpen={!!(fields.icon || fields.iconUrl || fields.color || fields.difficulty || fields.estimated_members || fields.num_subteams || fields.description)}
+            >
+              <div className="flex gap-3">
+                <div className="flex flex-col gap-1 w-28">
+                  <Label>Icon</Label>
+                  <IconPicker
+                    value={fields.icon}
+                    onChange={(v) => setFields((f) => (f ? { ...f, icon: v } : f))}
+                    imageUrl={fields.iconUrl}
+                    onImageChange={(url) => setFields((f) => (f ? { ...f, iconUrl: url } : f))}
+                    projectId={projectId}
+                  />
+                </div>
+                <div className="flex flex-col gap-1 flex-1">
+                  <Label>Accent color</Label>
+                  <ColorPicker value={fields.color} onChange={(v) => setFields((f) => (f ? { ...f, color: v } : f))} />
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="flex flex-col gap-1">
+                  <Label>Difficulty</Label>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button className="flex items-center justify-between gap-2 border rounded-md px-3 py-2 text-sm bg-background hover:bg-accent transition-colors">
+                        {fields.difficulty ? DIFFICULTY_LABELS[fields.difficulty] : "—"}
+                        <ChevronDown size={14} className="text-muted-foreground" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start">
+                      <DropdownMenuItem onSelect={() => setFields((f) => (f ? { ...f, difficulty: "" } : f))}>—</DropdownMenuItem>
+                      {DIFFICULTIES.map((d) => (
+                        <DropdownMenuItem key={d} onSelect={() => setFields((f) => (f ? { ...f, difficulty: d } : f))}>
+                          {DIFFICULTY_LABELS[d]}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="pe-members">Members</Label>
+                  <Input
+                    id="pe-members"
+                    type="number"
+                    min={0}
+                    value={fields.estimated_members}
+                    onChange={(e) => setFields((f) => (f ? { ...f, estimated_members: e.target.value } : f))}
+                    placeholder="Est."
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="pe-subteams">Subteams</Label>
+                  <Input
+                    id="pe-subteams"
+                    type="number"
+                    min={0}
+                    value={fields.num_subteams}
+                    onChange={(e) => setFields((f) => (f ? { ...f, num_subteams: e.target.value } : f))}
+                    placeholder="#"
+                  />
+                </div>
               </div>
               <div className="flex flex-col gap-1">
-                <Label htmlFor="pe-members">Members</Label>
-                <Input
-                  id="pe-members"
-                  type="number"
-                  min={0}
-                  value={fields.estimated_members}
-                  onChange={(e) => setFields((f) => (f ? { ...f, estimated_members: e.target.value } : f))}
-                  placeholder="Est."
+                <Label htmlFor="pe-desc">Description</Label>
+                <textarea
+                  id="pe-desc"
+                  rows={3}
+                  value={fields.description}
+                  onChange={(e) => setFields((f) => (f ? { ...f, description: e.target.value } : f))}
+                  className="border rounded-md px-3 py-2 text-sm w-full resize-none bg-background focus:outline-none focus:ring-1 focus:ring-ring"
                 />
               </div>
-              <div className="flex flex-col gap-1">
-                <Label htmlFor="pe-subteams">Subteams</Label>
-                <Input
-                  id="pe-subteams"
-                  type="number"
-                  min={0}
-                  value={fields.num_subteams}
-                  onChange={(e) => setFields((f) => (f ? { ...f, num_subteams: e.target.value } : f))}
-                  placeholder="#"
-                />
-              </div>
-            </div>
-            <div className="flex flex-col gap-1">
-              <Label htmlFor="pe-desc">Description</Label>
-              <textarea
-                id="pe-desc"
-                rows={3}
-                value={fields.description}
-                onChange={(e) => setFields((f) => (f ? { ...f, description: e.target.value } : f))}
-                className="border rounded-md px-3 py-2 text-sm w-full resize-none bg-background focus:outline-none focus:ring-1 focus:ring-ring"
-              />
-            </div>
-            <div className="flex items-center justify-between gap-2 border-t pt-4">
+            </Disclosure>
+            <div className="flex items-center justify-between gap-2 pt-2">
               <div className="flex flex-col">
                 <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Application questions</span>
                 <span className="text-xs text-muted-foreground">Custom questions applicants answer for this project.</span>

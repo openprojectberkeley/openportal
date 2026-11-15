@@ -1,7 +1,13 @@
 import type { Config } from "tailwindcss";
+import defaultTheme from "tailwindcss/defaultTheme";
 
 export default {
   darkMode: ["class"],
+  // Wrap every `hover:` in @media (hover: hover) so a tap on a touch screen
+  // doesn't leave a hover style stuck on until the next tap elsewhere.
+  future: {
+    hoverOnlyWhenSupported: true,
+  },
   content: [
     "./src/**/*.{js,ts,jsx,tsx,mdx}",
   ],
@@ -38,8 +44,23 @@ export default {
           DEFAULT: "hsl(var(--destructive))",
           foreground: "hsl(var(--destructive-foreground))",
         },
-        border: "hsl(var(--border))",
-        input: "hsl(var(--input))",
+        success: {
+          DEFAULT: "hsl(var(--success))",
+          foreground: "hsl(var(--success-foreground))",
+        },
+        warning: {
+          DEFAULT: "hsl(var(--warning))",
+          foreground: "hsl(var(--warning-foreground))",
+        },
+        info: {
+          DEFAULT: "hsl(var(--info))",
+          foreground: "hsl(var(--info-foreground))",
+        },
+        // Edges are translucent (alpha lives in its own var, globals.css), so a
+        // hairline picks up whatever surface it sits on and reads as glass
+        // rather than a grey rule. `<alpha-value>` still composes: border-border/50.
+        border: "hsl(var(--border) / calc(var(--border-alpha) * <alpha-value>))",
+        input: "hsl(var(--input) / calc(var(--input-alpha) * <alpha-value>))",
         ring: "hsl(var(--ring))",
         chart: {
           "1": "hsl(var(--chart-1))",
@@ -63,15 +84,15 @@ export default {
             "--tw-prose-bold": "hsl(var(--foreground))",
             "--tw-prose-counters": "hsl(var(--muted-foreground))",
             "--tw-prose-bullets": "hsl(var(--muted-foreground))",
-            "--tw-prose-hr": "hsl(var(--border))",
+            "--tw-prose-hr": "hsl(var(--border) / var(--border-alpha))",
             "--tw-prose-quotes": "hsl(var(--muted-foreground))",
-            "--tw-prose-quote-borders": "hsl(var(--border))",
+            "--tw-prose-quote-borders": "hsl(var(--border) / var(--border-alpha))",
             "--tw-prose-captions": "hsl(var(--muted-foreground))",
             "--tw-prose-code": "hsl(var(--foreground))",
             "--tw-prose-pre-code": "hsl(var(--foreground))",
             "--tw-prose-pre-bg": "hsl(var(--muted))",
-            "--tw-prose-th-borders": "hsl(var(--border))",
-            "--tw-prose-td-borders": "hsl(var(--border))",
+            "--tw-prose-th-borders": "hsl(var(--border) / var(--border-alpha))",
+            "--tw-prose-td-borders": "hsl(var(--border) / var(--border-alpha))",
             // prose-invert reads the same tokens; the CSS vars in globals.css
             // already flip under .dark, so both themes resolve correctly.
             "--tw-prose-invert-body": "hsl(var(--foreground))",
@@ -81,15 +102,15 @@ export default {
             "--tw-prose-invert-bold": "hsl(var(--foreground))",
             "--tw-prose-invert-counters": "hsl(var(--muted-foreground))",
             "--tw-prose-invert-bullets": "hsl(var(--muted-foreground))",
-            "--tw-prose-invert-hr": "hsl(var(--border))",
+            "--tw-prose-invert-hr": "hsl(var(--border) / var(--border-alpha))",
             "--tw-prose-invert-quotes": "hsl(var(--muted-foreground))",
-            "--tw-prose-invert-quote-borders": "hsl(var(--border))",
+            "--tw-prose-invert-quote-borders": "hsl(var(--border) / var(--border-alpha))",
             "--tw-prose-invert-captions": "hsl(var(--muted-foreground))",
             "--tw-prose-invert-code": "hsl(var(--foreground))",
             "--tw-prose-invert-pre-code": "hsl(var(--foreground))",
             "--tw-prose-invert-pre-bg": "hsl(var(--muted))",
-            "--tw-prose-invert-th-borders": "hsl(var(--border))",
-            "--tw-prose-invert-td-borders": "hsl(var(--border))",
+            "--tw-prose-invert-th-borders": "hsl(var(--border) / var(--border-alpha))",
+            "--tw-prose-invert-td-borders": "hsl(var(--border) / var(--border-alpha))",
             // Inline code ships with backtick pseudo-elements; drop them and
             // give it a chip instead.
             "code::before": { content: '""' },
@@ -97,7 +118,43 @@ export default {
           },
         },
       },
+      fontFamily: {
+        mono: ["var(--font-geist-mono)", ...defaultTheme.fontFamily.mono],
+        display: ["var(--font-display)", ...defaultTheme.fontFamily.sans],
+      },
+      // Motion tokens (app/globals.css). tailwindcss-animate reads these same
+      // scales, so `duration-2 ease-out-quart` times both a transition and a
+      // Radix enter/exit animation.
+      // DEFAULT is what a bare `transition-colors` gets: the instant tier, so
+      // every common hover snaps (<100ms). `duration-instant` names it
+      // explicitly; `duration-0` stays Tailwind's 0s.
+      transitionDuration: {
+        DEFAULT: "var(--dur-0)",
+        instant: "var(--dur-0)",
+        "1": "var(--dur-1)",
+        "2": "var(--dur-2)",
+        "3": "var(--dur-3)",
+        "4": "var(--dur-4)",
+        "5": "var(--dur-5)",
+      },
+      transitionTimingFunction: {
+        DEFAULT: "var(--ease-out-quad)",
+        "out-quad": "var(--ease-out-quad)",
+        "out-cubic": "var(--ease-out-cubic)",
+        "out-quart": "var(--ease-out-quart)",
+        "out-expo": "var(--ease-out-expo)",
+        "in-out-cubic": "var(--ease-in-out-cubic)",
+        "in-out-quart": "var(--ease-in-out-quart)",
+      },
+      boxShadow: {
+        // Floating surfaces (menus, popovers, dialogs): a faint lit top edge
+        // (--edge-hi) instead of a hard outline, plus a soft drop.
+        overlay:
+          "inset 0 1px 0 0 hsl(var(--edge-hi)), 0 12px 32px -12px rgb(0 0 0 / 0.28), 0 2px 8px -2px rgb(0 0 0 / 0.08)",
+        edge: "inset 0 1px 0 0 hsl(var(--edge-hi))",
+      },
       borderRadius: {
+        xl: "calc(var(--radius) + 4px)",
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
@@ -113,10 +170,44 @@ export default {
           from: { transform: "translateX(-100%)" },
           to: { transform: "translateX(200%)" },
         },
+        // Content replacing its skeleton: a short settle instead of a hard cut.
+        "fade-in-up": {
+          from: { opacity: "0", transform: "translateY(4px)" },
+          to: { opacity: "1", transform: "translateY(0)" },
+        },
+        // A count badge arriving or changing. No overshoot: it's feedback, not
+        // a toy.
+        pop: {
+          from: { opacity: "0", transform: "scale(0.9)" },
+          to: { opacity: "1", transform: "scale(1)" },
+        },
+        // A score bar drawing itself in from the left on first paint. Only a
+        // `from`: the end state is whatever clip-path the bar already has.
+        "bar-in": {
+          from: { clipPath: "inset(0 100% 0 0 round 9999px)" },
+        },
+        // An expanding row/panel growing to its natural height (no measuring:
+        // grid-template-rows interpolates 0fr -> 1fr).
+        "expand-rows": {
+          from: { gridTemplateRows: "0fr", opacity: "0" },
+          to: { gridTemplateRows: "1fr", opacity: "1" },
+        },
+        // "There's more below" hint: a couple of nudges, then it rests.
+        nudge: {
+          "0%, 100%": { transform: "translateY(0)" },
+          "50%": { transform: "translateY(3px)" },
+        },
       },
       animation: {
         "slow-flash": "slow-flash 1.8s ease-in-out infinite",
-        shimmer: "shimmer 1.1s cubic-bezier(0.16, 1, 0.3, 1) 1",
+        shimmer: "shimmer 1.1s var(--ease-out-expo) 1",
+        "fade-in-up": "fade-in-up var(--dur-2) var(--ease-out-quart) both",
+        pop: "pop var(--dur-2) var(--ease-out-quart) both",
+        nudge: "nudge 600ms var(--ease-in-out-cubic) 2",
+        expand: "expand-rows var(--dur-3) var(--ease-out-quart) both",
+        // `backwards`, not `both`: once it has played, the bar's own
+        // clip-path transition must be free to animate score changes.
+        "bar-in": "bar-in 700ms var(--ease-out-expo) backwards",
       },
     },
   },

@@ -1,6 +1,7 @@
 "use client";
 
-import { ChevronDown } from "lucide-react";
+import { useState } from "react";
+import { ChevronDown, Search } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -49,6 +50,11 @@ export function MultiSelectFilter({
   className,
   align = "start",
 }: Props) {
+  // Past ~8 options (portals grow with projects) the menu gets a search box.
+  const searchable = options.length > 8;
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLowerCase();
+  const shown = q ? options.filter((o) => o.label.toLowerCase().includes(q)) : options;
   const count = selected.size;
   const summary =
     count === 0
@@ -58,7 +64,7 @@ export function MultiSelectFilter({
         : `${count} selected`;
 
   return (
-    <DropdownMenu>
+    <DropdownMenu onOpenChange={(o) => { if (!o) setQuery(""); }}>
       <DropdownMenuTrigger asChild>
         <button
           aria-label={`Filter by ${label.toLowerCase()}`}
@@ -80,6 +86,30 @@ export function MultiSelectFilter({
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align={align} className="w-52">
+        {searchable && (
+          <div className="flex items-center gap-1.5 px-2 pb-1 pt-0.5">
+            <Search className="size-3 shrink-0 text-muted-foreground" aria-hidden />
+            <input
+              autoFocus
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              // Keep typing in the box: Radix menus otherwise treat letters as
+              // typeahead and move focus to a matching item.
+              onKeyDown={(e) => {
+                // Enter picks the first match (highlighted below while typing).
+                if (e.key === "Enter" && q && shown[0]) {
+                  e.preventDefault();
+                  onToggle(shown[0].key);
+                  return;
+                }
+                if (e.key !== "ArrowDown" && e.key !== "Escape") e.stopPropagation();
+              }}
+              placeholder={`Search ${label.toLowerCase()}s…`}
+              aria-label={`Search ${label.toLowerCase()}s`}
+              className="h-7 w-full border-0 bg-transparent text-xs outline-none placeholder:text-muted-foreground"
+            />
+          </div>
+        )}
         <DropdownMenuItem
           onSelect={(e) => {
             e.preventDefault();
@@ -90,7 +120,8 @@ export function MultiSelectFilter({
           All {label.toLowerCase()}s
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        {options.map((o) => (
+        {shown.length === 0 && <p className="px-2 py-3 text-center text-xs text-muted-foreground">No matches</p>}
+        {shown.map((o, i) => (
           <DropdownMenuCheckboxItem
             key={o.key}
             checked={selected.has(o.key)}
@@ -98,7 +129,7 @@ export function MultiSelectFilter({
             // the whole point of a multi-select.
             onSelect={(e) => e.preventDefault()}
             onCheckedChange={() => onToggle(o.key)}
-            className="text-xs"
+            className={cn("text-xs", q && i === 0 && "bg-accent text-accent-foreground")}
           >
             <span className="flex min-w-0 items-center gap-1.5">
               {o.color !== undefined && (

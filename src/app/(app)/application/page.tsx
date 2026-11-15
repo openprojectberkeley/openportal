@@ -26,7 +26,9 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { type Difficulty, DIFFICULTY_LABELS } from "@/lib/projects";
 import { ProjectIcon } from "@/components/project-icon";
 import { uploadResume, deleteResume, resumeSignedUrl } from "@/lib/resume-upload";
-import { TECH_AREAS, TECH_CLASSES, TECH_CLASS_NA } from "@/lib/application-profile";
+import { OTHER_CLASS_SUGGESTIONS, TECH_AREAS, TECH_CLASSES, TECH_CLASS_NA } from "@/lib/application-profile";
+import { MultiCombobox, joinList, splitList } from "@/components/ui/combobox";
+import { BackLink } from "@/components/back-link";
 
 // Postgres' RLS-violation code — the applications_open() checks baked into the
 // application_rankings/applications write policies fail with this when a period
@@ -312,35 +314,48 @@ export default function ApplicationPage() {
     return { rid: data.id as string, completed: false };
   };
 
-  // The `+` button on an available card — append to the ranking.
+  // The `+` button on an available card — append to the ranking. The card
+  // moves at once; the row is written behind it, and if that fails the card
+  // goes back to the available list (reportSaveError shows why).
   const addProject = async (projectId: string) => {
     if (ranked.includes(projectId) || ranked.length >= rankTarget) return;
-    const aId = await ensureApp();
-    if (!aId) return;
     const newRanked = [...ranked, projectId];
+    setRanked(newRanked);
+    const undo = () => setRanked((r) => r.filter((p) => p !== projectId));
+    const aId = await ensureApp();
+    if (!aId) { undo(); return; }
     const row = await upsertRankingRow(aId, projectId, newRanked.length);
-    if (!row) return;
+    if (!row) { undo(); return; }
     const nextMap = { ...rankingIdByProject, [projectId]: row.rid };
     setRankingIdByProject(nextMap);
     setCompletedByProject((p) => ({ ...p, [projectId]: row.completed }));
-    setRanked(newRanked);
     await syncRanks(newRanked, nextMap);
   };
 
   // The `X` button on a ranked card — soft-remove so re-adding restores answers.
+  // Removed from the list at once; restored in place if the write is refused.
   const removeProject = async (projectId: string) => {
     const rid = rankingIdByProject[projectId];
+    const prevRanked = ranked;
+    const prevMap = rankingIdByProject;
+    const prevCompleted = completedByProject;
     const newRanked = ranked.filter((p) => p !== projectId);
-    const supabase = createClient();
-    if (rid) {
-      const { error: removeError } = await supabase.from("application_rankings").update({ ranked: false }).eq("id", rid);
-      if (removeError) reportSaveError(removeError, "Couldn't remove that project.");
-    }
     const nextMap = { ...rankingIdByProject };
     delete nextMap[projectId];
     setRankingIdByProject(nextMap);
     setCompletedByProject((p) => { const n = { ...p }; delete n[projectId]; return n; });
     setRanked(newRanked);
+    if (rid) {
+      const supabase = createClient();
+      const { error: removeError } = await supabase.from("application_rankings").update({ ranked: false }).eq("id", rid);
+      if (removeError) {
+        reportSaveError(removeError, "Couldn't remove that project.");
+        setRanked(prevRanked);
+        setRankingIdByProject(prevMap);
+        setCompletedByProject(prevCompleted);
+        return;
+      }
+    }
     await syncRanks(newRanked, nextMap);
   };
 
@@ -390,12 +405,13 @@ export default function ApplicationPage() {
   // ---- "About you" persistence -------------------------------------------
   // Discrete controls (a rating tap, a checkbox) save at once; the two free-text
   // fields debounce through scheduleSave.
-  const saveAppFields = async (patch: Record<string, unknown>) => {
+  const saveAppFields = async (patch: Record<string, unknown>): Promise<boolean> => {
     const aId = await ensureApp();
-    if (!aId) return;
+    if (!aId) return false;
     const supabase = createClient();
     const { error: updateError } = await supabase.from("applications").update(patch).eq("id", aId);
-    if (updateError) reportSaveError(updateError, "Couldn't save your changes.");
+    if (updateError) { reportSaveError(updateError, "Couldn't save your changes."); return false; }
+    return true;
   };
   // A ref to the latest saveAppFields, so the unmount flush isn't a stale closure.
   const saveAppFieldsRef = useRef(saveAppFields);
@@ -424,8 +440,12 @@ export default function ApplicationPage() {
     const next = { ...techAreas };
     if (next[key] === value) delete next[key]; // tap the current value to clear
     else next[key] = value;
+    const prev = techAreas;
     setTechAreas(next);
-    saveAppFields({ tech_area_rankings: next });
+    // Roll back only if nothing newer has replaced this value meanwhile.
+    void saveAppFields({ tech_area_rankings: next }).then((ok) => {
+      if (!ok) setTechAreas((cur) => (cur === next ? prev : cur));
+    });
   };
 
   const toggleClass = (key: string) => {
@@ -438,8 +458,11 @@ export default function ApplicationPage() {
         : techClasses.includes(key)
           ? techClasses.filter((k) => k !== key)
           : [...techClasses.filter((k) => k !== TECH_CLASS_NA), key];
+    const prev = techClasses;
     setTechClasses(next);
-    saveAppFields({ tech_classes: next });
+    void saveAppFields({ tech_classes: next }).then((ok) => {
+      if (!ok) setTechClasses((cur) => (cur === next ? prev : cur));
+    });
   };
 
   const onOtherChange = (v: string) => { setTechClassesOther(v); scheduleSave({ tech_classes_other: v }); };
@@ -600,11 +623,11 @@ export default function ApplicationPage() {
           <div className="h-12 w-12 rounded-full bg-foreground/5 text-foreground/70 flex items-center justify-center">
             <X size={24} />
           </div>
-          <h1 className="text-2xl font-bold">Application submissions are closed</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Application submissions are closed</h1>
           <p className="text-sm text-muted-foreground">
             We&apos;re not accepting written applications right now. Check back again soon.
           </p>
-          <Link href="/" className="text-sm text-muted-foreground hover:text-foreground">← Back home</Link>
+          <BackLink href="/" label="Dashboard" />
         </div>
       </div>
     );
@@ -614,14 +637,14 @@ export default function ApplicationPage() {
     return (
       <div className="flex flex-1 w-full items-center justify-center p-6">
         <div className="flex flex-col items-center gap-4 text-center max-w-sm">
-          <div className="h-12 w-12 rounded-full bg-green-600/10 text-green-700 dark:text-green-400 flex items-center justify-center">
+          <div className="h-12 w-12 rounded-full bg-success/10 text-success flex items-center justify-center">
             <Check size={24} />
           </div>
-          <h1 className="text-2xl font-bold">Application submitted</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Application submitted</h1>
           <p className="text-sm text-muted-foreground">
             Thanks for applying! We&apos;ve received your project rankings and answers.
           </p>
-          <Link href="/" className="text-sm text-muted-foreground hover:text-foreground">← Back home</Link>
+          <BackLink href="/" label="Dashboard" />
         </div>
       </div>
     );
@@ -636,12 +659,12 @@ export default function ApplicationPage() {
           <div className="h-12 w-12 rounded-full bg-foreground/5 text-foreground/70 flex items-center justify-center">
             <Check size={24} />
           </div>
-          <h1 className="text-2xl font-bold">You&apos;re on every current project</h1>
+          <h1 className="text-2xl font-bold tracking-tight">You&apos;re on every current project</h1>
           <p className="text-sm text-muted-foreground">
             There aren&apos;t any other projects to apply to right now. Check back when new projects
             open up.
           </p>
-          <Link href="/" className="text-sm text-muted-foreground hover:text-foreground">← Back home</Link>
+          <BackLink href="/" label="Dashboard" />
         </div>
       </div>
     );
@@ -659,8 +682,8 @@ export default function ApplicationPage() {
   return (
     <div className="w-full max-w-5xl mx-auto p-6 flex flex-col gap-6">
       <div className="flex flex-col gap-1">
-        <Link href="/" className="text-sm text-muted-foreground hover:text-foreground">← Back</Link>
-        <h1 className="text-2xl font-bold">Application</h1>
+        <BackLink href="/" label="Dashboard" />
+        <h1 className="text-2xl font-bold tracking-tight">Application</h1>
         <p className="text-sm text-muted-foreground">
           Drag projects into your ranking (top {rankTarget}), then complete the questions for your
           top {requiredTarget} choice{requiredTarget === 1 ? "" : "s"}. Your progress saves automatically.
@@ -668,7 +691,7 @@ export default function ApplicationPage() {
       </div>
 
       {/* About you — optional background, above the project rankings. */}
-      <section className="flex flex-col gap-6 border rounded-xl p-5">
+      <section className="flex flex-col gap-6 rounded-xl surface p-5">
         <div className="flex flex-col gap-0.5">
           <h2 className="text-lg font-semibold">About you</h2>
           <p className="text-sm text-muted-foreground">
@@ -686,7 +709,7 @@ export default function ApplicationPage() {
               Optional · 1 (least) – 5 (most). Tap a number again to clear it.
             </span>
           </div>
-          <div className="flex flex-col divide-y">
+          <div className="flex flex-col">
             {TECH_AREAS.map((a) => (
               <div key={a.key} className="flex items-center justify-between gap-3 py-2">
                 <span className="text-sm">{a.label}</span>
@@ -714,18 +737,22 @@ export default function ApplicationPage() {
               </label>
             ))}
           </div>
-          <textarea
-            value={techClassesOther}
-            onChange={(e) => onOtherChange(e.target.value)}
-            placeholder="Other relevant classes (comma-separated)…"
-            rows={2}
-            className="border rounded-md px-3 py-2 text-sm w-full resize-y bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+          {/* Tags, not free text: each class is its own chip (and its own
+              value in the sheet's class filter). Stored comma-separated. */}
+          <MultiCombobox
+            aria-label="Other relevant classes"
+            creatable
+            value={splitList(techClassesOther)}
+            onChange={(v) => onOtherChange(joinList(v))}
+            options={OTHER_CLASS_SUGGESTIONS.map((c) => ({ value: c, label: c }))}
+            placeholder="Other relevant classes"
+            searchPlaceholder="Search or type a class…"
           />
         </div>
       </section>
 
       {/* Resume — optional, one per person, stored privately. */}
-      <section className="flex flex-col gap-2 border rounded-xl p-5">
+      <section className="flex flex-col gap-2 rounded-xl surface p-5">
         <div className="flex flex-col gap-0.5">
           <Label className="text-sm font-medium">Resume</Label>
           <span className="text-xs text-muted-foreground">
@@ -816,8 +843,8 @@ export default function ApplicationPage() {
         />
       </div>
 
-      <div className="flex flex-col gap-2 border-t pt-6">
-        {error && <p className="text-sm text-red-500">{error}</p>}
+      <div className="flex flex-col gap-2 pt-4">
+        {error && <p className="text-sm text-destructive">{error}</p>}
         {!canSubmit && (
           <p className="text-xs text-muted-foreground">
             {ranked.length !== rankTarget
@@ -843,7 +870,7 @@ export default function ApplicationPage() {
         onConfirm={submit}
       >
         {missingRequiredChats.length > 0 && (
-          <div className="flex items-start gap-2 text-xs rounded-md px-3 py-2.5 text-amber-600 dark:text-amber-500 bg-amber-500/10">
+          <div className="flex items-start gap-2 text-xs rounded-md px-3 py-2.5 text-warning bg-warning/10">
             <AlertTriangle size={15} className="flex-shrink-0 mt-0.5" />
             <p className="flex-1">
               You haven&apos;t completed a required coffee chat for{" "}
@@ -1047,8 +1074,8 @@ function ProjectCard(props: CardProps) {
   const box = (
     <div
       onClick={() => setOpen((o) => !o)}
-      className={`group relative overflow-hidden border rounded-xl p-3 transition-colors hover:bg-accent ${
-        completed ? "border-green-600/40 bg-green-600/5" : "bg-background"
+      className={`group relative overflow-hidden rounded-xl p-3 transition-colors ${
+        completed ? "bg-success/10 shadow-[inset_0_0_0_1px_hsl(var(--success)/0.25)]" : "bg-foreground/[0.04] hover:bg-foreground/[0.07]"
       }`}
     >
       <CardContent {...props} open={open} />
@@ -1066,7 +1093,7 @@ function ProjectCard(props: CardProps) {
       >
         <span
           className={`h-6 w-6 rounded-full text-xs font-semibold flex items-center justify-center flex-shrink-0 ${
-            completed ? "bg-green-600 text-white" : "bg-foreground text-background"
+            completed ? "bg-success text-success-foreground" : "bg-foreground text-background"
           }`}
         >
           {completed ? <Check size={14} /> : rankNumber}
@@ -1124,7 +1151,7 @@ function CardContent({
                 onPointerDown={(e) => e.stopPropagation()}
                 aria-label={`Add ${project.name}`}
                 title={full ? "Your ranking is full" : `Add ${project.name}`}
-                className="flex h-7 w-7 items-center justify-center rounded-md border bg-background text-foreground hover:bg-foreground hover:text-background hover:border-foreground disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-background disabled:hover:text-foreground flex-shrink-0 transition-colors"
+                className="flex h-7 w-7 items-center justify-center rounded-md bg-background text-foreground shadow-edge hover:bg-foreground hover:text-background disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-background disabled:hover:text-foreground flex-shrink-0 transition-colors"
               >
                 <Plus size={16} />
               </button>
@@ -1133,7 +1160,7 @@ function CardContent({
             <>
               {required && !completed && (
                 <span
-                  className="text-red-500 font-semibold flex-shrink-0"
+                  className="text-destructive font-semibold flex-shrink-0"
                   title="Required questions unfinished"
                   aria-label="Required questions unfinished"
                 >
@@ -1156,7 +1183,7 @@ function CardContent({
                   className={`absolute inset-0 rounded-md border ${
                     completed || !required
                       ? "border-border bg-background"
-                      : "border-amber-500/70 bg-amber-500/10 animate-slow-flash"
+                      : "border-warning/70 bg-warning/10 animate-slow-flash"
                   }`}
                   aria-hidden
                 />
@@ -1167,7 +1194,7 @@ function CardContent({
                 onClick={(e) => { e.stopPropagation(); onRemove?.(); }}
                 onPointerDown={(e) => e.stopPropagation()}
                 aria-label="Remove"
-                className="flex h-7 w-7 items-center justify-center rounded-md border bg-background text-muted-foreground hover:bg-red-500 hover:text-white hover:border-red-500 flex-shrink-0 transition-colors"
+                className="flex h-7 w-7 items-center justify-center rounded-md bg-background text-muted-foreground shadow-edge hover:bg-destructive hover:text-destructive-foreground flex-shrink-0 transition-colors"
               >
                 <X size={16} />
               </button>
@@ -1195,9 +1222,9 @@ function CardContent({
           <div
             className={`flex items-center gap-1.5 text-[11px] pl-6 ${
               met
-                ? "text-green-700 dark:text-green-400"
+                ? "text-success"
                 : project.coffee_chat_required
-                  ? "text-amber-600 dark:text-amber-500"
+                  ? "text-warning"
                   : "text-muted-foreground"
             }`}
           >
@@ -1214,7 +1241,7 @@ function CardContent({
           <div
             className={`flex items-center gap-2 text-xs rounded-md px-3 py-2 ${
               project.coffee_chat_required
-                ? "text-amber-600 dark:text-amber-500 bg-amber-500/10"
+                ? "text-warning bg-warning/10"
                 : "text-muted-foreground bg-muted"
             }`}
           >
@@ -1254,9 +1281,9 @@ function RatingScale({ value, onChange }: { value: number; onChange: (v: number)
           onClick={() => onChange(n)}
           aria-label={`Rate ${n} of 5`}
           aria-pressed={value === n}
-          className={`h-7 w-7 rounded-md border text-xs font-medium transition-colors ${
+          className={`h-7 w-7 rounded-md text-xs font-medium tabular-nums transition-colors ${
             value > 0 && value >= n
-              ? "bg-foreground text-background border-foreground"
+              ? "bg-foreground text-background"
               : "bg-background text-muted-foreground hover:bg-accent"
           }`}
         >
@@ -1330,7 +1357,7 @@ function ResumeField({
             onClick={onRemove}
             disabled={uploading}
             aria-label="Remove resume"
-            className="text-muted-foreground hover:text-red-500 disabled:opacity-50 flex-shrink-0"
+            className="text-muted-foreground hover:text-destructive disabled:opacity-50 flex-shrink-0"
           >
             <X size={15} />
           </button>
@@ -1351,7 +1378,7 @@ function ResumeField({
           )}
         </Button>
       )}
-      {error && <p className="text-xs text-red-500">{error}</p>}
+      {error && <p className="text-xs text-destructive">{error}</p>}
     </div>
   );
 }
@@ -1360,7 +1387,7 @@ function ResumeField({
 // the collapsed card look so moving between lists feels seamless.
 function DragPreview({ project }: { project: Project }) {
   return (
-    <div className="relative overflow-hidden rounded-xl border bg-background p-3 shadow-lg cursor-grabbing flex items-center gap-2">
+    <div className="relative overflow-hidden rounded-xl bg-background p-3 shadow-overlay cursor-grabbing flex items-center gap-2">
       <div className="relative z-10 flex items-center gap-2 min-w-0">
         <ProjectIcon project={project} />
         <span className="font-medium text-sm truncate">{project.name}</span>

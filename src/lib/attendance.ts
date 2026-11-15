@@ -8,11 +8,12 @@ export const ATTENDANCE_STATUS_LABEL: Record<AttendanceStatus, string> = {
   excused: "Excused",
 };
 
-// Same green/red/yellow as the attendance-taking grid (portal-attendance-modal).
+// Soft status tints from the theme's status tokens (globals.css), so a long
+// list of records reads calm rather than as a wall of saturated pills.
 export const ATTENDANCE_STATUS_PILL: Record<AttendanceStatus, string> = {
-  present: "bg-green-500 text-white",
-  absent: "bg-red-500 text-white",
-  excused: "bg-yellow-400 text-black",
+  present: "bg-success/15 text-success",
+  absent: "bg-destructive/15 text-destructive",
+  excused: "bg-warning/15 text-warning",
 };
 
 export type AttendanceCounts = Record<AttendanceStatus, number>;

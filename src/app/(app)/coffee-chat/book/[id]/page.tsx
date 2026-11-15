@@ -2,7 +2,6 @@
 
 import { useParams, useRouter } from "next/navigation";
 import { Suspense, cloneElement, useState, useEffect, useCallback } from "react";
-import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { useRefreshOnReturn } from "@/lib/use-refresh-on-return";
 import { loadCoffeeChatWindowBounds, earliestBookableIso } from "@/lib/coffee-chat-window";
@@ -11,6 +10,7 @@ import { AvailabilitySkeleton } from "@/components/skeletons";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { PersonName } from "@/components/person-profile-provider";
 import { MapPin, Info } from "lucide-react";
+import { BackLink } from "@/components/back-link";
 
 type PersonInfo = {
   name: string;
@@ -207,12 +207,10 @@ function BookingPageInner() {
 
   return (
     <div className="w-full max-w-5xl mx-auto p-6 flex flex-col gap-6">
-      <Link href="/coffee-chat" className="text-sm text-muted-foreground hover:text-foreground">
-        ← Back
-      </Link>
+      <BackLink href="/coffee-chat" label="Coffee chat" />
 
       {/* Always-on explainer for the filled/capacity badge and shared (group) slots. */}
-      <div className="flex items-start gap-2.5 rounded-lg border bg-accent/50 p-3 text-sm text-muted-foreground">
+      <div className="flex items-start gap-2.5 rounded-lg surface p-3 text-sm text-muted-foreground">
         <Info size={16} className="mt-0.5 flex-shrink-0" />
         <p className="leading-snug">
           <span className="font-medium text-foreground">Some time slots are shared.</span>{" "}
@@ -269,10 +267,10 @@ function BookingPageInner() {
                       const slotButton = (
                         <button
                           onClick={() => setSelected(slot.meeting_time)}
-                          className={`flex flex-col items-center px-4 py-2 rounded-md border text-sm font-medium transition-colors ${
+                          className={`flex flex-col items-center px-4 py-2 rounded-md text-sm font-medium transition-colors ${
                             isSelected
-                              ? "bg-foreground text-background border-foreground"
-                              : "hover:bg-accent"
+                              ? "bg-foreground text-background"
+                              : "bg-foreground/[0.05] hover:bg-foreground/[0.09]"
                           }`}
                         >
                           {slot.timeLabel}
@@ -312,7 +310,7 @@ function BookingPageInner() {
         </div>
 
         {/* Right: about the host + selected-time details + booking (one-third, sticky). */}
-        <div className="flex flex-col gap-6 md:w-1/3 md:sticky md:top-6 self-start rounded-lg border p-4">
+        <div className="flex flex-col gap-6 md:w-1/3 md:sticky md:top-6 self-start rounded-xl surface p-4">
           {person && (
             <div className="flex flex-col gap-3">
               <h3 className="text-sm font-semibold">About {firstName}&apos;s coffee chats</h3>
@@ -345,7 +343,7 @@ function BookingPageInner() {
           )}
 
           {days.length > 0 && (
-            <div className="flex flex-col gap-3 border-t pt-4">
+            <div className="flex flex-col gap-3 pt-2">
               {selected ? (
                 <>
                   <div className="flex flex-col gap-1">

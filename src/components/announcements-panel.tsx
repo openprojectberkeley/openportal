@@ -12,6 +12,10 @@ import { ColorPicker } from "@/components/color-picker";
 import { PanelListSkeleton } from "@/components/skeletons";
 import { AnnouncementBanner } from "@/components/announcement-banners";
 import { cn } from "@/lib/utils";
+import { staggerStyle } from "@/lib/motion";
+import { accentRing } from "@/lib/portal-color";
+import { optimistic } from "@/lib/optimistic";
+import { InfoHint } from "@/components/ui/info-hint";
 import {
   announcementStatus,
   dateInputToEndIso,
@@ -21,6 +25,7 @@ import {
   type Announcement,
   type AnnouncementStatus,
 } from "@/lib/announcements";
+import { Disclosure } from "@/components/ui/disclosure";
 
 type Fields = { message: string; color: string; start: string; end: string };
 
@@ -28,9 +33,9 @@ const DEFAULT_COLOR = "#3B82F6";
 const HEX_RE = /^#[0-9A-Fa-f]{6}$/;
 
 const STATUS_STYLE: Record<AnnouncementStatus, string> = {
-  live: "bg-green-500/15 text-green-700 dark:text-green-400",
-  scheduled: "bg-blue-500/15 text-blue-700 dark:text-blue-400",
-  ended: "bg-muted text-muted-foreground",
+  live: "text-success",
+  scheduled: "text-info",
+  ended: "text-muted-foreground",
 };
 
 function emptyFields(): Fields {
@@ -44,9 +49,9 @@ export function AnnouncementsPanel({ onCountChange }: { onCountChange?: (n: numb
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [fields, setFields] = useState<Fields>(emptyFields);
-  const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<Announcement | null>(null);
+  const [query, setQuery] = useState("");
 
   const reload = useCallback(async () => {
     const { data, error: loadError } = await createClient()
@@ -93,7 +98,6 @@ export function AnnouncementsPanel({ onCountChange }: { onCountChange?: (n: numb
     if (!fields.start || !fields.end) return setFormError("Start and end dates are required.");
     if (fields.end < fields.start) return setFormError("End date must be on or after the start date.");
 
-    setSaving(true);
     setFormError(null);
     const supabase = createClient();
     const payload = {
@@ -102,51 +106,89 @@ export function AnnouncementsPanel({ onCountChange }: { onCountChange?: (n: numb
       starts_at: dateInputToStartIso(fields.start),
       ends_at: dateInputToEndIso(fields.end),
     };
-    const { error: saveError } = editingId
-      ? await supabase
-          .from("announcements")
-          .update({ ...payload, updated_at: new Date().toISOString() })
-          .eq("id", editingId)
-      : await supabase.from("announcements").insert(payload);
-    setSaving(false);
-    if (saveError) return setFormError(saveError.message);
-    setDialogOpen(false);
-    await reload();
+    // Shown in the list and the dialog closed at once; the write follows. A
+    // new one sits under a temp id until the reload brings the real row.
+    const id = editingId ?? `temp-${Date.now()}`;
+    const before = items;
+    const next: Announcement = { id, ...payload } as Announcement;
+    void optimistic({
+      label: "announcement",
+      key: `announcement:${id}`,
+      apply: () => {
+        setItems((prev) =>
+          editingId
+            ? (prev ?? []).map((a) => (a.id === editingId ? { ...a, ...payload } : a))
+            : [next, ...(prev ?? [])],
+        );
+        setDialogOpen(false);
+      },
+      rollback: () => setItems(before),
+      commit: () =>
+        editingId
+          ? supabase
+              .from("announcements")
+              .update({ ...payload, updated_at: new Date().toISOString() })
+              .eq("id", editingId)
+              .select("id")
+          : supabase.from("announcements").insert(payload).select("id"),
+      requireRows: true,
+      onCommitted: () => void reload(),
+    });
   };
 
-  const remove = async (a: Announcement) => {
-    const { error: deleteError } = await createClient().from("announcements").delete().eq("id", a.id);
-    if (deleteError) {
-      setError(deleteError.message);
-      return false;
-    }
-    await reload();
+  const remove = (a: Announcement) => {
+    const before = items;
+    void optimistic({
+      label: "announcement deletion",
+      key: `announcement:${a.id}`,
+      apply: () => setItems((prev) => (prev ?? []).filter((x) => x.id !== a.id)),
+      rollback: () => setItems(before),
+      commit: () => createClient().from("announcements").delete().eq("id", a.id).select("id"),
+      requireRows: true,
+      onCommitted: () => onCountChange?.((before?.length ?? 1) - 1),
+    });
     return true;
   };
 
   if (items === null) return <PanelListSkeleton rows={3} />;
 
+  const q = query.trim().toLowerCase();
+  const shownItems = q ? items.filter((a) => a.message.toLowerCase().includes(q)) : items;
+
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-sm text-muted-foreground">
-          Banners show at the top of everyone&apos;s dashboard between their start and end dates.
-        </p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search announcements..."
+            aria-label="Search announcements"
+            className="max-w-xs"
+          />
+          <InfoHint label="About announcements" side="right">
+            Banners show under the header on every page between their start and end dates.
+          </InfoHint>
+        </div>
         <Button size="sm" onClick={openCreate}>
           <PlusCircle size={15} /> New announcement
         </Button>
       </div>
 
-      {error && <p className="text-sm text-red-500">{error}</p>}
+      {error && <p className="text-sm text-destructive">{error}</p>}
 
-      <div className="border rounded-lg overflow-hidden">
-        {items.map((a, i) => {
+      <div className="flex flex-col gap-0.5">
+        {shownItems.map((a, i) => {
           const status = announcementStatus(a);
           return (
-            <div key={a.id} className={cn("flex items-center gap-3 px-4 py-3", i > 0 && "border-t")}>
+            <div
+              key={a.id}
+              style={staggerStyle(i)}
+              className="flex items-center gap-3 rounded-lg px-4 py-3 transition-colors hover:bg-foreground/[0.03] animate-fade-in-up"
+            >
               <span
-                className="h-4 w-4 shrink-0 rounded-full border border-foreground/10"
-                style={{ backgroundColor: a.color }}
+                className="h-4 w-4 shrink-0 rounded-full"
+                style={{ backgroundColor: a.color, boxShadow: accentRing(a.color, 40) }}
               />
               <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                 <span className="truncate text-sm font-medium">{a.message}</span>
@@ -154,12 +196,9 @@ export function AnnouncementsPanel({ onCountChange }: { onCountChange?: (n: numb
                   {formatAnnouncementDate(a.starts_at)} – {formatAnnouncementDate(a.ends_at)}
                 </span>
               </div>
-              <span
-                className={cn(
-                  "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
-                  STATUS_STYLE[status],
-                )}
-              >
+              {/* Status as dot + word, not a pill. */}
+              <span className={cn("inline-flex shrink-0 items-center gap-1.5 text-xs font-medium capitalize", STATUS_STYLE[status])}>
+                <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-current" />
                 {status}
               </span>
               <button
@@ -171,7 +210,7 @@ export function AnnouncementsPanel({ onCountChange }: { onCountChange?: (n: numb
               </button>
               <button
                 onClick={() => setDeleting(a)}
-                className="text-muted-foreground hover:text-red-500 transition-colors flex-shrink-0"
+                className="text-muted-foreground hover:text-destructive transition-colors flex-shrink-0"
                 aria-label="Delete announcement"
               >
                 <X size={15} />
@@ -179,8 +218,10 @@ export function AnnouncementsPanel({ onCountChange }: { onCountChange?: (n: numb
             </div>
           );
         })}
-        {items.length === 0 && (
-          <div className="px-4 py-8 text-center text-sm text-muted-foreground">No announcements yet.</div>
+        {shownItems.length === 0 && (
+          <div className="rounded-xl surface px-4 py-8 text-center text-sm text-muted-foreground">
+            {items.length === 0 ? "No announcements yet." : "No announcements match."}
+          </div>
         )}
       </div>
 
@@ -203,42 +244,50 @@ export function AnnouncementsPanel({ onCountChange }: { onCountChange?: (n: numb
             </div>
             <div className="flex flex-col gap-1">
               <Label>Color</Label>
-              <ColorPicker value={fields.color} onChange={(v) => setFields((f) => ({ ...f, color: v }))} />
+              <ColorPicker required value={fields.color} onChange={(v) => setFields((f) => ({ ...f, color: v }))} />
             </div>
-            <div className="flex gap-3">
-              <div className="flex flex-1 flex-col gap-1">
-                <Label htmlFor="announcement-start">Start date</Label>
-                <Input
-                  id="announcement-start"
-                  type="date"
-                  value={fields.start}
-                  onChange={(e) => setFields((f) => ({ ...f, start: e.target.value }))}
-                />
+            {/* Dates default to today; open them to schedule ahead or run longer. */}
+            <Disclosure
+              key={editingId ?? "new"}
+              label="Schedule"
+              hint={fields.start === fields.end ? formatAnnouncementDate(dateInputToStartIso(fields.start)) : undefined}
+              defaultOpen={!!editingId}
+            >
+              <div className="flex gap-3">
+                <div className="flex flex-1 flex-col gap-1">
+                  <Label htmlFor="announcement-start">Start date</Label>
+                  <Input
+                    id="announcement-start"
+                    type="date"
+                    value={fields.start}
+                    onChange={(e) => setFields((f) => ({ ...f, start: e.target.value }))}
+                  />
+                </div>
+                <div className="flex flex-1 flex-col gap-1">
+                  <Label htmlFor="announcement-end">End date</Label>
+                  <Input
+                    id="announcement-end"
+                    type="date"
+                    value={fields.end}
+                    min={fields.start || undefined}
+                    onChange={(e) => setFields((f) => ({ ...f, end: e.target.value }))}
+                  />
+                </div>
               </div>
-              <div className="flex flex-1 flex-col gap-1">
-                <Label htmlFor="announcement-end">End date</Label>
-                <Input
-                  id="announcement-end"
-                  type="date"
-                  value={fields.end}
-                  min={fields.start || undefined}
-                  onChange={(e) => setFields((f) => ({ ...f, end: e.target.value }))}
-                />
-              </div>
-            </div>
+            </Disclosure>
             {fields.message.trim() && HEX_RE.test(fields.color) && (
               <div className="flex flex-col gap-1">
                 <Label>Preview</Label>
                 <AnnouncementBanner message={fields.message.trim()} color={fields.color} />
               </div>
             )}
-            {formError && <p className="text-sm text-red-500">{formError}</p>}
+            {formError && <p className="text-sm text-destructive">{formError}</p>}
             <div className="flex justify-end gap-2">
-              <Button variant="outline" size="sm" onClick={() => setDialogOpen(false)} disabled={saving}>
+              <Button variant="outline" size="sm" onClick={() => setDialogOpen(false)}>
                 Cancel
               </Button>
-              <Button size="sm" onClick={save} disabled={saving}>
-                {saving ? "Saving…" : "Save"}
+              <Button size="sm" onClick={save}>
+                Save
               </Button>
             </div>
           </div>
@@ -255,9 +304,9 @@ export function AnnouncementsPanel({ onCountChange }: { onCountChange?: (n: numb
         confirmLabel="Delete"
         onConfirm={async () => {
           if (!deleting) return false;
-          const ok = await remove(deleting);
-          if (ok) setDeleting(null);
-          return ok;
+          remove(deleting);
+          setDeleting(null);
+          return true;
         }}
       />
     </div>

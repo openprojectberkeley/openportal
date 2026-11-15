@@ -23,8 +23,8 @@
 import { useState } from "react";
 import { FileQuestion } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import { useAddableMembers, type AddableMember, type AddableStatus } from "@/lib/use-addable-members";
+import { Command, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 
 export type PickableApplicant = { id: string; name: string };
 export type { AddableMember } from "@/lib/use-addable-members";
@@ -111,80 +111,75 @@ export function ApplicantPickerDialog({
         </DialogHeader>
         <div className="flex flex-col gap-3">
           {note && <p className="text-xs text-muted-foreground">{note}</p>}
-          <Input
-            autoFocus
-            placeholder={memberSearch ? "Search by name or email…" : "Search applicants…"}
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-          />
-          <div className="flex max-h-72 flex-col gap-1 overflow-y-auto">
-            {applicants === null ? (
-              <p className="text-sm text-muted-foreground py-4 text-center">Loading applicants…</p>
-            ) : showEmpty ? (
-              <p className="text-sm text-muted-foreground py-4 text-center">
-                {memberSearch ? "Nobody matches that." : "No matching applicants."}
-              </p>
-            ) : (
-              <>
-                {grouped && options.length > 0 && (
-                  <p className="px-1 pt-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                    Applied
-                  </p>
-                )}
-                {options.map((a) => (
-                  <button
-                    key={a.id}
-                    type="button"
-                    onClick={() => onPick(a.id)}
-                    className="rounded-md px-3 py-2 text-left text-sm hover:bg-accent"
-                  >
-                    {a.name}
-                  </button>
-                ))}
+          {/* cmdk for keyboard picking (arrows + Enter) during a live draft.
+              shouldFilter is off: this component already filters applicants
+              locally and searches accounts on the server. */}
+          <Command shouldFilter={false} className="rounded-md border">
+            <CommandInput
+              autoFocus
+              placeholder={memberSearch ? "Search by name or email…" : "Search applicants…"}
+              value={filter}
+              onValueChange={setFilter}
+            />
+            <CommandList className="max-h-72 border-t">
+              {applicants === null ? (
+                <p className="py-4 text-center text-sm text-muted-foreground">Loading applicants…</p>
+              ) : showEmpty ? (
+                <p className="py-4 text-center text-sm text-muted-foreground">
+                  {memberSearch ? "Nobody matches that." : "No matching applicants."}
+                </p>
+              ) : (
+                <>
+                  {options.length > 0 && (
+                    <CommandGroup heading={grouped ? "Applied" : undefined}>
+                      {options.map((a) => (
+                        <CommandItem key={a.id} value={`app-${a.id}`} onSelect={() => onPick(a.id)}>
+                          {a.name}
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  )}
 
-                {memberSearch && memberRows.length > 0 && (
-                  <>
-                    <p className="px-1 pt-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                      Not in the draft pool
-                    </p>
-                    {memberRows.map((m) => (
-                      <button
-                        key={m.user_id}
-                        type="button"
-                        onClick={() => { forget(m.user_id); memberSearch.onPick(m); }}
-                        className="flex items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-accent"
-                      >
-                        <FileQuestion size={13} className="shrink-0 text-muted-foreground" />
-                        <span className="flex min-w-0 flex-col">
-                          <span className="truncate">{memberLabel(m)}</span>
-                          {/* The email disambiguates two people with one name,
-                              and is the only label when a profile has no name. */}
-                          {m.email && m.name?.trim() && (
-                            <span className="truncate text-xs text-muted-foreground">{m.email}</span>
-                          )}
-                        </span>
-                        <span
-                          className={`ml-auto shrink-0 text-[11px] ${STATUS_NOTE[statusKey(m.app_status)].tone}`}
-                          title={STATUS_NOTE[statusKey(m.app_status)].title}
+                  {memberSearch && memberRows.length > 0 && (
+                    <CommandGroup heading="Not in the draft pool">
+                      {memberRows.map((m) => (
+                        <CommandItem
+                          key={m.user_id}
+                          value={`member-${m.user_id}`}
+                          onSelect={() => { forget(m.user_id); memberSearch.onPick(m); }}
                         >
-                          {STATUS_NOTE[statusKey(m.app_status)].label}
-                        </span>
-                      </button>
-                    ))}
-                  </>
-                )}
+                          <FileQuestion size={13} className="shrink-0 text-muted-foreground" />
+                          <span className="flex min-w-0 flex-col">
+                            <span className="truncate">{memberLabel(m)}</span>
+                            {/* The email disambiguates two people with one name,
+                                and is the only label when a profile has no name. */}
+                            {m.email && m.name?.trim() && (
+                              <span className="truncate text-xs text-muted-foreground">{m.email}</span>
+                            )}
+                          </span>
+                          <span
+                            className={`ml-auto shrink-0 text-[11px] ${STATUS_NOTE[statusKey(m.app_status)].tone}`}
+                            title={STATUS_NOTE[statusKey(m.app_status)].title}
+                          >
+                            {STATUS_NOTE[statusKey(m.app_status)].label}
+                          </span>
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  )}
 
-                {memberSearch && searching && (
-                  <p className="py-2 text-center text-xs text-muted-foreground">Searching accounts…</p>
-                )}
-                {memberSearch && tooShort && (
-                  <p className="py-2 text-center text-xs text-muted-foreground">
-                    Type {minChars}+ characters to also search accounts outside the draft pool.
-                  </p>
-                )}
-              </>
-            )}
-          </div>
+                  {memberSearch && searching && (
+                    <p className="py-2 text-center text-xs text-muted-foreground">Searching accounts…</p>
+                  )}
+                  {memberSearch && tooShort && (
+                    <p className="py-2 text-center text-xs text-muted-foreground">
+                      Type {minChars}+ characters to also search accounts outside the draft pool.
+                    </p>
+                  )}
+                </>
+              )}
+            </CommandList>
+          </Command>
         </div>
       </DialogContent>
     </Dialog>

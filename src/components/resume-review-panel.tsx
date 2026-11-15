@@ -14,7 +14,7 @@ type State =
 // is NOT part of the application, so this panel stands on its own rather than
 // joining the applicant checklist — it just reflects whatever the person's most
 // recent request is doing and links into /resume-review.
-export function ResumeReviewPanel() {
+export function ResumeReviewPanel({ compact = false, className }: { compact?: boolean; className?: string }) {
   const [state, setState] = useState<State | null>(null);
 
   useEffect(() => {
@@ -46,37 +46,40 @@ export function ResumeReviewPanel() {
   const date = (iso: string) =>
     new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 
+  // Short copy: the card is a pointer, not an explanation (DESIGN.md).
   const copy =
     state.kind === "pending"
-      ? { title: "Resume review in progress", body: `Requested ${date(state.since)} — we'll notify you when feedback is ready.`, cta: "View request", Icon: Clock }
+      ? { title: "Review in progress", body: `Requested ${date(state.since)}`, cta: "View request", Icon: Clock }
       : state.kind === "ready"
-        ? { title: "Your resume feedback is ready", body: `Reviewed ${date(state.on)}.`, cta: "Read feedback", Icon: Check }
-        : { title: "Want feedback on your resume?", body: "Ask a member of our team to look it over — any time, no application needed.", cta: "Request a review", Icon: FileSearch };
+        ? { title: "Feedback ready", body: `Reviewed ${date(state.on)}`, cta: "Read feedback", Icon: Check }
+        : { title: "Resume feedback", body: "Get a review anytime", cta: "Request a review", Icon: FileSearch };
 
   const { title, body, cta, Icon } = copy;
 
   return (
     <Link
       href="/resume-review"
-      className="group flex items-center gap-3.5 rounded-xl border border-foreground/15 bg-foreground/[0.03] p-4 hover:border-foreground/25 hover:shadow-sm transition-all"
+      className={`group flex items-center rounded-xl surface rim-card transition-colors hover:bg-foreground/[0.07] ${
+        compact ? "gap-3 px-3 py-2.5" : "gap-3.5 p-4"
+      } ${className ?? ""}`}
     >
       <span
-        className={`h-10 w-10 rounded-full flex items-center justify-center flex-shrink-0 ${
-          state.kind === "ready"
-            ? "bg-green-600/10 text-green-700 dark:text-green-400"
-            : "bg-foreground/5 text-foreground/70"
+        className={`rounded-full flex items-center justify-center flex-shrink-0 ${compact ? "h-8 w-8" : "h-10 w-10"} ${
+          state.kind === "ready" ? "bg-success/10 text-success" : "bg-foreground/5 text-foreground/70"
         }`}
       >
-        <Icon size={18} />
+        <Icon size={compact ? 15 : 18} />
       </span>
       <div className="flex flex-col gap-0.5 min-w-0 flex-1">
-        <span className="text-sm font-semibold">{title}</span>
-        <span className="text-xs text-muted-foreground">{body}</span>
+        <span className="truncate text-sm font-semibold">{title}</span>
+        <span className="truncate text-xs text-muted-foreground">{body}</span>
       </div>
-      <span className="hidden sm:inline text-xs font-medium text-muted-foreground group-hover:text-foreground transition-colors whitespace-nowrap">
-        {cta}
-      </span>
-      <ArrowRight size={16} className="text-muted-foreground/50 flex-shrink-0 group-hover:translate-x-0.5 group-hover:text-muted-foreground transition-all" />
+      {!compact && (
+        <span className="hidden sm:inline text-xs font-medium text-muted-foreground group-hover:text-foreground transition-colors whitespace-nowrap">
+          {cta}
+        </span>
+      )}
+      <ArrowRight size={16} className="text-muted-foreground/50 flex-shrink-0 group-hover:translate-x-0.5 group-hover:text-muted-foreground transition-[transform,color] duration-instant ease-out-quart" />
     </Link>
   );
 }

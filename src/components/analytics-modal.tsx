@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { RecruitingAnalyticsBody } from "@/components/application-analytics-modal";
 import { ProjectAnalyticsBody } from "@/components/project-analytics-modal";
+import { TabStrip } from "@/components/ui/tab-strip";
 
 export type AnalyticsPeriod = { id: string; name: string };
 
@@ -73,21 +74,12 @@ export function AnalyticsModal({
             </DropdownMenuContent>
           </DropdownMenu>
 
-          <div className="flex gap-1 border-b">
-            {TABS.map((t) => (
-              <button
-                key={t.key}
-                onClick={() => setTab(t.key)}
-                className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
-                  tab === t.key
-                    ? "border-foreground text-foreground"
-                    : "border-transparent text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
+          <TabStrip
+            aria-label="Analytics view"
+            value={tab}
+            onChange={setTab}
+            tabs={TABS.map((t) => ({ value: t.key, label: t.label }))}
+          />
 
           {tab === "recruiting" ? (
             <RecruitingAnalyticsBody periodId={periodId} onPeriodChange={setPeriodId} />

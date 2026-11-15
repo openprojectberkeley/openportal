@@ -1,7 +1,6 @@
 "use client";
 
 import { createClient } from "@/lib/supabase/client";
-import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronDown, SlidersHorizontal, Mail, BarChart3, Table2 } from "lucide-react";
@@ -38,7 +37,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Badge } from "@/components/ui/badge";
+
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -59,6 +58,11 @@ import { enrichAppRows } from "@/lib/applicant-rows";
 import { rankLabel } from "@/lib/application-rank";
 import { compareReviewPriority } from "@/lib/utils";
 import { DEFAULT_ACCENT } from "@/lib/portal-color";
+import { staggerStyle } from "@/lib/motion";
+import { toast } from "sonner";
+import { Combobox } from "@/components/ui/combobox";
+import { BackLink } from "@/components/back-link";
+import { AdminCrown } from "@/components/admin-crown";
 
 // The project currently under review: which project the reviewer is
 // assigned to (or, for a full-access reviewer, has picked from all of them).
@@ -463,19 +467,44 @@ export default function ManagerApplicationsPage() {
     }, { emphasizeId: applicationId });
     if (!changed) return;
     const supabase = createClient();
-    await supabase.from("application_wishlist").upsert(
+    const { error } = await supabase.from("application_wishlist").upsert(
       { application_id: applicationId, project_id: selectedProjectId, created_by: currentUserId, position },
       { onConflict: "application_id,project_id", ignoreDuplicates: true },
     );
+    if (error) {
+      flipMove(applicantsColumnRef.current, () => {
+        setWishlist((prev) => (prev ? prev.filter((id) => id !== applicationId) : prev));
+      });
+      toast.error("Couldn't save wishlist", { description: error.message });
+    }
   }, [selectedProjectId, currentUserId]);
 
   const removeFromWishlist = useCallback(async (applicationId: string) => {
     if (!selectedProjectId || selectedProjectId === ALL_PROJECTS) return;
+    let index = -1;
     flipMove(applicantsColumnRef.current, () => {
-      setWishlist((prev) => (prev ? prev.filter((id) => id !== applicationId) : prev));
+      setWishlist((prev) => {
+        index = prev ? prev.indexOf(applicationId) : -1;
+        return prev ? prev.filter((id) => id !== applicationId) : prev;
+      });
     }, { emphasizeId: applicationId });
     const supabase = createClient();
-    await supabase.from("application_wishlist").delete().eq("application_id", applicationId).eq("project_id", selectedProjectId);
+    const { error } = await supabase
+      .from("application_wishlist")
+      .delete()
+      .eq("application_id", applicationId)
+      .eq("project_id", selectedProjectId);
+    if (error) {
+      flipMove(applicantsColumnRef.current, () => {
+        setWishlist((prev) => {
+          if (!prev || prev.includes(applicationId)) return prev;
+          const next = [...prev];
+          next.splice(index < 0 ? next.length : Math.min(index, next.length), 0, applicationId);
+          return next;
+        });
+      });
+      toast.error("Couldn't save wishlist", { description: error.message });
+    }
   }, [selectedProjectId]);
 
   // Draft-round state for the selected project (Confirmed/Draft window,
@@ -778,8 +807,8 @@ export default function ManagerApplicationsPage() {
     // the single-project split view.
     <div className={`w-full ${allSelected ? "max-w-7xl" : "max-w-5xl"} mx-auto p-5 flex flex-col gap-6`}>
       <div className="flex flex-col gap-1">
-        <Link href="/manager" className="text-sm text-muted-foreground hover:text-foreground">← Back</Link>
-        <h1 className="text-2xl font-bold">Applications</h1>
+        <BackLink href="/manager" label="Manager" />
+        <h1 className="text-2xl font-bold tracking-tight">Applications</h1>
         <p className="text-sm text-muted-foreground">
           Review submitted applications and accept applicants into a project. Tip: use
           &ldquo;View as&rdquo; (bottom-right) to preview the accepted-member experience.
@@ -877,32 +906,26 @@ export default function ManagerApplicationsPage() {
               Reviewing for <span className="font-medium text-foreground">{reviewableProjects[0].name}</span>
             </span>
           ) : (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button className="flex items-center gap-2 self-start border rounded-md px-3 py-2 text-sm bg-background hover:bg-accent transition-colors">
+            // Searchable: execs switch between ~20 projects all review long.
+            <Combobox
+              aria-label="Reviewing for"
+              className="w-auto min-w-64 self-start"
+              contentClassName="w-72"
+              value={allSelected ? ALL_PROJECTS : selectedProject?.id ?? null}
+              onChange={setSelectedProjectId}
+              options={[
+                ...(fullAccessReview ? [{ value: ALL_PROJECTS, label: "All projects" }] : []),
+                ...reviewableProjects.map((p) => ({ value: p.id, label: p.name })),
+              ]}
+              placeholder="Select project"
+              searchPlaceholder="Search projects…"
+              renderValue={(o) => (
+                <>
                   <span className="text-muted-foreground">Reviewing for</span>
-                  <span className="font-medium">
-                    {allSelected ? "All projects" : selectedProject?.name ?? "Select project"}
-                  </span>
-                  <ChevronDown size={14} className="text-muted-foreground" />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start">
-                {fullAccessReview && (
-                  <>
-                    <DropdownMenuItem onSelect={() => setSelectedProjectId(ALL_PROJECTS)}>
-                      All projects
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                  </>
-                )}
-                {reviewableProjects.map((p) => (
-                  <DropdownMenuItem key={p.id} onSelect={() => setSelectedProjectId(p.id)}>
-                    {p.name}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
+                  <span className="truncate font-medium text-foreground">{o.label}</span>
+                </>
+              )}
+            />
           )}
         </div>
       )}
@@ -920,7 +943,7 @@ export default function ManagerApplicationsPage() {
       {/* Split view: current team on the left, applicants left to review
           (grouped by rank: 1st choice, 2nd choice, …) on the right */}
       {reviewableProjects?.length === 0 ? (
-        <div className="px-4 py-10 text-center text-sm text-muted-foreground border rounded-xl">
+        <div className="px-4 py-10 text-center text-sm text-muted-foreground rounded-xl surface">
           You aren&apos;t assigned to review any projects.
         </div>
       ) : allSelected ? (
@@ -965,15 +988,19 @@ export default function ManagerApplicationsPage() {
                 {roster === null ? (
                   <ApplicationListSkeleton rows={3} />
                 ) : roster.length === 0 ? (
-                  <div className="px-4 py-10 text-center text-sm text-muted-foreground border rounded-xl">
+                  <div className="px-4 py-10 text-center text-sm text-muted-foreground rounded-xl surface">
                     No one on this project yet.
                   </div>
                 ) : (
                   <div className="flex flex-col gap-2.5">
-                    {roster.map((m) => (
-                      <div key={m.user_id} className="flex items-center gap-2 border rounded-xl px-4 py-3">
+                    {roster.map((m, i) => (
+                      <div key={m.user_id} style={staggerStyle(i)} className="animate-fade-in-up flex items-center gap-2 rounded-xl surface px-4 py-3">
                         <PersonName userId={m.user_id} name={m.name} className="text-sm font-medium" />
-                        {m.isPm && <Badge variant="outline">PM</Badge>}
+                        {m.isPm && (
+                          <span title="PM" className="inline-flex">
+                            <AdminCrown active size={13} />
+                          </span>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -1057,11 +1084,11 @@ export default function ManagerApplicationsPage() {
                 {apps === null ? (
                   <ApplicationListSkeleton rows={4} />
                 ) : apps.length === 0 ? (
-                  <div className="px-4 py-10 text-center text-sm text-muted-foreground border rounded-xl">
+                  <div className="px-4 py-10 text-center text-sm text-muted-foreground rounded-xl surface">
                     No submitted applications for this project yet.
                   </div>
                 ) : groupedApps.length === 0 ? (
-                  <div className="px-4 py-10 text-center text-sm text-muted-foreground border rounded-xl">
+                  <div className="px-4 py-10 text-center text-sm text-muted-foreground rounded-xl surface">
                     Everyone&apos;s on the wishlist.
                   </div>
                 ) : (

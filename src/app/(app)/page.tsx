@@ -13,8 +13,9 @@ import { ResumeReviewPanel } from "@/components/resume-review-panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PortalGridSkeleton, CalendarSkeleton, ScoreboardCompactSkeleton } from "@/components/skeletons";
 import { FamilyScoreboardCard } from "@/components/family-scoreboard";
-import { AnnouncementBanners } from "@/components/announcement-banners";
 import { getHomeView, shouldShowReapplyBanner } from "@/lib/member-status";
+import { staggerStyle } from "@/lib/motion";
+import { optimistic } from "@/lib/optimistic";
 
 type CompletionState = {
   coffeeChat: boolean;
@@ -287,15 +288,28 @@ export default function HomePage() {
 
   // Settle a past coffee chat: attended (complete) or didn't happen (no_show).
   // The two flags are mutually exclusive, and either way the chat drops off the
-  // pending list. Mirrors the manager page's optimistic update — ignore on error.
-  const resolveChat = async (id: string, outcome: "complete" | "no_show") => {
+  // pending list at once; if the write is refused it comes back where it was.
+  const resolveChat = (id: string, outcome: "complete" | "no_show") => {
     const supabase = createClient();
     const patch = outcome === "complete"
       ? { complete: true, no_show: false }
       : { no_show: true, complete: false };
-    const { error } = await supabase.from("coffee_chats").update(patch).eq("id", id);
-    if (error) return;
-    setPendingChats((prev) => (prev ? prev.filter((c) => c.id !== id) : prev));
+    const index = pendingChats?.findIndex((c) => c.id === id) ?? -1;
+    const chat = index >= 0 ? pendingChats![index] : null;
+    void optimistic({
+      label: "coffee chat",
+      key: `coffee-chat:${id}`,
+      apply: () => setPendingChats((prev) => (prev ? prev.filter((c) => c.id !== id) : prev)),
+      rollback: () =>
+        setPendingChats((prev) => {
+          if (!prev || !chat || prev.some((c) => c.id === id)) return prev;
+          const next = [...prev];
+          next.splice(Math.min(index, next.length), 0, chat);
+          return next;
+        }),
+      commit: () => supabase.from("coffee_chats").update(patch).eq("id", id).select("id"),
+      requireRows: true,
+    });
   };
 
   if (view === "checklist") {
@@ -305,38 +319,42 @@ export default function HomePage() {
   if (view === "dashboard") {
     return (
       <div className="w-full max-w-6xl mx-auto p-5 flex flex-col gap-6">
-        <AnnouncementBanners />
-
         {/* Board/exec shortcut into the application manager, shown only while a
             period is open; the profile menu carries it the rest of the year. A
-            dark-gray pill; on hover white swipes in from the left (like the
-            portal cards), the text inverts, and it scales up a hair. */}
+            secondary pill; on hover the foreground colour swipes in from the
+            left (like the nav tabs) and the text inverts. It doesn't scale:
+            the hovered element itself shouldn't move. */}
         {isBoardOrExec && periodOpen && (
           <Link
             href="/manager"
             aria-label="Application Manager"
-            className="group relative self-center inline-flex items-center gap-2 overflow-hidden rounded-full bg-neutral-700 px-4 py-2 text-sm font-medium text-white shadow-sm transition-transform duration-200 ease-out hover:scale-[1.03]"
+            className="group relative self-center inline-flex items-center gap-2 overflow-hidden rounded-full bg-secondary px-4 py-2 text-sm font-medium text-secondary-foreground shadow-sm"
           >
             {/* White accent wipes in from the left on hover. */}
             <span
               aria-hidden
-              className="absolute inset-0 z-0 origin-left scale-x-0 bg-white transition-transform duration-300 ease-out group-hover:scale-x-100"
+              className="absolute inset-0 z-0 origin-left scale-x-0 bg-foreground transition-transform duration-3 ease-out-quart group-hover:scale-x-100 motion-reduce:transition-none"
             />
-            <span className="relative z-10 inline-flex items-center gap-2 whitespace-nowrap transition-colors duration-300 group-hover:text-neutral-900">
+            <span className="relative z-10 inline-flex items-center gap-2 whitespace-nowrap transition-colors duration-3 ease-out-quart group-hover:text-background">
               <ShieldCheck size={18} className="shrink-0" />
               Application Manager
             </span>
           </Link>
         )}
 
-        {firstName ? (
-          <h1 className="text-3xl font-bold">{`Hi ${firstName}!`}</h1>
-        ) : (
-          <Skeleton className="h-9 w-48" />
-        )}
+        {/* Greeting and the resume pointer share one row; the card wraps under
+            the greeting on narrow screens. */}
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          {firstName ? (
+            <h1 className="text-4xl font-bold tracking-tight animate-fade-in-up">{`Hi, ${firstName}`}</h1>
+          ) : (
+            <Skeleton className="h-10 w-56" />
+          )}
+          <ResumeReviewPanel compact className="w-full animate-fade-in-up sm:w-72" />
+        </div>
 
         {pendingChats && pendingChats.length > 0 && (
-          <div className="flex flex-col gap-3 rounded-xl border border-foreground/15 bg-foreground/[0.03] p-4">
+          <div className="flex flex-col gap-3 rounded-xl surface p-4">
             <div className="flex items-center gap-2">
               <Coffee size={16} className="shrink-0 text-muted-foreground" />
               <div className="flex flex-col gap-0.5">
@@ -350,7 +368,7 @@ export default function HomePage() {
               {pendingChats.map((chat) => (
                 <div
                   key={chat.id}
-                  className="flex flex-wrap items-center gap-3 rounded-lg border bg-background px-3 py-2"
+                  className="flex flex-wrap items-center gap-3 rounded-lg bg-background px-3 py-2 shadow-edge"
                 >
                   {chat.avatarUrl ? (
                     <img src={chat.avatarUrl} alt={chat.name} className="h-8 w-8 rounded-full object-cover flex-shrink-0" />
@@ -375,7 +393,7 @@ export default function HomePage() {
                     <button
                       type="button"
                       onClick={() => resolveChat(chat.id, "complete")}
-                      className="inline-flex items-center gap-1 rounded-lg border border-green-600/30 bg-green-600/10 px-2.5 py-1.5 text-xs font-medium text-green-700 hover:bg-green-600/20 dark:text-green-400 transition-colors"
+                      className="inline-flex items-center gap-1 rounded-lg bg-success/10 px-2.5 py-1.5 text-xs font-medium text-success hover:bg-success/20 transition-colors"
                     >
                       <Check size={14} />
                       Yes
@@ -383,7 +401,7 @@ export default function HomePage() {
                     <button
                       type="button"
                       onClick={() => resolveChat(chat.id, "no_show")}
-                      className="inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:border-red-500/40 hover:text-red-600 dark:hover:text-red-400 transition-colors"
+                      className="inline-flex items-center gap-1 rounded-lg bg-foreground/[0.05] px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
                     >
                       <X size={14} />
                       No, didn&apos;t happen
@@ -396,7 +414,7 @@ export default function HomePage() {
         )}
 
         {reapply && (
-          <div className="flex flex-col gap-3 rounded-xl border border-foreground/15 bg-foreground/[0.03] p-4">
+          <div className="flex flex-col gap-3 rounded-xl surface p-4">
             <div className="flex flex-col gap-0.5">
               <h2 className="text-sm font-semibold">Applications are open for {reapply.periodName}</h2>
               <p className="text-xs text-muted-foreground">
@@ -417,13 +435,14 @@ export default function HomePage() {
           </div>
         )}
 
-        <ResumeReviewPanel />
-
         <div className="flex flex-col lg:flex-row gap-6">
           <div className="flex-1 min-w-0">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+            <div className="flex items-baseline justify-between mb-3">
+              <h2 className="text-base font-semibold tracking-tight">
                 Portals
+                {portals && portals.length > 0 && (
+                  <span className="ml-1.5 font-normal text-muted-foreground tabular-nums">{portals.length}</span>
+                )}
               </h2>
             </div>
             {portals === null ? (
@@ -433,9 +452,12 @@ export default function HomePage() {
                 You&apos;re not a member of any portals yet.
               </div>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {portals.map((p) => (
-                  <PortalCard key={p.id} portal={p} />
+              // auto-rows-fr: every row as tall as the tallest, so no card is short.
+              <div className="grid grid-cols-1 sm:grid-cols-2 auto-rows-fr gap-4">
+                {portals.map((p, i) => (
+                  <div key={p.id} className="h-full animate-fade-in-up" style={staggerStyle(i)}>
+                    <PortalCard portal={p} />
+                  </div>
                 ))}
               </div>
             )}
@@ -443,16 +465,16 @@ export default function HomePage() {
 
           <div className="w-full lg:w-80 lg:flex-shrink-0 order-first lg:order-none flex flex-col gap-6">
             <div className="flex flex-col">
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+              <div className="flex items-baseline justify-between mb-3">
+                <h2 className="text-base font-semibold tracking-tight">
                   <Link
                     href="/calendar"
-                    className="group flex items-center gap-1 transition-colors hover:text-foreground"
+                    className="group flex items-center gap-1 transition-colors hover:text-muted-foreground"
                   >
                     Calendar
                     <ArrowRight
-                      size={12}
-                      className="transition-transform group-hover:translate-x-0.5"
+                      size={14}
+                      className="transition-transform duration-instant ease-out-quart group-hover:translate-x-0.5"
                       aria-hidden
                     />
                   </Link>
@@ -512,7 +534,7 @@ function ReapplyStep({
     return (
       <span
         aria-disabled
-        className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm bg-background opacity-50 cursor-not-allowed"
+        className="inline-flex items-center gap-2 rounded-lg surface px-3 py-2 text-sm opacity-50 cursor-not-allowed"
       >
         <span className="h-6 w-6 rounded-full flex items-center justify-center flex-shrink-0 bg-foreground/5 text-foreground/70">
           <Icon size={14} />
@@ -526,17 +548,17 @@ function ReapplyStep({
   return (
     <Link
       href={href}
-      className="group inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm bg-background hover:border-foreground/20 hover:shadow-sm transition-all"
+      className="group inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm surface rim-card transition-colors hover:bg-foreground/[0.07]"
     >
       <span
         className={`h-6 w-6 rounded-full flex items-center justify-center flex-shrink-0 transition-colors ${
-          done ? "bg-green-600/10 text-green-700 dark:text-green-400" : "bg-foreground/5 text-foreground/70"
+          done ? "bg-success/10 text-success" : "bg-foreground/5 text-foreground/70"
         }`}
       >
         {done ? <Check size={14} /> : <Icon size={14} />}
       </span>
       <span className="font-medium">{label}</span>
-      <ArrowRight size={14} className="text-muted-foreground/50 group-hover:translate-x-0.5 group-hover:text-muted-foreground transition-all" />
+      <ArrowRight size={14} className="text-muted-foreground/50 group-hover:translate-x-0.5 group-hover:text-muted-foreground transition-[transform,color] duration-instant ease-out-quart" />
     </Link>
   );
 }
@@ -574,8 +596,8 @@ function ApplicantChecklist({
           <div className="flex items-center gap-3">
             <div className="h-1.5 flex-1 rounded-full bg-muted overflow-hidden">
               <div
-                className="h-full rounded-full bg-foreground transition-all duration-500"
-                style={{ width: `${(doneCount / items.length) * 100}%` }}
+                className="h-full w-full rounded-full bg-foreground transition-[clip-path] duration-5 ease-in-out-cubic"
+                style={{ clipPath: `inset(0 ${100 - (doneCount / items.length) * 100}% 0 0 round 9999px)` }}
               />
             </div>
             <span className="text-xs font-medium text-muted-foreground tabular-nums">
@@ -588,11 +610,11 @@ function ApplicantChecklist({
               <button
                 key={href}
                 onClick={() => router.push(href)}
-                className="group border rounded-xl px-4 py-3.5 flex items-center gap-3.5 text-left bg-background hover:border-foreground/20 hover:shadow-sm transition-all"
+                className="group rounded-xl px-4 py-3.5 flex items-center gap-3.5 text-left surface rim-card transition-colors hover:bg-foreground/[0.07]"
               >
                 <div
                   className={`h-10 w-10 rounded-full flex items-center justify-center flex-shrink-0 transition-colors ${
-                    done ? "bg-green-600/10 text-green-700 dark:text-green-400" : "bg-foreground/5 text-foreground/70"
+                    done ? "bg-success/10 text-success" : "bg-foreground/5 text-foreground/70"
                   }`}
                 >
                   {done ? <Check size={18} /> : <Icon size={18} />}
@@ -601,14 +623,14 @@ function ApplicantChecklist({
                   <span className="text-sm font-medium">{label}</span>
                   <span className="text-xs text-muted-foreground">{description}</span>
                 </div>
-                <ArrowRight size={16} className="text-muted-foreground/50 flex-shrink-0 group-hover:translate-x-0.5 group-hover:text-muted-foreground transition-all" />
+                <ArrowRight size={16} className="text-muted-foreground/50 flex-shrink-0 group-hover:translate-x-0.5 group-hover:text-muted-foreground transition-[transform,color] duration-instant ease-out-quart" />
               </button>
             ))}
           </div>
 
           {/* Not a step in the checklist — an always-available service, so it
               sits below the progress bar and never counts toward it. */}
-          <div className="pt-2 border-t">
+          <div className="pt-4">
             <ResumeReviewPanel />
           </div>
 

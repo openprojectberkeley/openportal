@@ -16,6 +16,7 @@ import {
   type Persona,
   type MemberRoleRow,
 } from "@/lib/roles";
+import { Segmented } from "@/components/ui/segmented";
 
 type RoleSim = {
   ready: boolean;
@@ -32,6 +33,20 @@ type RoleSim = {
 
 const RoleContext = createContext<RoleSim | null>(null);
 
+// Lets a floating dock (support-button.tsx) host the "View as" switcher in its
+// own row. While one is mounted the provider stops rendering the standalone
+// pill, so the two bottom-right controls sit side by side instead of stacked
+// over the page. Pages without a dock (admin, onboarding) keep the standalone.
+const DockClaimContext = createContext<((claimed: boolean) => void) | null>(null);
+
+export function useClaimFloatingDock() {
+  const claim = useContext(DockClaimContext);
+  useEffect(() => {
+    claim?.(true);
+    return () => claim?.(false);
+  }, [claim]);
+}
+
 function readCookie(name: string): string | null {
   if (typeof document === "undefined") return null;
   const match = document.cookie.match(new RegExp("(?:^|; )" + name + "=([^;]*)"));
@@ -45,6 +60,7 @@ export function RoleSimulationProvider({ children }: { children: React.ReactNode
   const [realLevels, setRealLevels] = useState<string[]>([]);
   const [persona, setPersonaState] = useState<Persona>("member");
   const [isPm, setIsPm] = useState(false);
+  const [dockClaimed, setDockClaimed] = useState(false);
 
   useEffect(() => {
     const supabase = createClient();
@@ -107,29 +123,39 @@ export function RoleSimulationProvider({ children }: { children: React.ReactNode
 
   return (
     <RoleContext.Provider value={value}>
-      {children}
-      {ready && canSimulate && <RoleSimToggle persona={persona} onChange={setPersona} />}
+      <DockClaimContext.Provider value={setDockClaimed}>
+        {children}
+        {ready && canSimulate && !dockClaimed && (
+          <RoleSimToggle persona={persona} onChange={setPersona} className="fixed bottom-4 right-4 z-50" />
+        )}
+      </DockClaimContext.Provider>
     </RoleContext.Provider>
   );
 }
 
-function RoleSimToggle({ persona, onChange }: { persona: Persona; onChange: (p: Persona) => void }) {
+export function RoleSimToggle({
+  persona,
+  onChange,
+  className,
+}: {
+  persona: Persona;
+  onChange: (p: Persona) => void;
+  className?: string;
+}) {
   return (
-    <div className="fixed bottom-4 right-4 z-50 flex items-center gap-2 rounded-full border bg-background/95 px-2 py-1.5 shadow-lg backdrop-blur">
+    <div
+      className={`flex items-center gap-2 rounded-full border glass px-2 py-1.5 shadow-overlay ${className ?? ""}`}
+    >
       <span className="pl-1.5 text-[11px] font-medium text-muted-foreground">View as</span>
-      <div className="flex items-center gap-0.5">
-        {PERSONAS.map((p) => (
-          <button
-            key={p}
-            onClick={() => onChange(p)}
-            className={`rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
-              persona === p ? "bg-foreground text-background" : "text-muted-foreground hover:bg-accent"
-            }`}
-          >
-            {PERSONA_LABELS[p]}
-          </button>
-        ))}
-      </div>
+      <Segmented
+        aria-label="View as"
+        shape="pill"
+        className="border-0 p-0"
+        itemClassName="px-2.5"
+        value={persona}
+        onChange={onChange}
+        options={PERSONAS.map((p) => ({ value: p, label: PERSONA_LABELS[p] }))}
+      />
     </div>
   );
 }

@@ -3,14 +3,13 @@
 import { useState } from "react";
 import { CircleHelp, Send, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { useRoleSim } from "@/components/role-simulation-provider";
+import { RoleSimToggle, useClaimFloatingDock, useRoleSim } from "@/components/role-simulation-provider";
 import { Button } from "@/components/ui/button";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { cn } from "@/lib/utils";
 
 type SendState = "idle" | "sending" | "sent" | "error";
 
@@ -19,15 +18,12 @@ type SendState = "idle" | "sending" | "sent" | "error";
 // function (the static site can't send mail directly). Mounted once in the
 // authenticated app layout so it appears on every signed-in page.
 export function SupportButton() {
-  const { canSimulate } = useRoleSim();
+  const { ready, canSimulate, persona, setPersona } = useRoleSim();
+  useClaimFloatingDock();
   const [open, setOpen] = useState(false);
   const [message, setMessage] = useState("");
   const [state, setState] = useState<SendState>("idle");
   const [error, setError] = useState<string | null>(null);
-
-  // The role-sim "View as" pill also lives at bottom-4 right-4; lift the button
-  // above it when that pill is present so they don't overlap.
-  const bottomClass = canSimulate ? "bottom-20" : "bottom-4";
 
   async function handleSend() {
     const trimmed = message.trim();
@@ -62,10 +58,7 @@ export function SupportButton() {
     <>
       {open && (
         <div
-          className={cn(
-            "fixed right-4 z-50 flex w-80 max-w-[calc(100vw-2rem)] flex-col rounded-xl border bg-background/95 shadow-lg backdrop-blur",
-            canSimulate ? "bottom-36" : "bottom-20",
-          )}
+          className="fixed bottom-[4.5rem] right-4 z-50 flex w-80 max-w-[calc(100vw-2rem)] origin-bottom-right animate-in fade-in-0 zoom-in-[.96] slide-in-from-bottom-1 duration-2 ease-out-quart flex-col rounded-xl border glass shadow-overlay"
           role="dialog"
           aria-label="Contact tech support"
         >
@@ -114,22 +107,28 @@ export function SupportButton() {
         </div>
       )}
 
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            type="button"
-            size="icon"
-            aria-label="Contact tech support"
-            onClick={() => setOpen((v) => !v)}
-            className={cn("fixed right-4 z-50 size-11 rounded-full shadow-lg", bottomClass)}
-          >
-            <CircleHelp className="size-5" />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent side="left" align="end">
-          Stuck? Contact Tech for support
-        </TooltipContent>
-      </Tooltip>
+      {/* One bottom-right dock: the "View as" switcher (staff only) and the
+          help button share a row instead of stacking over the page. */}
+      <div className="fixed bottom-4 right-4 z-50 flex items-center gap-2">
+        {ready && canSimulate && <RoleSimToggle persona={persona} onChange={setPersona} />}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              size="icon"
+              aria-label="Contact tech support"
+              aria-expanded={open}
+              onClick={() => setOpen((v) => !v)}
+              className="size-11 rounded-full shadow-lg"
+            >
+              <CircleHelp className="size-5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="top" align="end">
+            Stuck? Contact Tech for support
+          </TooltipContent>
+        </Tooltip>
+      </div>
     </>
   );
 }

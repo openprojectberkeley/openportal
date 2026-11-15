@@ -21,61 +21,102 @@
     --muted-foreground: 255 8% 44%;
     --accent: 255 18% 92%;
     --accent-foreground: 255 12% 18%;
-    --destructive: 0 84.2% 60.2%;
+    --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 98%;
-    --border: 255 14% 88%;
-    --input: 255 14% 88%;
+    /* Status colours. Use these, not raw green/amber/blue: they're tuned per
+       theme for text contrast, and `/10`-style alpha gives the soft fill. */
+    --success: 152 62% 32%;
+    --success-foreground: 0 0% 100%;
+    --warning: 32 92% 40%;
+    --warning-foreground: 0 0% 100%;
+    --info: 221 78% 50%;
+    --info-foreground: 0 0% 100%;
+    /* Edges: a dark ink at very low alpha, so hairlines read as glass on any
+       surface (tinted cards included) instead of a grey rule. Inputs get a
+       little more so fields stay findable. --edge-hi is the lit top edge on
+       floating surfaces (shadow-overlay / shadow-edge). */
+    --border: 255 30% 20%;
+    --border-alpha: 0.09;
+    --input: 255 30% 20%;
+    --input-alpha: 0.16;
+    --edge-hi: 0 0% 100% / 0.7;
+    /* Glass: how much of the surface colour a floating layer keeps; the rest
+       is the blurred page behind it. */
+    --glass-alpha: 0.72;
+    --glass-strong-alpha: 0.86;
+    /* Gradient rim (see the rim block in @layer components): the white
+       highlight at the lit corner, and the far-corner return. In light mode
+       the return is dark ink, since a white line vanishes on light surfaces. */
+    --rim-light: 0.6;
+    --rim-ink-color: 255 30% 20%;
+    --rim-ink: 0.12;
     --ring: 255 12% 40%;
 
-    /* Sheen laid over accent-painted surfaces — see accentSheen() in
-       lib/portal-color.ts. A white lift at one corner, a shade at the other.
-
-       The card pair is theme-split: it sits on a tint mixed toward --muted, so
-       the same alpha reads very differently on the two bases. White over a dark
-       dark-mode surface goes a long way, while on a light tinted card the base
-       is already near-white and the drop does most of the work.
-
-       --sheen-lift-accent paints surfaces showing the RAW accent — the dashboard
-       card's hover swipe, the calendar's portal tab. Three things make it its
-       own value. That colour is the portal's own hex in BOTH themes, so it is
-       not theme-split. Those surfaces are large, so the corner-to-corner delta
-       is spread over a long diagonal and needs more range to read at all. And
-       they carry readableTextColor() text directly, which is why there is no
-       matching drop: see the comment on accentSheen(). */
-    --sheen-lift: 0.26;
-    --sheen-drop: 0.11;
-    --sheen-lift-accent: 0.34;
     --chart-1: 12 76% 61%;
     --chart-2: 173 58% 39%;
     --chart-3: 197 37% 24%;
     --chart-4: 43 74% 66%;
     --chart-5: 27 87% 67%;
     --radius: 0.5rem;
+
+    /* Motion tokens. Mirrored in lib/motion.ts (JS animations) and exposed to
+       Tailwind as `duration-1..5` / `ease-out-quart` etc. (tailwind.config.ts).
+       Ease-out for things entering/leaving, ease-in-out for things already on
+       screen that move, plain `ease` for colour/opacity hovers, linear for time.
+       Frequent hovers/selections use --dur-0 (100ms, the Tailwind default); 120–240ms
+       is for overlays and rarely-used controls; 300+ for large or illustrative
+       motion. */
+    --dur-0: 100ms; /* instant tier: common hovers and selections */
+    --dur-1: 120ms;
+    --dur-2: 180ms;
+    --dur-3: 240ms;
+    --dur-4: 300ms;
+    --dur-5: 500ms;
+    --ease-out-quad: cubic-bezier(.25, .46, .45, .94);
+    --ease-out-cubic: cubic-bezier(.215, .61, .355, 1);
+    --ease-out-quart: cubic-bezier(.165, .84, .44, 1);
+    --ease-out-expo: cubic-bezier(.19, 1, .22, 1);
+    --ease-in-out-cubic: cubic-bezier(.645, .045, .355, 1);
+    --ease-in-out-quart: cubic-bezier(.77, 0, .175, 1);
   }
   .dark {
-    --background: 0 0% 3.9%;
-    --foreground: 0 0% 98%;
-    --card: 0 0% 3.9%;
-    --card-foreground: 0 0% 98%;
-    --popover: 0 0% 3.9%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 0 0% 98%;
-    --primary-foreground: 0 0% 9%;
-    --secondary: 0 0% 14.9%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 0 0% 14.9%;
-    --muted-foreground: 0 0% 63.9%;
-    --accent: 0 0% 14.9%;
-    --accent-foreground: 0 0% 98%;
-    --destructive: 0 62.8% 30.6%;
+    /* Same hue-255 tint as light, so the two themes read as one product.
+       Muted (the card surface) sits closer to the background than stock
+       shadcn's 14.9% did: cards lift off the page instead of reading as grey
+       slabs. accentTint() mixes toward --muted, so accent tiles follow. */
+    --background: 255 14% 5%;
+    --foreground: 255 20% 97%;
+    --card: 255 12% 7.5%;
+    --card-foreground: 255 20% 97%;
+    --popover: 255 12% 8%;
+    --popover-foreground: 255 20% 97%;
+    --primary: 255 20% 97%;
+    --primary-foreground: 255 14% 8%;
+    --secondary: 255 10% 13%;
+    --secondary-foreground: 255 20% 97%;
+    --muted: 255 10% 10.5%;
+    --muted-foreground: 255 8% 64%;
+    --accent: 255 10% 14%;
+    --accent-foreground: 255 20% 97%;
+    --destructive: 0 72% 60%;
     --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 14.9%;
-    --input: 0 0% 14.9%;
-    --ring: 0 0% 83.1%;
-
-    /* Card pair only — the -accent pair is theme-independent, see :root. */
-    --sheen-lift: 0.12;
-    --sheen-drop: 0.20;
+    --success: 152 55% 52%;
+    --success-foreground: 152 60% 8%;
+    --warning: 38 92% 58%;
+    --warning-foreground: 38 80% 8%;
+    --info: 215 90% 68%;
+    --info-foreground: 215 60% 10%;
+    --border: 255 25% 92%;
+    --border-alpha: 0.075;
+    --input: 255 25% 92%;
+    --input-alpha: 0.12;
+    --edge-hi: 0 0% 100% / 0.07;
+    --glass-alpha: 0.66;
+    --glass-strong-alpha: 0.84;
+    --rim-light: 0.35;
+    --rim-ink-color: 0 0% 100%;
+    --rim-ink: 0.1225;
+    --ring: 255 10% 72%;
     --chart-1: 220 70% 50%;
     --chart-2: 160 60% 45%;
     --chart-3: 30 80% 55%;
@@ -88,6 +129,13 @@
   * {
     @apply border-border;
   }
+  /* Form fields carry a touch more edge than containers so they stay
+     findable; an explicit border-* class on the field still wins. */
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  textarea,
+  select {
+    @apply border-input;
+  }
   html {
     /* Disable vertical elastic/rubber-band overscroll so the page can't be
        dragged past its bounds (which visually shifts the fixed header). Only the
@@ -98,6 +146,115 @@
   body {
     @apply bg-background text-foreground;
     overscroll-behavior-y: none;
+    /* Tabular figures app-wide: this is a data app, and counts, scores,
+       times and badges change in place. Proportional digits would make them
+       jitter sideways as they tick. Long-form prose opts back out below. */
+    font-variant-numeric: tabular-nums;
+  }
+  .prose {
+    font-variant-numeric: proportional-nums;
+  }
+}
+
+@layer components {
+  /* Glass for floating layers only (menus, popovers, toasts, the dock, the
+     header, dialogs). Content surfaces stay solid/tinted. The surface keeps
+     --glass-alpha of its colour and the page behind is blurred and slightly
+     saturated, so colour from cards underneath tints the layer. Pair with
+     shadow-overlay for the lit top edge. Without backdrop-filter support it
+     falls back to an opaque surface so text never sits on a busy page. */
+  .glass,
+  .glass-strong,
+  .glass-bar {
+    background-color: hsl(var(--popover));
+  }
+  @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .glass {
+      background-color: hsl(var(--popover) / var(--glass-alpha));
+      -webkit-backdrop-filter: blur(20px) saturate(1.8);
+      backdrop-filter: blur(20px) saturate(1.8);
+    }
+    /* Dialogs: more opaque, since they hold forms and long text. */
+    .glass-strong {
+      background-color: hsl(var(--background) / var(--glass-strong-alpha));
+      -webkit-backdrop-filter: blur(28px) saturate(1.6);
+      backdrop-filter: blur(28px) saturate(1.6);
+    }
+    /* The sticky header: page colour, lighter blur, content scrolls under. */
+    .glass-bar {
+      background-color: hsl(var(--background) / 0.72);
+      -webkit-backdrop-filter: blur(16px) saturate(1.8);
+      backdrop-filter: blur(16px) saturate(1.8);
+    }
+  }
+
+  /* Gradient rim (picked in /lab/glass): a 1px edge that's bright where the
+     light falls (160°, top-left), fades to nothing along the sides, and
+     returns faintly on the far corner (white in dark mode, ink in light).
+     Drawn as a masked ring on ::before, so it follows the radius, costs no
+     layout and never takes clicks. Three strengths via --rim-k:
+       .rim / .glass / .glass-strong   1    floating layers
+       .rim-card                       0.6  cards you click
+       .rim-section / .surface         0.3  tinted panels and sections
+     Content gets the rim but never the blur. `position: relative` lives in
+     this layer, so a `fixed`/`absolute` utility on the element still wins. */
+  .rim,
+  .glass,
+  .glass-strong {
+    --rim-k: 1;
+  }
+  .rim-section,
+  .surface {
+    --rim-k: 0.3;
+  }
+  /* After .surface, so a clickable tinted card (`surface rim-card`) gets the
+     card strength. */
+  .rim-card {
+    --rim-k: 0.6;
+  }
+  /* The standard section: a faint tint plus the section rim. */
+  .surface {
+    background-color: hsl(var(--foreground) / 0.035);
+  }
+  .rim,
+  .glass,
+  .glass-strong,
+  .rim-card,
+  .rim-section,
+  .surface {
+    position: relative;
+  }
+  .rim::before,
+  .glass::before,
+  .glass-strong::before,
+  .rim-card::before,
+  .rim-section::before,
+  .surface::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    /* Above layered card content (e.g. the portal card's colour swipe); it's
+       a 1px ring with pointer-events off, so it never covers anything. */
+    z-index: 30;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(
+      160deg,
+      hsl(0 0% 100% / calc(var(--rim-light) * var(--rim-k))) 0%,
+      transparent 45%,
+      transparent 70%,
+      hsl(var(--rim-ink-color) / calc(var(--rim-ink) * var(--rim-k))) 100%
+    );
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+    pointer-events: none;
+  }
+  /* Headings speak in the display face (Satoshi); body stays Geist. */
+  h1,
+  h2,
+  h3 {
+    @apply font-display;
   }
 
   /* Hide native scrollbars everywhere; a custom overlay scrollbar is rendered
@@ -152,5 +309,25 @@
 
 ::view-transition-group(*) {
   animation-duration: 320ms;
-  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  animation-timing-function: var(--ease-out-expo);
+}
+
+/* One switch for everyone who asked the OS for less motion: transitions and
+   keyframes (tailwindcss-animate's enter/exit included) finish instantly, so
+   state still changes but nothing travels. JS-driven motion checks the same
+   media query (prefersReducedMotion() in lib/flip-move.ts). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
 }

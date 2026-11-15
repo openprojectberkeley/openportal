@@ -3,8 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ScrollArea } from "@/components/overlay-scrollbar";
 import { dayKey, formatEventTime, formatHour, shortTime, WEEKDAYS_SHORT } from "@/lib/dates";
-import { eventSurface } from "@/lib/event-tint";
-import { accentSheen } from "@/lib/portal-color";
+import { eventBarColor } from "@/lib/event-tint";
 import { isBandEvent, layoutDay } from "@/lib/week-layout";
 import { cn } from "@/lib/utils";
 import type { PortalEvent } from "@/lib/use-calendar-events";
@@ -117,13 +116,15 @@ export function CalendarWeekGrid({
                     type="button"
                     onClick={() => onOpenEvent(ev, key)}
                     title={ev.title}
-                    style={{
-                      backgroundColor: eventSurface(ev.category, color, 26),
-                      backgroundImage: accentSheen(),
-                    }}
-                    className="w-full truncate rounded px-1 py-0.5 text-left text-[11px] font-medium leading-tight transition-opacity hover:opacity-85 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    // No fill: bar + title, like every event.
+                    className="flex w-full min-w-0 items-center gap-1 rounded px-1 py-0.5 text-left text-[11px] font-medium leading-tight transition-colors hover:bg-foreground/[0.05] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                   >
-                    {ev.title}
+                    <span
+                      aria-hidden
+                      className="h-3 w-[2px] shrink-0 rounded-full"
+                      style={{ backgroundColor: eventBarColor(ev.category, color) }}
+                    />
+                    <span className="min-w-0 truncate">{ev.title}</span>
                   </button>
                 );
               })}
@@ -166,6 +167,7 @@ export function CalendarWeekGrid({
 
                 {layoutDay(timed, d, HOUR_PX, MIN_BLOCK_PX).map(({ ev, topPx, heightPx, lane, lanes }) => {
                   const { color } = resolve(ev);
+                  const bar = eventBarColor(ev.category, color);
                   return (
                     <button
                       key={ev.id}
@@ -176,14 +178,17 @@ export function CalendarWeekGrid({
                         top: topPx,
                         height: heightPx,
                         left: `${(lane / lanes) * 100}%`,
-                        width: `${100 / lanes}%`,
-                        backgroundColor: eventSurface(ev.category, color, 26),
-                        backgroundImage: accentSheen(),
+                        // A 2px gap between lanes instead of a border.
+                        width: `calc(${100 / lanes}% - 2px)`,
+                        // Keeps a faint tint of the time span (hour lines show
+                        // through); the identity is the bar on the left.
+                        backgroundColor: `color-mix(in srgb, ${bar} 14%, transparent)`,
                       }}
                       // focus-visible:z-20 so a focused block in a narrow lane
                       // isn't occluded by its neighbour.
-                      className="absolute z-10 overflow-hidden rounded border border-background/50 px-1 py-0.5 text-left text-[11px] leading-tight transition-opacity hover:opacity-85 focus-visible:z-20 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      className="absolute z-10 overflow-hidden rounded py-0.5 pl-2 pr-1 text-left text-[11px] leading-tight transition-colors hover:brightness-110 focus-visible:z-20 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                     >
+                      <span aria-hidden className="absolute bottom-0.5 left-0.5 top-0.5 w-[3px] rounded-full" style={{ backgroundColor: bar }} />
                       <span className="block truncate font-medium">{ev.title}</span>
                       <span className="block truncate opacity-70">{shortTime(ev.start_time)}</span>
                     </button>
@@ -193,7 +198,7 @@ export function CalendarWeekGrid({
                 {key === todayKey && nowTopPx !== null && (
                   <div
                     aria-hidden
-                    className="pointer-events-none absolute inset-x-0 z-20 h-px bg-red-500"
+                    className="pointer-events-none absolute inset-x-0 z-20 h-px bg-destructive"
                     style={{ top: nowTopPx }}
                   />
                 )}

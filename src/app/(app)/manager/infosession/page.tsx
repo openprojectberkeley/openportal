@@ -1,11 +1,13 @@
 "use client";
 
 import { createClient } from "@/lib/supabase/client";
-import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { CodesTableSkeleton } from "@/components/skeletons";
 import { ScrollArea } from "@/components/overlay-scrollbar";
 import { PersonName } from "@/components/person-profile-provider";
+import { optimistic } from "@/lib/optimistic";
+import { BackLink } from "@/components/back-link";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 
 const PAGE_SIZE = 20;
 
@@ -39,7 +41,7 @@ export default function ManagerInfosessionPage() {
   const [genError, setGenError] = useState<string | null>(null);
   const [newCode, setNewCode] = useState<string | null>(null);
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const deletingId: string | null = null; // deletes are optimistic: the row leaves at once
 
   const load = useCallback(async (uid: string, pageArg: number) => {
     setLoading(true);
@@ -145,31 +147,32 @@ export default function ManagerInfosessionPage() {
       : `Delete code ${row?.code ?? "this code"}? This can't be undone.`;
     if (!window.confirm(message)) return;
 
-    setDeletingId(id);
+    // The row leaves the table at once; the delete runs behind it and the
+    // page reloads once it lands. A refusal puts the row back.
     const supabase = createClient();
-    const { error } = await supabase
-      .from("infosesh_attendance")
-      .delete()
-      .eq("id", id)
-      .eq("member_id", userId);
-
-    if (error) {
-      setGenError(error.message);
-      setDeletingId(null);
-      return;
-    }
-
-    // Clear the highlighted "new code" box if it's the one we just deleted.
-    if (row && newCode === row.code) {
-      setNewCode(null);
-      setCopiedCode(null);
-    }
-
-    // If we just deleted the last row on this page, step back a page.
-    const nextPage = rows.length === 1 && page > 0 ? page - 1 : page;
-    setPage(nextPage);
-    await load(userId, nextPage);
-    setDeletingId(null);
+    const rowsBefore = rows;
+    void optimistic({
+      label: "code deletion",
+      key: `infosesh-code:${id}`,
+      apply: () => {
+        setRows((prev) => prev.filter((r) => r.id !== id));
+        // Clear the highlighted "new code" box if it's the one being deleted.
+        if (row && newCode === row.code) {
+          setNewCode(null);
+          setCopiedCode(null);
+        }
+      },
+      rollback: () => setRows(rowsBefore),
+      commit: () => supabase.from("infosesh_attendance").delete().eq("id", id).eq("member_id", userId).select("id"),
+      requireRows: true,
+      onCommitted: () => {
+        // If we just deleted the last row on this page, step back a page.
+        const nextPage = rowsBefore.length === 1 && page > 0 ? page - 1 : page;
+        setPage(nextPage);
+        void load(userId, nextPage);
+      },
+      onFailed: (message) => setGenError(message),
+    });
   };
 
   const copyCode = async (code: string) => {
@@ -187,8 +190,8 @@ export default function ManagerInfosessionPage() {
   return (
     <div className="w-full max-w-3xl mx-auto p-6 flex flex-col gap-10">
       <div className="flex flex-col gap-1">
-        <Link href="/manager" className="text-sm text-muted-foreground hover:text-foreground">← Back</Link>
-        <h1 className="text-2xl font-bold">Infosession Attendance</h1>
+        <BackLink href="/manager" label="Manager" />
+        <h1 className="text-2xl font-bold tracking-tight">Infosession Attendance</h1>
         <p className="text-sm text-muted-foreground">
           Generate a code, then read it out to an applicant so they can record their attendance.
         </p>
@@ -313,9 +316,10 @@ export default function ManagerInfosessionPage() {
                 <button
                   onClick={() => goToPage(page - 1)}
                   disabled={page === 0}
-                  className="rounded-md border px-3 py-1.5 text-sm hover:bg-accent transition-colors disabled:opacity-30"
+                  aria-label="Previous page"
+                  className="flex h-7 w-7 items-center justify-center rounded-md border hover:bg-accent transition-colors disabled:opacity-30"
                 >
-                  Previous
+                  <ChevronLeft size={14} />
                 </button>
                 <span className="text-sm text-muted-foreground tabular-nums">
                   Page {page + 1} of {totalPages}
@@ -323,9 +327,10 @@ export default function ManagerInfosessionPage() {
                 <button
                   onClick={() => goToPage(page + 1)}
                   disabled={page + 1 >= totalPages}
-                  className="rounded-md border px-3 py-1.5 text-sm hover:bg-accent transition-colors disabled:opacity-30"
+                  aria-label="Next page"
+                  className="flex h-7 w-7 items-center justify-center rounded-md border hover:bg-accent transition-colors disabled:opacity-30"
                 >
-                  Next
+                  <ChevronRight size={14} />
                 </button>
               </div>
             )}

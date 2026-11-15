@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import type { Semester } from "@/lib/scoring";
+import { Disclosure } from "@/components/ui/disclosure";
 
 /**
  * Manage scoring semesters: create, rename, retime, and choose which one is
@@ -108,16 +109,14 @@ export function SemestersDialog({
         </DialogHeader>
 
         <div className="flex flex-col gap-4">
-          <div className="border rounded-lg divide-y">
+          <div className="flex flex-col gap-0.5">
             {semesters.map((s) => (
               <div key={s.id} className="flex items-center gap-2 px-3 py-2">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-medium truncate">{s.name}</span>
                     {s.is_active && (
-                      <span className="px-2 py-0.5 rounded-full bg-foreground text-background text-[10px] font-semibold uppercase tracking-wide">
-                        Active
-                      </span>
+                      <span className="text-xs text-muted-foreground">Active</span>
                     )}
                   </div>
                   {(s.starts_on || s.ends_on) && (
@@ -152,7 +151,7 @@ export function SemestersDialog({
             )}
           </div>
 
-          <div className="flex flex-col gap-2 border-t pt-4">
+          <div className="flex flex-col gap-2 pt-2">
             <Label htmlFor="semester-name">New semester</Label>
             <Input
               id="semester-name"
@@ -160,30 +159,32 @@ export function SemestersDialog({
               onChange={(e) => setName(e.target.value)}
               placeholder="Fall 2026"
             />
-            <div className="grid grid-cols-2 gap-2">
-              <div className="flex flex-col gap-1">
-                <Label htmlFor="semester-start" className="text-xs text-muted-foreground">
-                  Starts
-                </Label>
-                <Input
-                  id="semester-start"
-                  type="date"
-                  value={startsOn}
-                  onChange={(e) => setStartsOn(e.target.value)}
-                />
+            <Disclosure label="Dates" hint="optional">
+              <div className="grid grid-cols-2 gap-2">
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="semester-start" className="text-xs text-muted-foreground">
+                    Starts
+                  </Label>
+                  <Input
+                    id="semester-start"
+                    type="date"
+                    value={startsOn}
+                    onChange={(e) => setStartsOn(e.target.value)}
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="semester-end" className="text-xs text-muted-foreground">
+                    Ends
+                  </Label>
+                  <Input
+                    id="semester-end"
+                    type="date"
+                    value={endsOn}
+                    onChange={(e) => setEndsOn(e.target.value)}
+                  />
+                </div>
               </div>
-              <div className="flex flex-col gap-1">
-                <Label htmlFor="semester-end" className="text-xs text-muted-foreground">
-                  Ends
-                </Label>
-                <Input
-                  id="semester-end"
-                  type="date"
-                  value={endsOn}
-                  onChange={(e) => setEndsOn(e.target.value)}
-                />
-              </div>
-            </div>
+            </Disclosure>
             <div className="flex justify-end">
               <Button size="sm" onClick={create} disabled={pending}>
                 <Plus size={14} /> Add semester
@@ -191,7 +192,7 @@ export function SemestersDialog({
             </div>
           </div>
 
-          {error && <p className="text-sm text-red-500">{error}</p>}
+          {error && <p className="text-sm text-destructive">{error}</p>}
         </div>
       </DialogContent>
     </Dialog>

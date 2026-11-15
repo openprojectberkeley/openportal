@@ -9,18 +9,21 @@ export async function GET() {
   const { data: { user }, error } = await supabase.auth.getUser();
   if (error || !user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  // Honors the VP Tech/President "view as" simulation cookie.
-  const accessLevels = await getEffectiveAccessLevels(supabase);
-  if (!accessIsExec(accessLevels)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-
-  const [{ data: members }, { data: memberRoles }] = await Promise.all([
+  // The access check (honors the VP Tech/President "view as" cookie) and the
+  // data queries run together; nothing is returned until the check passes,
+  // and RLS still scopes the reads.
+  const [accessLevels, { data: members }, { data: memberRoles }] = await Promise.all([
+    getEffectiveAccessLevels(supabase, user),
     supabase
       .from("members")
-      .select("user_id, preferred_firstname, lastname, major, grad_year, phone, linkedin, github, status"),
+      // Light rows: the list needs names, status and roles. Contact/academic
+      // details load per member on expand (/api/admin/members/[userId]).
+      .select("user_id, preferred_firstname, lastname, status"),
     supabase
       .from("members_roles")
       .select("user_id, roles(id, role_name)"),
   ]);
+  if (!accessIsExec(accessLevels)) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const rolesMap = new Map<string, { id: string; role_name: string }[]>();
   for (const mr of memberRoles ?? []) {

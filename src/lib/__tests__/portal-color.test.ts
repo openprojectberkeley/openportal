@@ -7,12 +7,14 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_ACCENT,
-  accentSheen,
+  accentRing,
+  readableAccentText,
   accentStyle,
   accentFill,
   accentTint,
   hoverForeground,
   readableTextColor,
+  visibleMarkColor,
 } from "@/lib/portal-color";
 
 const BLACK = "#000000";
@@ -82,36 +84,22 @@ describe("accentTint", () => {
   });
 });
 
-describe("accentSheen", () => {
-  it("is colour-agnostic, so one gradient works over any accent in either theme", () => {
-    expect(accentSheen()).toBe(
-      "linear-gradient(145deg, rgb(255 255 255 / var(--sheen-lift)) 0%," +
-        " rgb(255 255 255 / 0) 48%, rgb(0 0 0 / var(--sheen-drop)) 100%)",
+describe("accentRing", () => {
+  it("is a 1px inset ring of the accent at low alpha, so it costs no layout", () => {
+    expect(accentRing("#6366f1")).toBe(
+      "inset 0 0 0 1px color-mix(in srgb, #6366f1 14%, transparent)",
     );
   });
 
-  it("never nests color-mix inside the gradient — engines drop that outright", () => {
-    expect(accentSheen()).not.toContain("color-mix");
-  });
-
-  it("only ever lifts over a raw accent, since darkening is what breaks its text", () => {
-    expect(accentSheen("accent")).toBe(
-      "linear-gradient(145deg, rgb(255 255 255 / var(--sheen-lift-accent)) 0%," +
-        " rgb(255 255 255 / 0) 100%)",
-    );
-    expect(accentSheen("accent")).not.toContain("rgb(0 0 0");
-  });
-
-  it("honours a custom angle, for a surface only partly on screen", () => {
-    expect(accentSheen("accent", "to right")).toContain("linear-gradient(to right,");
+  it("returns undefined with no accent", () => {
+    expect(accentRing(null)).toBeUndefined();
   });
 });
 
 describe("accentFill", () => {
-  it("paints the raw accent under the sheen, with text that survives on it", () => {
+  it("paints the raw accent flat, with text that survives on it", () => {
     expect(accentFill("#6366f1")).toEqual({
       backgroundColor: "#6366f1",
-      backgroundImage: accentSheen("accent"),
       color: readableTextColor("#6366f1"),
     });
   });
@@ -130,18 +118,40 @@ describe("accentStyle", () => {
     expect(accentStyle("#6366f1")).toEqual({
       // 22%, not accentTint's own 14% default — see the note on accentStyle.
       backgroundColor: accentTint("#6366f1", 22, "hsl(var(--muted))"),
-      backgroundImage: accentSheen(),
+      boxShadow: accentRing("#6366f1"),
     });
   });
 
   it("passes a caller's pct through to the flat tint beneath", () => {
     expect(accentStyle("#6366f1", 24)).toEqual({
       backgroundColor: accentTint("#6366f1", 24, "hsl(var(--muted))"),
-      backgroundImage: accentSheen(),
+      boxShadow: accentRing("#6366f1"),
     });
   });
 
   it("returns undefined with no accent", () => {
     expect(accentStyle(null)).toBeUndefined();
+  });
+});
+
+describe("visibleMarkColor", () => {
+  it("leaves an ordinary accent alone", () => {
+    expect(visibleMarkColor("#22c55e")).toBe("#22c55e");
+  });
+
+  it("pulls a near-black accent toward the foreground so the mark stays visible", () => {
+    expect(visibleMarkColor("#1e1b4b")).toBe(
+      "color-mix(in srgb, #1e1b4b 65%, hsl(var(--foreground)))",
+    );
+  });
+
+  it("passes an unparseable colour through", () => {
+    expect(visibleMarkColor("rebeccapurple")).toBe("rebeccapurple");
+  });
+});
+
+describe("readableAccentText", () => {
+  it("mixes the accent toward the theme foreground", () => {
+    expect(readableAccentText("#f59e0b")).toBe("color-mix(in srgb, #f59e0b 70%, hsl(var(--foreground)))");
   });
 });

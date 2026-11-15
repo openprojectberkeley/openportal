@@ -70,7 +70,7 @@ export default function ScoreboardPage() {
   return (
     <div className="w-full max-w-6xl mx-auto p-5 flex flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-3xl font-bold">Scoreboard</h1>
+        <h1 className="text-4xl font-bold tracking-tight">Scoreboard</h1>
         <div className="flex flex-wrap items-center gap-2">
           {semesters !== null && semesters.length > 1 && (
             <DropdownMenu>

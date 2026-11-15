@@ -125,9 +125,7 @@ export function ProfileModal({ target, cached, onLoaded, onClose }: Props) {
                   <ProjectBadge key={p.id} project={p} />
                 ))}
                 {merged.status && MEMBER_STATUS_BADGE_LABEL[merged.status] && (
-                  <span className="px-2 py-0.5 rounded-full bg-foreground/10 text-muted-foreground text-xs font-medium">
-                    {MEMBER_STATUS_BADGE_LABEL[merged.status]}
-                  </span>
+                  <span className="text-xs text-muted-foreground">{MEMBER_STATUS_BADGE_LABEL[merged.status]}</span>
                 )}
                 <CoffeeChatIndicator state={merged.coffee_chat} withNames={merged.coffee_chat_with} />
                 <InfosessionIndicator attended={merged.infosession_attended} />

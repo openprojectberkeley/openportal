@@ -2,10 +2,12 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, ChevronDown, ChevronRight, Trophy } from "lucide-react";
+import { ArrowRight, ChevronDown, ChevronRight } from "lucide-react";
 import { FamilyMark } from "@/components/family-mark";
 import { ScoreboardCompactSkeleton, ScoreboardSkeleton } from "@/components/skeletons";
-import { accentFill, accentTint, DEFAULT_ACCENT } from "@/lib/portal-color";
+import { accentTint, DEFAULT_ACCENT, visibleMarkColor } from "@/lib/portal-color";
+import { cn } from "@/lib/utils";
+import { staggerStyle } from "@/lib/motion";
 import { useScoreboard } from "@/lib/use-scoreboard";
 import { useSemesters } from "@/lib/use-semesters";
 import {
@@ -16,44 +18,25 @@ import {
   type FamilyStanding,
   type ProjectScore,
 } from "@/lib/scoring";
+import { TabStrip } from "@/components/ui/tab-strip";
 
-// Every family gets a card, in rank order — there are only ever a handful, so
-// showing all of them beats a top-three podium that hides the rest. Plain
-// left-to-right order: the trophy marks the leader, so the 2nd-1st-3rd staging
-// a three-card podium needed would only confuse a row of five.
-//
-// Card height is the score, drawn as a column. The floor has to clear the
-// contents' own natural height (mark, name, total, project count — about
-// 170px), or every card below that score collapses to the same size and the
-// bottom of the range stops meaning anything. The grid aligns to the bottom so
-// they read as bars standing on one baseline.
-const CARD_MIN_H = 176;
-const CARD_MAX_H = 264;
-
-function cardHeight(points: number, leader: number): number {
-  return CARD_MIN_H + (barPct(points, leader) / 100) * (CARD_MAX_H - CARD_MIN_H);
+/**
+ * A score bar's fill. The bar is always full width and clipped to its length,
+ * so a change in score animates without reflowing the row (clip-path repaints;
+ * width would re-run layout) and the rounded end stays round at any length (a
+ * scaleX would squash it). `index` staggers the first-paint draw-in so the
+ * bars land top to bottom.
+ */
+function barFill(pct: number, index: number, color: string): React.CSSProperties {
+  return {
+    clipPath: `inset(0 ${100 - pct}% 0 0 round 9999px)`,
+    animationDelay: `${index * 40}ms`,
+    backgroundColor: visibleMarkColor(color),
+  };
 }
 
-// The Projects list is the same idea on its side: a bar per project, long
-// enough to carry its own label. Same floor problem as the cards, so the same
-// answer — the bar can't be shorter than the rank, mark, name and total sitting
-// inside it, or every project below that score renders identically and the
-// bottom of the range says nothing. 44% leaves room on the page's narrowest
-// column; BAR_MIN_W is the pixel backstop for phone widths, where 44% of the
-// viewport isn't enough for the text either.
-const BAR_MIN_PCT = 44;
-const BAR_MIN_W = "min(100%, 18rem)";
-// A project in the red gets a bar too — it earned its position the same way the
-// rest did. It sits below the positive floor so it's visibly the shortest thing
-// on the chart, and that's as far as the length goes: barPct's reasoning holds
-// here, there's no sensible direction to draw a negative in on a chart anchored
-// at the left, so the signed number inside the bar carries the rest.
-const BAR_NEG_PCT = 36;
-
-function barWidth(points: number, top: number): string {
-  if (points < 0) return `${BAR_NEG_PCT}%`;
-  return `${BAR_MIN_PCT + (barPct(points, top) / 100) * (100 - BAR_MIN_PCT)}%`;
-}
+const BAR_FILL_CLASS =
+  "h-full w-full rounded-full animate-bar-in transition-[clip-path] duration-700 ease-out-expo";
 
 // Leader mark. Lucide's Trophy can't do this: filling it solidifies the two
 // handles, which are meant to read as open loops, and its bottom path is a
@@ -104,60 +87,77 @@ function projectBarColor(p: ProjectScore, familyColor: string | null | undefined
   return p.color || familyColor || DEFAULT_ACCENT;
 }
 
-function PodiumCard({
-  s,
-  leader,
-  leading,
+/**
+ * One ranked line, shared by the family board, the project board and (in
+ * spirit) the dashboard glance, so every standings view reads as the same
+ * chart: rank, mark, name, a hairline bar scaled to the top score, and the
+ * total pinned to one right edge. Colour appears once per line — in the bar —
+ * so a page of standings is a column of comparable lengths, not a wall of
+ * painted tiles.
+ *
+ * The bar sits inline from sm up and drops under the name on phones, where a
+ * 40px sliver between name and score would compare nothing.
+ */
+function StandingLine({
+  lead,
+  rank,
+  mark,
+  name,
+  meta,
+  pct,
+  index,
+  color,
+  points,
+  leading = false,
 }: {
-  s: FamilyStanding;
-  leader: number;
-  leading: boolean;
+  /** Leading control slot (the family row's disclosure chevron). */
+  lead?: React.ReactNode;
+  rank: string;
+  mark: React.ReactNode;
+  name: string;
+  meta: React.ReactNode;
+  pct: number;
+  index: number;
+  color: string;
+  points: number;
+  leading?: boolean;
 }) {
-  // Painted in the raw accent under the same sheen as a portal card's hover
-  // swipe, rather than a tint of it — these cards are the page's one big
-  // expression of a family's colour, so they wear it at full strength and let
-  // readableTextColor pick the text that survives on top.
+  const bar = (
+    <span className="block h-1.5 w-full overflow-hidden rounded-full bg-foreground/[0.07]">
+      <span className={cn("block", BAR_FILL_CLASS)} style={barFill(pct, index, color)} />
+    </span>
+  );
   return (
-    // The trophy sits in flow ABOVE the card rather than straddling its edge, so
-    // it never overlaps the accent and only ever has the page behind it. That
-    // makes the row a touch taller for the leader; the grid is items-end, so
-    // every card still stands on the same baseline.
-    <div className="flex flex-col">
-      {leading && (
-        // Family accent at full opacity — same colour as the card beneath, so
-        // the mark reads as belonging to the leader without stroke/fill seams.
-        <span
-          className="mx-auto mb-2"
-          role="img"
-          aria-label="Leading"
-          style={{ color: s.color || DEFAULT_ACCENT }}
-        >
-          <TrophyMark size={28} />
+    <span className="flex flex-col gap-2">
+      <span className="flex items-center gap-3">
+        {lead}
+        <span className="w-7 shrink-0 text-right font-mono text-xs tabular-nums text-muted-foreground">
+          {rank}
         </span>
-      )}
-      <div
-        className="relative overflow-hidden rounded-xl p-4 pt-5 flex flex-col items-center justify-end gap-2 text-center"
-        style={{ minHeight: cardHeight(s.points, leader), ...accentFill(s.color || DEFAULT_ACCENT) }}
-      >
-        <span
-          className="absolute left-2.5 top-1 text-4xl font-black tabular-nums select-none opacity-30"
-          aria-hidden
-        >
-          {s.rank}
+        {mark}
+        <span className="min-w-0 flex-1 sm:w-56 sm:flex-none">
+          <span className={cn("block truncate text-sm", leading ? "font-semibold" : "font-medium")}>
+            {name}
+          </span>
+          <span className="block truncate text-xs text-muted-foreground">{meta}</span>
         </span>
-        <FamilyMark
-          icon={s.icon}
-          iconUrl={s.icon_url}
-          color={s.color}
-          name={s.family_name}
-          size={44}
-          onAccent
-        />
-        <p className="text-sm font-semibold leading-tight line-clamp-2">{s.family_name}</p>
-        <p className="text-2xl font-bold tabular-nums">{s.points}</p>
-        <p className="text-[11px] opacity-70">{countLabel(s.project_count, "project")}</p>
-      </div>
-    </div>
+        <span className="hidden min-w-0 flex-1 sm:block">{bar}</span>
+        <span
+          className={cn(
+            "flex w-16 shrink-0 items-center justify-end gap-1.5 font-mono text-base font-semibold tabular-nums",
+            points < 0 && "text-destructive",
+          )}
+        >
+          {leading && (
+            <span role="img" aria-label="Leading" className="text-muted-foreground">
+              <TrophyMark size={14} />
+            </span>
+          )}
+          {points}
+        </span>
+      </span>
+      <span className="sm:hidden">{bar}</span>
+    </span>
   );
 }
 
@@ -190,52 +190,36 @@ function FamilyRow({
   const panelId = `family-breakdown-${s.family_id}`;
 
   return (
-    <div>
+    <div className="animate-fade-in-up" style={staggerStyle(index)}>
       <button
         type="button"
         onClick={onToggle}
         aria-expanded={expanded}
         aria-controls={panelId}
-        className="w-full text-left px-4 py-3 flex flex-col gap-2 hover:bg-accent/50 transition-colors"
+        className="w-full rounded-lg text-left px-4 py-3 transition-colors hover:bg-foreground/[0.04] focus-visible:outline-none focus-visible:bg-foreground/[0.04]"
       >
-        <div className="flex items-center gap-3">
-          <span className="text-muted-foreground flex-shrink-0">
-            {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-          </span>
-          <span className="w-7 text-right text-xs font-medium tabular-nums text-muted-foreground flex-shrink-0">
-            {rankLabel(standings, index)}
-          </span>
-          <FamilyMark
-            icon={s.icon}
-            iconUrl={s.icon_url}
-            color={s.color}
-            name={s.family_name}
-            size={32}
-          />
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold truncate">{s.family_name}</p>
-            <p className="text-xs text-muted-foreground">
-              {countLabel(s.project_count, "project")} · {countLabel(s.award_count, "award")}
-            </p>
-          </div>
-          <span
-            className={`text-lg font-bold tabular-nums flex-shrink-0 ${
-              s.points < 0 ? "text-red-600 dark:text-red-400" : ""
-            }`}
-          >
-            {s.points}
-          </span>
-        </div>
-        <div className="h-2 w-full rounded-full bg-foreground/10 overflow-hidden">
-          <div
-            className="h-full rounded-full transition-[width] duration-700 ease-out"
-            style={{ width: `${familyBarPct}%`, backgroundColor: accent }}
-          />
-        </div>
+        <StandingLine
+          lead={
+            <span className="shrink-0 text-muted-foreground">
+              {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+            </span>
+          }
+          rank={rankLabel(standings, index)}
+          mark={
+            <FamilyMark icon={s.icon} iconUrl={s.icon_url} color={s.color} name={s.family_name} size={28} />
+          }
+          name={s.family_name}
+          meta={`${countLabel(s.project_count, "project")} · ${countLabel(s.award_count, "award")}`}
+          pct={familyBarPct}
+          index={index}
+          color={accent}
+          points={s.points}
+          leading={s.rank === 1 && s.points > 0}
+        />
       </button>
 
       {expanded && (
-        <div id={panelId} className="px-4 pb-4 pt-3 bg-accent/20 flex flex-col gap-3">
+        <div id={panelId} className="mb-1 flex flex-col gap-3 rounded-lg surface px-4 py-3 sm:pl-[6.75rem]">
           {projects.length === 0 ? (
             <p className="text-sm text-muted-foreground">No projects in this family yet.</p>
           ) : (
@@ -252,7 +236,7 @@ function FamilyRow({
                       }}
                     />
                   </div>
-                  <span className="w-12 text-right tabular-nums font-medium flex-shrink-0">
+                  <span className="w-12 text-right font-mono tabular-nums font-medium flex-shrink-0">
                     {p.points}
                   </span>
                 </div>
@@ -266,7 +250,7 @@ function FamilyRow({
                   <span className="text-xs">
                     {p.points < 0 ? "" : "no points yet"}
                   </span>
-                  <span className="w-12 text-right tabular-nums flex-shrink-0">
+                  <span className="w-12 text-right font-mono tabular-nums flex-shrink-0">
                     {p.points < 0 ? p.points : ""}
                   </span>
                 </div>
@@ -281,7 +265,7 @@ function FamilyRow({
 
 function EmptyCard({ children }: { children: React.ReactNode }) {
   return (
-    <div className="border rounded-xl px-4 py-10 text-center text-sm text-muted-foreground">
+    <div className="rounded-xl surface px-4 py-10 text-center text-sm text-muted-foreground">
       {children}
     </div>
   );
@@ -318,48 +302,22 @@ function ScoreboardTabs({
   counts: Partial<Record<ScoreboardTab, number>>;
 }) {
   return (
-    <div role="tablist" aria-label="Scoreboard view" className="flex gap-1 border-b">
-      {TABS.map((t, i) => (
-        <button
-          key={t.id}
-          type="button"
-          role="tab"
-          id={`scoreboard-tab-${t.id}`}
-          aria-selected={tab === t.id}
-          aria-controls={`scoreboard-panel-${t.id}`}
-          // Roving tabindex: one stop for the whole strip, then arrows within it.
-          tabIndex={tab === t.id ? 0 : -1}
-          onClick={() => onTab(t.id)}
-          onKeyDown={(e) => {
-            const step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
-            if (!step) return;
-            e.preventDefault();
-            const next = TABS[(i + step + TABS.length) % TABS.length];
-            onTab(next.id);
-            document.getElementById(`scoreboard-tab-${next.id}`)?.focus();
-          }}
-          className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
-            tab === t.id
-              ? "border-foreground text-foreground"
-              : "border-transparent text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          {t.label}
-          {counts[t.id] !== undefined && (
-            <span className="ml-1 text-[10px] font-normal text-muted-foreground/60">
-              ({counts[t.id]})
-            </span>
-          )}
-        </button>
-      ))}
-    </div>
+    <TabStrip
+      aria-label="Scoreboard view"
+      idPrefix="scoreboard-tab"
+      panelId={(id) => `scoreboard-panel-${id}`}
+      value={tab}
+      onChange={onTab}
+      tabs={TABS.map((t) => ({ value: t.id, label: t.label, count: counts[t.id] }))}
+    />
   );
 }
 
 /**
- * The full scoreboard: a podium for the top three, then every family as a
- * ranked row whose bar is scaled to the leader, each expanding to show which
- * projects carried it.
+ * The full scoreboard: every family as one ranked line whose bar is scaled to
+ * the leader, each expanding to show which projects carried it. No podium: it
+ * repeated the list above the list, and the meta line now says the one thing it
+ * added (who leads, by how much).
  *
  * Everything here is a div with an inline width or flexGrow rather than a
  * chart: there's no chart library in this app, and a family's accent comes from
@@ -397,16 +355,29 @@ export function FamilyStandingsView({
     });
 
   const scoringStarted = totalPoints !== 0 || totalAwards > 0;
+  // The one sentence the old podium was trying to say, said plainly.
+  const margin =
+    standings.length > 1 && standings[0].points > standings[1].points
+      ? standings[0].points - standings[1].points
+      : 0;
 
   return (
     <div className="flex flex-col gap-6">
-      <p className="text-xs text-muted-foreground">
+      <p className="text-xs tabular-nums text-muted-foreground">
         <span className="text-sm font-semibold text-foreground">{semesterName}</span>
         {scoringStarted && (
           <>
             {" · "}
             {totalPoints} point{totalPoints === 1 ? "" : "s"} awarded {" · "}
             {countLabel(totalAwards, "award")}
+            {margin > 0 && (
+              <>
+                {" · "}
+                <span className="text-foreground">
+                  {standings[0].family_name} lead by {margin}
+                </span>
+              </>
+            )}
           </>
         )}
       </p>
@@ -415,25 +386,7 @@ export function FamilyStandingsView({
         <EmptyCard>No points awarded yet this semester.</EmptyCard>
       )}
 
-      {scoringStarted && leader > 0 && (
-        <div
-          className="grid items-end gap-3"
-          // auto-fit rather than a fixed column count: four families shouldn't
-          // leave a hole where a fifth would go, and they wrap on narrow screens.
-          style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}
-        >
-          {standings.map((s) => (
-            <PodiumCard
-              key={s.family_id}
-              s={s}
-              leader={leader}
-              leading={s.rank === 1 && s.points > 0}
-            />
-          ))}
-        </div>
-      )}
-
-      <div className="border rounded-xl divide-y overflow-hidden">
+      <div className="flex flex-col">
         {standings.map((s, i) => (
           <FamilyRow
             key={s.family_id}
@@ -505,7 +458,7 @@ export function ProjectStandingsView({
 
   return (
     <div className="flex flex-col gap-6">
-      <p className="text-xs text-muted-foreground">
+      <p className="text-xs tabular-nums text-muted-foreground">
         <span className="text-sm font-semibold text-foreground">{semesterName}</span>
         {" · "}
         {countLabel(projects.length, "project")}
@@ -521,46 +474,30 @@ export function ProjectStandingsView({
       {ranked.length === 0 ? (
         <EmptyCard>No points awarded yet this semester.</EmptyCard>
       ) : (
-        // No container border and no track behind the bars: they stand on the
-        // page the way the podium columns do, so the row of lengths reads as
-        // one chart rather than a bordered list that happens to be coloured.
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col">
           {ranked.map((p, i) => {
             const family = families.get(p.family_id);
-            const accent = projectBarColor(p, family?.color);
             return (
-              <div
-                key={p.project_id}
-                className="relative overflow-hidden rounded-xl pl-2 pr-4 py-3 flex items-center gap-3 transition-[width] duration-700 ease-out"
-                style={{
-                  width: barWidth(p.points, top),
-                  minWidth: BAR_MIN_W,
-                  ...accentFill(accent),
-                }}
-              >
-                <span
-                  className="w-9 text-center text-xl font-black tabular-nums select-none opacity-40 flex-shrink-0"
-                  aria-hidden
-                >
-                  {rankLabel(ranked, i)}
-                </span>
-                <FamilyMark
-                  icon={family?.icon ?? null}
-                  iconUrl={family?.icon_url ?? null}
-                  color={family?.color ?? null}
-                  name={family?.family_name ?? p.project_name}
-                  size={32}
-                  onAccent
+              <div key={p.project_id} className="rounded-lg px-4 py-3 animate-fade-in-up" style={staggerStyle(i)}>
+                <StandingLine
+                  rank={rankLabel(ranked, i)}
+                  mark={
+                    <FamilyMark
+                      icon={family?.icon ?? null}
+                      iconUrl={family?.icon_url ?? null}
+                      color={family?.color ?? null}
+                      name={family?.family_name ?? p.project_name}
+                      size={28}
+                    />
+                  }
+                  name={p.project_name}
+                  meta={`${family?.family_name ?? "—"} · ${countLabel(p.award_count, "award")}`}
+                  pct={barPct(p.points, top)}
+                  index={i}
+                  color={projectBarColor(p, family?.color)}
+                  points={p.points}
+                  leading={i === 0 && p.points > 0 && (ranked[1]?.points ?? -Infinity) < p.points}
                 />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold leading-tight truncate">{p.project_name}</p>
-                  <p className="text-[11px] opacity-70 truncate">
-                    {family?.family_name ?? "—"} · {countLabel(p.award_count, "award")}
-                  </p>
-                </div>
-                {/* At the bar's own end rather than a shared right margin: the
-                    number belongs to the tip of its bar. */}
-                <span className="text-xl font-bold tabular-nums flex-shrink-0">{p.points}</span>
               </div>
             );
           })}
@@ -569,10 +506,8 @@ export function ProjectStandingsView({
 
       {idle.length > 0 && (
         <div className="flex flex-col gap-2">
-          <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-            Not scoring yet
-          </h3>
-          <div className="border rounded-xl divide-y overflow-hidden">
+          <h3 className="text-sm font-semibold tracking-tight">Not scoring yet</h3>
+          <div className="flex flex-col">
             {idle.map((p) => {
               const family = families.get(p.family_id);
               return (
@@ -608,11 +543,9 @@ export function FamilyStandingsCompact({
   semesterName: string;
 }) {
   return (
-    <div className="border rounded-xl p-4 flex flex-col gap-3">
+    <div className="rounded-xl surface rim-card p-4 flex flex-col gap-3">
       <div className="flex items-center justify-between gap-2">
-        <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-          Standings
-        </h2>
+        <h2 className="text-sm font-semibold tracking-tight">Standings</h2>
         <Link
           href="/scoreboard"
           className="group flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
@@ -620,7 +553,7 @@ export function FamilyStandingsCompact({
           View all
           <ArrowRight
             size={12}
-            className="transition-transform group-hover:translate-x-0.5"
+            className="transition-transform duration-instant ease-out-quart group-hover:translate-x-0.5"
             aria-hidden
           />
         </Link>
@@ -647,23 +580,21 @@ export function FamilyStandingsCompact({
                 {s.family_name}
               </span>
               {i === 0 && leader > 0 && (
-                <Trophy size={11} className="text-muted-foreground flex-shrink-0" aria-hidden/>
+                <TrophyMark size={12} className="text-muted-foreground flex-shrink-0" />
               )}
               <span
-                className={`text-xs font-bold tabular-nums flex-shrink-0 ${
-                  s.points < 0 ? "text-red-600 dark:text-red-400" : ""
-                }`}
+                className={cn(
+                  "font-mono text-xs font-semibold tabular-nums flex-shrink-0",
+                  s.points < 0 && "text-destructive",
+                )}
               >
                 {s.points}
               </span>
             </div>
-            <div className="h-1.5 w-full rounded-full bg-foreground/10 overflow-hidden">
+            <div className="h-1.5 w-full rounded-full bg-foreground/[0.07] overflow-hidden">
               <div
-                className="h-full rounded-full transition-[width] duration-700 ease-out"
-                style={{
-                  width: `${barPct(s.points, leader)}%`,
-                  backgroundColor: s.color || DEFAULT_ACCENT,
-                }}
+                className={BAR_FILL_CLASS}
+                style={barFill(barPct(s.points, leader), i, s.color || DEFAULT_ACCENT)}
               />
             </div>
           </div>
@@ -715,7 +646,7 @@ export function FamilyScoreboard({
   if (standings.length === 0) return <EmptyCard>No families have been set up yet.</EmptyCard>;
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-6 animate-fade-in-up">
       <ScoreboardTabs
         tab={tab}
         onTab={setTab}
@@ -766,6 +697,8 @@ export function FamilyScoreboardCard() {
   if (!active || standings.length === 0) return null;
 
   return (
-    <FamilyStandingsCompact standings={standings} leader={leader} semesterName={active.name} />
+    <div className="animate-fade-in-up">
+      <FamilyStandingsCompact standings={standings} leader={leader} semesterName={active.name} />
+    </div>
   );
 }

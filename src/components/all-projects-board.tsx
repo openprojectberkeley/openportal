@@ -15,8 +15,8 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronDown, Plus, Table2, UserPlus, UserSearch } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { Check, ChevronDown, Plus, Search, Table2, UserPlus, UserSearch } from "lucide-react";
+
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -51,6 +51,8 @@ import {
   type RosterRow,
 } from "@/lib/use-all-projects-board";
 import type { AddableMember } from "@/components/applicant-picker-dialog";
+import { staggerStyle } from "@/lib/motion";
+import { toast } from "sonner";
 
 // The three states the per-card menu cycles between, and all three are THEIR
 // decision, not ours: we draft, we email the confirmation, they answer.
@@ -123,6 +125,32 @@ function withPendingOutcomes(
   }));
 }
 
+// The board with any in-flight "Move to" already applied: the card leaves its
+// column and joins the target's at once, instead of greying out until the RPC
+// and reload land. Cleared (and so reverted) by the caller on failure.
+function withPendingMoves(
+  columns: BoardColumn[] | null,
+  moves: Record<string, string>,
+): BoardColumn[] | null {
+  if (!columns || Object.keys(moves).length === 0) return columns;
+  const moving = new Map<string, BoardCard>();
+  const stripped = columns.map((column) => ({
+    ...column,
+    picks: column.picks.filter((card) => {
+      const to = moves[card.pickId];
+      if (!to || to === column.project.id) return true;
+      moving.set(card.pickId, card);
+      return false;
+    }),
+  }));
+  return stripped.map((column) => {
+    const arriving = [...moving.entries()]
+      .filter(([pickId]) => moves[pickId] === column.project.id)
+      .map(([, card]) => card);
+    return arriving.length ? { ...column, picks: [...column.picks, ...arriving] } : column;
+  });
+}
+
 // Clicks inside the card must not reach the card root, whose onClick opens the
 // review modal -- same helper the card's own overlay buttons use.
 const stopClick = {
@@ -155,6 +183,10 @@ function CardMenu({
   // still just "Drafted". Say so on the chip rather than letting the two read
   // as a contradiction.
   const elsewhere = card.app.status === "accepted" && card.acceptedProjectId !== project.id;
+  // "Move to" lists every drafting project (~20); a search box narrows it.
+  const [moveQuery, setMoveQuery] = useState("");
+  const mq = moveQuery.trim().toLowerCase();
+  const shownTargets = mq ? moveTargets.filter((p) => p.name.toLowerCase().includes(mq)) : moveTargets;
   const explain: Record<Outcome, string> = {
     drafted: "Drafted — confirmation sent, no reply yet",
     accepted: `Accepted — they took the offer; now a member of ${project.name}`,
@@ -162,20 +194,21 @@ function CardMenu({
   };
   return (
     <div {...stopClick} className="shrink-0">
-      <DropdownMenu>
+      <DropdownMenu onOpenChange={(o) => { if (!o) setMoveQuery(""); }}>
         <DropdownMenuTrigger asChild disabled={busy}>
-          <Badge
-            variant={outcome === "drafted" ? "outline" : undefined}
-            className={`inline-flex shrink-0 cursor-pointer items-center gap-1 ${
-              outcome === "accepted" ? "bg-green-600 text-white hover:bg-green-600"
-              : outcome === "rejected" ? "bg-red-500 text-white hover:bg-red-500"
-              : ""
+          {/* A control, so it stays a chip, but light: coloured text + chevron. */}
+          <button
+            type="button"
+            className={`inline-flex shrink-0 items-center gap-0.5 rounded-md px-1.5 py-0.5 text-xs font-medium hover:bg-foreground/[0.06] ${
+              outcome === "accepted" ? "text-success"
+              : outcome === "rejected" ? "text-destructive"
+              : "text-muted-foreground"
             } ${busy ? "opacity-50" : ""}`}
             title={elsewhere ? "Accepted onto another project" : explain[outcome]}
           >
-            <ChevronDown size={12} className="opacity-70" />
             {OUTCOME_LABEL[outcome]}
-          </Badge>
+            <ChevronDown size={12} className="opacity-70" aria-hidden />
+          </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="max-h-72">
           <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
@@ -192,8 +225,28 @@ function CardMenu({
               <DropdownMenuSeparator />
               <DropdownMenuSub>
                 <DropdownMenuSubTrigger>Move to</DropdownMenuSubTrigger>
-                <DropdownMenuSubContent className="max-h-72 overflow-y-auto">
-                  {moveTargets.map((p) => (
+                <DropdownMenuSubContent className="max-h-72 w-56 overflow-y-auto">
+                  {moveTargets.length > 8 && (
+                    <div className="flex items-center gap-1.5 px-2 pb-1 pt-0.5">
+                      <Search className="size-3 shrink-0 text-muted-foreground" aria-hidden />
+                      <input
+                        autoFocus
+                        value={moveQuery}
+                        onChange={(e) => setMoveQuery(e.target.value)}
+                        // Keep letters in the box instead of Radix typeahead.
+                        onKeyDown={(e) => {
+                          if (e.key !== "ArrowDown" && e.key !== "Escape" && e.key !== "ArrowLeft") e.stopPropagation();
+                        }}
+                        placeholder="Search projects…"
+                        aria-label="Search projects to move to"
+                        className="h-7 w-full border-0 bg-transparent text-xs outline-none placeholder:text-muted-foreground"
+                      />
+                    </div>
+                  )}
+                  {shownTargets.length === 0 && (
+                    <p className="px-2 py-3 text-center text-xs text-muted-foreground">No matches</p>
+                  )}
+                  {shownTargets.map((p) => (
                     <DropdownMenuItem key={p.id} onSelect={() => onMove(p.id)}>
                       {p.name}
                     </DropdownMenuItem>
@@ -212,7 +265,7 @@ function CardMenu({
 // single-project view uses for Wishlist / Confirmed / Draft window.
 function SectionHeading({ label, count }: { label: string; count: number }) {
   return (
-    <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+    <h3 className="text-xs font-semibold uppercase tracking-wide tabular-nums text-muted-foreground">
       {label} ({count})
     </h3>
   );
@@ -220,7 +273,7 @@ function SectionHeading({ label, count }: { label: string; count: number }) {
 
 function EmptySection({ children }: { children: React.ReactNode }) {
   return (
-    <div className="rounded-lg border px-3 py-4 text-center text-xs text-muted-foreground">{children}</div>
+    <div className="rounded-lg surface px-3 py-4 text-center text-xs text-muted-foreground">{children}</div>
   );
 }
 
@@ -282,7 +335,7 @@ function ProjectColumn({
           {/* opacity rather than text-muted-foreground: the head card is painted
               in the project's accent now, and a theme-fixed muted grey is
               unreadable on an arbitrary colour. */}
-          <span className="text-xs opacity-70">
+          <span className="text-xs tabular-nums opacity-70">
             {picks.length} drafted
           </span>
         </div>
@@ -336,7 +389,7 @@ function ProjectColumn({
         <button
           type="button"
           onClick={() => onAdd(project)}
-          className="flex items-center justify-center gap-1.5 rounded-lg border border-dashed border-muted-foreground/40 px-2.5 py-1 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          className="flex items-center justify-center gap-1.5 rounded-lg border border-dashed border-foreground/15 px-2.5 py-1 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         >
           <Plus size={14} />
           Add member
@@ -405,7 +458,7 @@ function UndraftedDialog({
               options.map(({ app }) => {
                 const staged = stagedByAppId.get(app.id);
                 return (
-                  <div key={app.id} className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm bg-background">
+                  <div key={app.id} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm bg-background shadow-edge">
                     <button
                       type="button"
                       onClick={() => onOpenApplicant(app)}
@@ -417,9 +470,9 @@ function UndraftedDialog({
                     <ReturningIndicator returning={app.returning} />
                     <LateBadge submittedAt={app.submitted_at} endsAt={periodEndsAt} />
                     {staged && (
-                      <Badge variant="outline" className="ml-auto shrink-0 font-normal text-muted-foreground">
+                      <span className="ml-auto min-w-0 max-w-[50%] shrink-0 truncate text-xs text-muted-foreground">
                         Staged{staged.length > 0 ? ` · ${staged.join(", ")}` : ""}
-                      </Badge>
+                      </span>
                     )}
                   </div>
                 );
@@ -470,7 +523,12 @@ export function AllProjectsBoard({
   const { columns: loadedColumns, draftProjectIds, error, reload } = useAllProjectsBoard(periodId, true, reloadToken);
   // Outcome clicks that haven't come back from the database yet, by pick.
   const [pendingOutcome, setPendingOutcome] = useState<Record<string, Outcome>>({});
-  const columns = useMemo(() => withPendingOutcomes(loadedColumns, pendingOutcome), [loadedColumns, pendingOutcome]);
+  // "Move to" clicks still in flight, by pick: target project id.
+  const [pendingMove, setPendingMove] = useState<Record<string, string>>({});
+  const columns = useMemo(
+    () => withPendingMoves(withPendingOutcomes(loadedColumns, pendingOutcome), pendingMove),
+    [loadedColumns, pendingOutcome, pendingMove],
+  );
   // Per-pick click counter, so a slow answer to an earlier click can't clear
   // (or report an error over) the chip a later click is already showing.
   const outcomeSeq = useRef(new Map<string, number>());
@@ -567,12 +625,36 @@ export function AllProjectsBoard({
     [reload, onMutated, clearPending],
   );
 
+  // Optimistic: the card jumps columns on click; the RPC and reload follow,
+  // then the pending entry hands the card back to loaded data that already
+  // agrees. A refusal drops the entry (the card jumps back) and shows why.
   const movePick = useCallback(
-    (card: BoardCard, toProjectId: string) =>
-      run(card.pickId, () =>
-        createClient().rpc("move_draft_pick", { p_pick_id: card.pickId, p_project_id: toProjectId }),
-      ),
-    [run],
+    async (card: BoardCard, toProjectId: string) => {
+      const pickId = card.pickId;
+      const clearMove = () =>
+        setPendingMove((prev) => {
+          if (!(pickId in prev)) return prev;
+          const next = { ...prev };
+          delete next[pickId];
+          return next;
+        });
+      setActionError(null);
+      setPendingMove((prev) => ({ ...prev, [pickId]: toProjectId }));
+      const { error: rpcError } = await createClient().rpc("move_draft_pick", {
+        p_pick_id: pickId,
+        p_project_id: toProjectId,
+      });
+      if (rpcError) {
+        clearMove();
+        setActionError(rpcError.message || "That didn't work.");
+        toast.error("Couldn't move that pick", { description: rpcError.message });
+        return;
+      }
+      await reload();
+      clearMove();
+      onMutated?.();
+    },
+    [reload, onMutated],
   );
 
   const addPick = useCallback(
@@ -669,7 +751,7 @@ export function AllProjectsBoard({
               </Label>
             </div>
           </div>
-          <p className="text-sm text-muted-foreground">
+          <p className="text-sm tabular-nums text-muted-foreground">
             {counts
               ? `${counts.applicants} application${counts.applicants === 1 ? "" : "s"} across ${counts.projects} project${counts.projects === 1 ? "" : "s"}.`
               : "Loading counts…"}{" "}
@@ -707,22 +789,22 @@ export function AllProjectsBoard({
         <div className="flex gap-4">
           {[0, 1, 2].map((i) => (
             <div key={i} className="flex w-[300px] shrink-0 flex-col gap-4">
-              <div className="h-[62px] rounded-xl border bg-muted/30 animate-pulse" />
+              <div className="h-[62px] rounded-xl bg-muted/50 animate-pulse" />
               <ApplicationListSkeleton rows={3} />
             </div>
           ))}
         </div>
       ) : columns.length === 0 ? (
-        <div className="rounded-xl border px-4 py-10 text-center text-sm text-muted-foreground">
+        <div className="rounded-xl surface px-4 py-10 text-center text-sm text-muted-foreground">
           No projects to review this period.
         </div>
       ) : (
         // Bottom padding leaves room for the overlay scrollbar under the columns.
         <ScrollArea orientation="horizontal" viewportClassName="pb-3">
           <div className="flex items-start gap-4">
-            {columns.map((column) => (
+            {columns.map((column, i) => (
+              <div key={column.project.id} className="shrink-0 animate-fade-in-up" style={staggerStyle(i)}>
               <ProjectColumn
-                key={column.project.id}
                 column={column}
                 moveTargets={draftingProjects.filter((p) => p.id !== column.project.id)}
                 periodEndsAt={periodEndsAt}
@@ -733,6 +815,7 @@ export function AllProjectsBoard({
                 onMove={movePick}
                 onAdd={setAddFor}
               />
+              </div>
             ))}
           </div>
         </ScrollArea>

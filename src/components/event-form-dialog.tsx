@@ -16,6 +16,9 @@ import {
   isRoleGated,
   type EventCategory,
 } from "@/lib/event-category";
+import { optimistic, sessionUserId } from "@/lib/optimistic";
+import { Combobox } from "@/components/ui/combobox";
+import { Disclosure } from "@/components/ui/disclosure";
 
 // The shape a saved event round-trips as. Superset used by every caller: the
 // calendar needs the `portals(name, color)` embed for tinting; the attendance
@@ -48,7 +51,7 @@ export const EVENT_FORM_SELECT =
 
 type PortalOption = { id: string; name: string };
 
-// Sentinel for the portal picker's club-wide choice — <select> values are
+// Sentinel for the portal picker's club-wide choice — option values are
 // strings, so null needs a stand-in.
 export const CLUB_EVENT_OPTION = "__club__";
 
@@ -173,8 +176,9 @@ export function EventFormFields({ event, portalId, portals, allowClubEvent, club
     setSaving(true);
     setError(null);
     const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { setError("Not signed in."); setSaving(false); return; }
+    const userId = await sessionUserId(supabase);
+    if (!userId) { setError("Not signed in."); setSaving(false); return; }
+    const user = { id: userId };
 
     let start_time: string;
     let end_time: string | null = null;
@@ -211,6 +215,33 @@ export function EventFormFields({ event, portalId, portals, allowClubEvent, club
           ...(categoryChanged ? { category_overridden: true } : {}),
         }
       : payload;
+
+    // Edits are optimistic: the calendar shows the change and the dialog
+    // closes at once; the real row replaces it when the write lands, and the
+    // original comes back (with a toast) if it's refused. Creation still
+    // waits, since the new row's id and joined fields come from the server.
+    if (editing) {
+      const original = event!;
+      setSaving(false);
+      void optimistic({
+        label: "event",
+        key: `event:${original.id}`,
+        apply: () => onSaved({ ...original, ...updatePayload } as EventFormValue),
+        rollback: () => onSaved(original),
+        commit: () =>
+          supabase
+            .from("portal_events")
+            .update({ ...updatePayload, updated_at: new Date().toISOString() })
+            .eq("id", original.id)
+            .select(EVENT_FORM_SELECT)
+            .single(),
+        onCommitted: (res) => {
+          const row = (res as { data?: unknown } | null)?.data;
+          if (row) onSaved(row as unknown as EventFormValue);
+        },
+      });
+      return;
+    }
 
     const query = editing
       ? supabase
@@ -261,20 +292,19 @@ export function EventFormFields({ event, portalId, portals, allowClubEvent, club
       </div>
       {showPortalPicker && (
         <div className="flex flex-col gap-1">
-          <Label htmlFor="event-form-portal">Portal</Label>
-          <select
-            id="event-form-portal"
-            value={fields.portalId}
-            onChange={(e) => setFields((f) => ({ ...f, portalId: e.target.value }))}
-            className="border rounded-md h-9 px-3 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-ring"
-          >
-            {allowClubEvent && (
-              <option value={CLUB_EVENT_OPTION}>Club-wide (no portal)</option>
-            )}
-            {(portals ?? []).map((p) => (
-              <option key={p.id} value={p.id}>{p.name}</option>
-            ))}
-          </select>
+          <Label>Portal</Label>
+          {/* Searchable: portals grow with every project. */}
+          <Combobox
+            aria-label="Portal"
+            value={fields.portalId || null}
+            onChange={(v) => setFields((f) => ({ ...f, portalId: v }))}
+            options={[
+              ...(allowClubEvent ? [{ value: CLUB_EVENT_OPTION, label: "Club-wide (no portal)" }] : []),
+              ...(portals ?? []).map((p) => ({ value: p.id, label: p.name })),
+            ]}
+            placeholder="Pick a portal"
+            searchPlaceholder="Search portals…"
+          />
         </div>
       )}
       <div className="flex flex-col gap-1">
@@ -320,69 +350,75 @@ export function EventFormFields({ event, portalId, portals, allowClubEvent, club
           </div>
         </div>
       )}
-      <div className="flex flex-col gap-1">
-        <Label htmlFor="event-form-location">Location</Label>
-        <Input
-          id="event-form-location"
-          value={fields.location}
-          disabled={isSynced}
-          onChange={(e) => setFields((f) => ({ ...f, location: e.target.value }))}
-          placeholder="Optional"
-        />
-      </div>
-      <div className="flex flex-col gap-1">
-        <Label htmlFor="event-form-description">Description</Label>
-        <textarea
-          id="event-form-description"
-          value={fields.description}
-          disabled={isSynced}
-          onChange={(e) => setFields((f) => ({ ...f, description: e.target.value }))}
-          rows={3}
-          className="border rounded-md px-3 py-2 text-sm w-full resize-none bg-background focus:outline-none focus:ring-1 focus:ring-ring"
-        />
-      </div>
-      <div className="flex flex-col gap-1">
-        <Label htmlFor="event-form-category">Category</Label>
-        <select
-          id="event-form-category"
-          value={fields.category}
-          onChange={(e) => {
-            const category = isEventCategory(e.target.value) ? e.target.value : "general";
-            // Changing the kind of event re-applies that kind's attendance
-            // default, which is almost always what's wanted; the switch below
-            // is still there to override it.
-            setFields((f) => ({
-              ...f,
-              category,
-              // Keep an explicitly requested default (the attendance modal) on.
-              attendanceEnabled: defaultAttendance ?? ATTENDANCE_BY_DEFAULT[category],
-            }));
-          }}
-          className="border rounded-md h-9 px-3 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-ring"
-        >
-          {EVENT_CATEGORIES.map((c) => (
-            <option key={c} value={c}>{CATEGORY_META[c].label}</option>
-          ))}
-        </select>
-        {isRoleGated(fields.category) && (
-          <p className="text-xs text-muted-foreground">
-            Visible only to board and exec, whatever portal it&apos;s in.
-          </p>
-        )}
-      </div>
+      {/* Title, portal and time make an event; the rest is optional. Open when
+          editing (synced events are edited mostly here: category, attendance). */}
+      <Disclosure
+        hint="location, description, category, attendance"
+        defaultOpen={editing || !!(fields.location || fields.description)}
+      >
+        <div className="flex flex-col gap-1">
+          <Label htmlFor="event-form-location">Location</Label>
+          <Input
+            id="event-form-location"
+            value={fields.location}
+            disabled={isSynced}
+            onChange={(e) => setFields((f) => ({ ...f, location: e.target.value }))}
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <Label htmlFor="event-form-description">Description</Label>
+          <textarea
+            id="event-form-description"
+            value={fields.description}
+            disabled={isSynced}
+            onChange={(e) => setFields((f) => ({ ...f, description: e.target.value }))}
+            rows={3}
+            className="border rounded-md px-3 py-2 text-sm w-full resize-none bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <Label htmlFor="event-form-category">Category</Label>
+          <select
+            id="event-form-category"
+            value={fields.category}
+            onChange={(e) => {
+              const category = isEventCategory(e.target.value) ? e.target.value : "general";
+              // Changing the kind of event re-applies that kind's attendance
+              // default, which is almost always what's wanted; the switch below
+              // is still there to override it.
+              setFields((f) => ({
+                ...f,
+                category,
+                // Keep an explicitly requested default (the attendance modal) on.
+                attendanceEnabled: defaultAttendance ?? ATTENDANCE_BY_DEFAULT[category],
+              }));
+            }}
+            className="border rounded-md h-9 px-3 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+          >
+            {EVENT_CATEGORIES.map((c) => (
+              <option key={c} value={c}>{CATEGORY_META[c].label}</option>
+            ))}
+          </select>
+          {isRoleGated(fields.category) && (
+            <p className="text-xs text-muted-foreground">
+              Visible only to board and exec, whatever portal it&apos;s in.
+            </p>
+          )}
+        </div>
 
-      <label className="flex items-center justify-between gap-3 text-sm">
-        <span className="flex flex-col">
-          Take attendance
-          <span className="text-xs text-muted-foreground">Show this event in the attendance sheet.</span>
-        </span>
-        <Switch
-          checked={fields.attendanceEnabled}
-          onCheckedChange={(v) => setFields((f) => ({ ...f, attendanceEnabled: v }))}
-        />
-      </label>
+        <label className="flex items-center justify-between gap-3 text-sm">
+          <span className="flex flex-col">
+            Take attendance
+            <span className="text-xs text-muted-foreground">Show this event in the attendance sheet.</span>
+          </span>
+          <Switch
+            checked={fields.attendanceEnabled}
+            onCheckedChange={(v) => setFields((f) => ({ ...f, attendanceEnabled: v }))}
+          />
+        </label>
+      </Disclosure>
 
-      {error && <p className="text-sm text-red-500">{error}</p>}
+      {error && <p className="text-sm text-destructive">{error}</p>}
       <div className="flex justify-end gap-2">
         <Button variant="outline" onClick={onCancel}>Cancel</Button>
         <Button onClick={save} disabled={saving}>{saving ? "Saving..." : "Save"}</Button>
@@ -424,6 +460,22 @@ export function EventFormDialog({ open, onOpenChange, event, portalId, portals, 
 /** Delete an event. Returns true on success. Caller handles confirmation + UI. */
 export async function deletePortalEvent(eventId: string): Promise<boolean> {
   const supabase = createClient();
-  const { error } = await supabase.from("portal_events").delete().eq("id", eventId);
-  return !error;
+  // .select(): RLS refuses a delete by matching zero rows, not with an error.
+  const { data, error } = await supabase.from("portal_events").delete().eq("id", eventId).select("id");
+  return !error && !!data?.length;
+}
+
+/**
+ * Optimistic delete: `remove` takes the event off screen now, the delete runs
+ * behind it, and `restore` puts it back (with a toast) if it's refused.
+ */
+export function deletePortalEventOptimistic(eventId: string, remove: () => void, restore: () => void): void {
+  void optimistic({
+    label: "event deletion",
+    key: `event:${eventId}`,
+    apply: remove,
+    rollback: restore,
+    commit: async () =>
+      (await deletePortalEvent(eventId)) ? { error: null } : { error: { message: "The event couldn't be deleted." } },
+  });
 }

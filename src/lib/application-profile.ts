@@ -31,6 +31,15 @@ export const TECH_CLASSES: LabeledKey[] = [
   { key: TECH_CLASS_NA, label: "N/A (haven't taken any of the above)" },
 ];
 
+// Suggestions for "Other relevant classes" (a creatable tag input on the
+// application). Upper-division and adjacent courses past the checkbox set
+// above; anything else can be typed.
+export const OTHER_CLASS_SUGGESTIONS = [
+  "CS 160", "CS 161", "CS 162", "CS 164", "CS 168", "CS 169A", "CS 170", "CS 186",
+  "CS 188", "CS 189", "Data 101", "Data 102", "Data 140", "EECS 16A", "EECS 16B",
+  "EECS 151", "Info 159", "Math 54", "Stat 134", "UGBA 10",
+] as const;
+
 export const techAreaLabel = (key: string): string =>
   TECH_AREAS.find((a) => a.key === key)?.label ?? key;
 

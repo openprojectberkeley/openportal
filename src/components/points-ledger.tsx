@@ -11,6 +11,8 @@ import { LedgerSkeleton } from "@/components/skeletons";
 import { PersonName } from "@/components/person-profile-provider";
 import { DEFAULT_ACCENT } from "@/lib/portal-color";
 import { formatPoints, ledgerMatches, type LedgerEntry } from "@/lib/scoring";
+import { optimistic } from "@/lib/optimistic";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 
 function formatDay(iso: string): string {
   // `awarded_on` is a DATE, so parse the parts rather than letting Date treat
@@ -38,7 +40,7 @@ function formatDay(iso: string): string {
 const PAGE_SIZE = 20;
 
 export function PointsLedger({
-  entries,
+  entries: loadedEntries,
   title,
   readOnly = false,
   onVoided,
@@ -54,6 +56,13 @@ export function PointsLedger({
   onVoided?: (id: string) => void;
   emptyLabel?: string;
 }) {
+  // Voids in flight: the row shows as voided at once; the parent hears about
+  // it (and refreshes standings) only once the RPC lands.
+  const [pendingVoids, setPendingVoids] = useState<Record<string, string>>({});
+  const entries =
+    loadedEntries && Object.keys(pendingVoids).length
+      ? loadedEntries.map((e) => (e.voided_at === null && pendingVoids[e.id] ? { ...e, voided_at: pendingVoids[e.id] } : e))
+      : loadedEntries;
   const [showVoided, setShowVoided] = useState(false);
   const [voiding, setVoiding] = useState<LedgerEntry | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -139,15 +148,27 @@ export function PointsLedger({
       ? "Every entry in this log is voided. Turn on “Show voided” to see them."
       : emptyLabel;
 
-  const voidEntry = async (entry: LedgerEntry) => {
+  const voidEntry = (entry: LedgerEntry) => {
     const supabase = createClient();
-    const { error: rpcError } = await supabase.rpc("void_score_entry", { p_entry_id: entry.id });
-    if (rpcError) {
-      setError(rpcError.message);
-      return false;
-    }
     setError(null);
-    onVoided?.(entry.id);
+    const clear = () =>
+      setPendingVoids((prev) => {
+        const next = { ...prev };
+        delete next[entry.id];
+        return next;
+      });
+    void optimistic({
+      label: "void",
+      key: `ledger-void:${entry.id}`,
+      apply: () => setPendingVoids((prev) => ({ ...prev, [entry.id]: new Date().toISOString() })),
+      rollback: clear,
+      commit: () => supabase.rpc("void_score_entry", { p_entry_id: entry.id }),
+      onCommitted: () => {
+        onVoided?.(entry.id);
+        clear();
+      },
+      onFailed: (message) => setError(message),
+    });
     return true;
   };
 
@@ -155,7 +176,7 @@ export function PointsLedger({
     <div className="flex flex-col gap-2">
       {header}
 
-      {error && <p className="text-sm text-red-500">{error}</p>}
+      {error && <p className="text-sm text-destructive">{error}</p>}
 
       <div className="border rounded-lg overflow-x-auto">
         <table className="w-full text-sm border-separate border-spacing-0">
@@ -250,26 +271,26 @@ export function PointsLedger({
           <div className="flex items-center gap-2">
             <Button
               variant="outline"
-              size="sm"
-              className="h-7 px-2 text-xs"
+              size="icon"
+              className="h-7 w-7"
               disabled={safePage === 0}
               aria-label="Previous page"
               onClick={() => setPage(safePage - 1)}
             >
-              Previous
+              <ChevronLeft size={14} />
             </Button>
             <span className="tabular-nums">
               {safePage + 1} / {pageCount}
             </span>
             <Button
               variant="outline"
-              size="sm"
-              className="h-7 px-2 text-xs"
+              size="icon"
+              className="h-7 w-7"
               disabled={safePage >= pageCount - 1}
               aria-label="Next page"
               onClick={() => setPage(safePage + 1)}
             >
-              Next
+              <ChevronRight size={14} />
             </Button>
           </div>
         </nav>

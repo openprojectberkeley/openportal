@@ -1,8 +1,7 @@
 "use client";
 
 import { dayKey, formatEventTime, shortTime, weekdayLabels } from "@/lib/dates";
-import { eventSurface } from "@/lib/event-tint";
-import { accentSheen } from "@/lib/portal-color";
+import { eventBarColor } from "@/lib/event-tint";
 import { cn } from "@/lib/utils";
 import type { PortalEvent } from "@/lib/use-calendar-events";
 
@@ -21,6 +20,8 @@ type Props = {
   onSelectDay: (key: string) => void;
   /** `key` is the cell the chip sits in, which may not be the event's start day. */
   onOpenEvent: (ev: PortalEvent, key: string) => void;
+  /** "+N more": select the day and bring its list into view. */
+  onShowMore?: (key: string) => void;
 };
 
 export function CalendarMonthGrid({
@@ -32,6 +33,7 @@ export function CalendarMonthGrid({
   resolve,
   onSelectDay,
   onOpenEvent,
+  onShowMore,
 }: Props) {
   return (
     <div className="flex flex-col">
@@ -96,14 +98,14 @@ export function CalendarMonthGrid({
                       // The chip is too small for the full title, let alone the
                       // time, so the tooltip carries both.
                       title={`${ev.title} — ${ev.all_day ? "All day" : formatEventTime(ev.start_time)}`}
-                      // Text stays currentColor: eventSurface mixes toward the
-                      // theme background, so the foreground reads in both themes.
-                      style={{
-                        backgroundColor: eventSurface(ev.category, color, 24),
-                        backgroundImage: accentSheen(),
-                      }}
-                      className="flex w-full min-w-0 items-center gap-1 overflow-hidden rounded px-1 py-0.5 text-left text-[11px] leading-tight transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      // No fill: a 2px colour bar + the title, like every event.
+                      className="flex w-full min-w-0 items-center gap-1 overflow-hidden rounded px-1 py-0.5 text-left text-[11px] leading-tight transition-colors hover:bg-foreground/[0.05] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                     >
+                      <span
+                        aria-hidden
+                        className="h-3 w-[2px] shrink-0 rounded-full"
+                        style={{ backgroundColor: eventBarColor(ev.category, color) }}
+                      />
                       <span className="min-w-0 flex-1 truncate font-medium">{ev.title}</span>
                       {!ev.all_day && (
                         <span className="hidden shrink-0 tabular-nums opacity-70 sm:inline">
@@ -114,11 +116,11 @@ export function CalendarMonthGrid({
                   );
                 })}
                 {overflow > 0 && (
-                  // Just selects the day — the detail rail below already lists
-                  // every one of them, so there's no popover to build.
+                  // Selects the day and scrolls to its list below, which
+                  // already lists every one of them.
                   <button
                     type="button"
-                    onClick={() => onSelectDay(key)}
+                    onClick={() => (onShowMore ? onShowMore(key) : onSelectDay(key))}
                     className="px-1 text-left text-[10px] font-medium text-muted-foreground transition-colors hover:text-foreground"
                   >
                     +{overflow} more

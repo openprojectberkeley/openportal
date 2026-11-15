@@ -3,17 +3,18 @@
 import { useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Plus, RefreshCw, ClipboardCheck } from "lucide-react";
 import { EventListSkeleton } from "@/components/skeletons";
-import { accentSheen, hoverForeground, DEFAULT_ACCENT } from "@/lib/portal-color";
+import { hoverForeground, DEFAULT_ACCENT } from "@/lib/portal-color";
 import { dayKey, dateFromKey, MONTHS, WEEKDAYS_SHORT } from "@/lib/dates";
 import { useRoleSim } from "@/components/role-simulation-provider";
 import { CATEGORY_META, type EventCategory } from "@/lib/event-category";
 import { usePortalMeta } from "@/components/portal-meta-provider";
-import { EventFormDialog, deletePortalEvent } from "@/components/event-form-dialog";
+import { EventFormDialog, deletePortalEventOptimistic } from "@/components/event-form-dialog";
 import { PortalAttendanceModal } from "@/components/portal-attendance-modal";
 import { EventCard } from "@/components/event-card";
 import { MultiSelectFilter } from "@/components/multi-select-filter";
 import { SubscribeMenu } from "@/components/calendar-subscribe-menu";
 import { useCalendarEvents, type PortalEvent } from "@/lib/use-calendar-events";
+import { MonthYearPicker } from "@/components/month-year-picker";
 
 type Props = {
   // When set, the calendar shows only this portal's events and creates events
@@ -52,18 +53,16 @@ function PortalBackingCard({
     <div className="relative" style={{ marginTop: PEEK }}>
       <div
         aria-hidden
-        className="absolute inset-x-0 bottom-0 rounded-xl border flex items-start"
+        className="absolute inset-x-0 bottom-0 rounded-xl flex items-start"
         style={{
           top: `calc(-1 * ${PEEK})`,
           // The raw accent at full strength, exactly like the portal card's
           // hover swipe — so a portal reads the same color here as on the
           // dashboard. DEFAULT_ACCENT keeps a colorless portal intentional
           // rather than transparent. Border matches the fill so the peek is one
-          // solid shape instead of a rimmed box. The sheen runs left-to-right
-          // rather than diagonally: only the PEEK strip is ever visible, so a
-          // vertical component would clip to the gradient's lightest end.
+          // solid shape instead of a rimmed box. Flat, like every accent
+          // surface (lib/portal-color.ts).
           backgroundColor: color || DEFAULT_ACCENT,
-          backgroundImage: accentSheen("accent", "to right"),
           borderColor: color || DEFAULT_ACCENT,
         }}
       >
@@ -129,7 +128,9 @@ export function CalendarPanel({ portalId, portalName, portalColor }: Props) {
 
   const [formOpen, setFormOpen] = useState(false);
   const [editingEvent, setEditingEvent] = useState<PortalEvent | null>(null);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+  // Deletes are optimistic (the card leaves at once), so nothing is ever
+  // "deleting" on screen; kept for the child components' prop shape.
+  const deletingId: string | null = null;
 
   // An in-session portal settings save lands in `overrides` first, so the band
   // retints without a reload — same precedence resolve() uses for event tints.
@@ -197,31 +198,36 @@ export function CalendarPanel({ portalId, portalName, portalColor }: Props) {
     jumpTo(saved.start_time);
   };
 
-  const deleteEvent = async (ev: PortalEvent) => {
+  const deleteEvent = (ev: PortalEvent) => {
     if (!window.confirm(`Delete "${ev.title}"? This can't be undone.`)) return;
-    setDeletingId(ev.id);
-    const ok = await deletePortalEvent(ev.id);
-    if (!ok) { setDeletingId(null); return; }
-    applyDeleted(ev.id);
-    setDeletingId(null);
+    deletePortalEventOptimistic(ev.id, () => applyDeleted(ev.id), () => applySaved(ev));
   };
 
   return (
     <PortalBackingCard name={bandName} color={bandColor}>
-    <div className="border rounded-xl p-4 bg-background">
+    <div className="rounded-xl border p-4 bg-background rim-card">
       {!portalId && <SubscribeMenu className="mb-3 w-full" />}
 
       <div className="flex flex-col sm:flex-row lg:flex-col gap-4 lg:gap-3">
         {/* Month section (shrinks when the events sections sit beside it). */}
         <div className="w-full sm:w-1/2 lg:w-full flex flex-col gap-3">
           <div className="flex items-center justify-between">
-            <h2 className="font-semibold text-sm select-none">
-              {MONTHS[viewMonth]} {viewYear}
+            <h2 className="font-semibold text-sm">
+              {/* Click the month/year to jump anywhere. */}
+              <MonthYearPicker value={new Date(viewYear, viewMonth, 1)} onPick={(d) => jumpTo(d.toISOString())}>
+                <button
+                  type="button"
+                  aria-label={`${MONTHS[viewMonth]} ${viewYear}, choose a month or date`}
+                  className="-ml-1.5 rounded-md px-1.5 py-0.5 transition-colors hover:bg-accent"
+                >
+                  {MONTHS[viewMonth]} {viewYear}
+                </button>
+              </MonthYearPicker>
             </h2>
             <div className="flex items-center gap-1">
               <button
                 onClick={goToday}
-                className="text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors px-2 py-1 rounded-md border"
+                className="text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-colors px-2 py-1 rounded-md"
                 aria-label="Go to today"
               >
                 Today
@@ -265,7 +271,7 @@ export function CalendarPanel({ portalId, portalName, portalColor }: Props) {
 
                   {/* Hover preview of the day's events, floated above the tile. */}
                   {hoverKey === key && dayEvents.length > 0 && (
-                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 z-30 w-52 pointer-events-none flex flex-col gap-1 rounded-lg border bg-popover p-2 shadow-lg text-left">
+                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 z-30 w-52 pointer-events-none flex flex-col gap-1 rounded-lg border glass p-2 shadow-overlay text-left">
                       {dayEvents.map((ev) => {
                         const { name, color } = resolve(ev);
                         return <EventCard key={ev.id} ev={ev} name={name} color={color} actions={false} />;
@@ -294,7 +300,7 @@ export function CalendarPanel({ portalId, portalName, portalColor }: Props) {
         </div>
 
         {/* Events sections: divider swaps between top (stacked) and left (split). */}
-        <div className="w-full sm:flex-1 lg:w-full min-w-0 flex flex-col gap-4 border-t pt-3 sm:border-t-0 sm:pt-0 sm:border-l sm:pl-4 lg:border-l-0 lg:pl-0 lg:border-t lg:pt-3">
+        <div className="w-full sm:flex-1 lg:w-full min-w-0 flex flex-col gap-4 pt-3 sm:pt-0 sm:pl-5 lg:pl-0 lg:pt-4">
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
@@ -314,7 +320,7 @@ export function CalendarPanel({ portalId, portalName, portalColor }: Props) {
             ) : selectedEvents.length === 0 ? (
               <p className="text-xs text-muted-foreground">No events.</p>
             ) : (
-              <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-2 animate-fade-in-up">
                 {selectedEvents.map((ev) => {
                   const { name, color } = resolve(ev);
                   const manage = canManageEvent(ev);
@@ -360,7 +366,7 @@ export function CalendarPanel({ portalId, portalName, portalColor }: Props) {
       </div>
 
       {showClubAttendance && (
-        <div className="flex flex-col gap-1.5 border-t mt-3 pt-3">
+        <div className="flex flex-col gap-1.5 mt-3">
           <div className="flex items-center gap-3">
             <button
               onClick={() => setAttendanceOpen(true)}

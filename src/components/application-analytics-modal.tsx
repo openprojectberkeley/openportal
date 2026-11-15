@@ -80,7 +80,7 @@ function toSegments(items: { label: string; count: number }[], color: (label: st
 function PieCard({ title, segments, total, centerSub }: { title: string; segments: Segment[]; total: number; centerSub: string }) {
   const hasData = segments.some((s) => s.value > 0);
   return (
-    <div className="flex flex-col gap-3 rounded-xl border bg-background p-4">
+    <div className="flex flex-col gap-3 rounded-xl surface p-4">
       <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</h3>
       {!hasData ? (
         <p className="text-xs text-muted-foreground">No data.</p>
@@ -221,10 +221,10 @@ export function RecruitingAnalyticsBody({
     {rows === null ? (
       <div className="flex flex-col gap-4">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div className="h-56 rounded-xl border bg-muted animate-pulse" />
-          <div className="h-56 rounded-xl border bg-muted animate-pulse" />
+          <div className="h-56 rounded-xl bg-muted animate-pulse" />
+          <div className="h-56 rounded-xl bg-muted animate-pulse" />
         </div>
-        <div className="h-40 rounded-xl border bg-muted animate-pulse" />
+        <div className="h-40 rounded-xl bg-muted animate-pulse" />
       </div>
     ) : (
       <div className="flex flex-col gap-5">
@@ -241,7 +241,7 @@ export function RecruitingAnalyticsBody({
                 ["Accepted", selected.accepted],
                 ["Rejected", selected.rejected],
               ].map(([label, value]) => (
-                <div key={label as string} className="rounded-lg border bg-background px-3 py-2">
+                <div key={label as string} className="rounded-lg surface px-3 py-2">
                   <div className="text-lg font-bold tabular-nums">{value}</div>
                   <div className="text-[0.7rem] text-muted-foreground">{label}</div>
                 </div>
@@ -249,7 +249,7 @@ export function RecruitingAnalyticsBody({
             </div>
 
             {/* Combined valid: cleared both requirements */}
-            <div className="flex flex-col gap-2 rounded-xl border bg-background p-4">
+            <div className="flex flex-col gap-2 rounded-xl surface p-4">
               <div className="flex items-center justify-between gap-2">
                 <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Valid</h3>
                 {invalidCount > 0 && (
@@ -371,14 +371,14 @@ export function RecruitingAnalyticsBody({
 
         {invalidRows === null ? (
           <div className="flex flex-col gap-2">
-            <div className="h-10 rounded-lg border bg-muted animate-pulse" />
-            <div className="h-10 rounded-lg border bg-muted animate-pulse" />
-            <div className="h-10 rounded-lg border bg-muted animate-pulse" />
+            <div className="h-10 rounded-lg bg-muted animate-pulse" />
+            <div className="h-10 rounded-lg bg-muted animate-pulse" />
+            <div className="h-10 rounded-lg bg-muted animate-pulse" />
           </div>
         ) : invalidRows.length === 0 ? (
           <p className="text-sm text-muted-foreground">Everyone submitted is valid.</p>
         ) : (
-          <ul className="flex flex-col divide-y">
+          <ul className="flex flex-col">
             {invalidRows.map((r) => (
               <li
                 key={r.applicant_id}
@@ -394,10 +394,10 @@ export function RecruitingAnalyticsBody({
                     <span
                       key={issue}
                       className={cn(
-                        "inline-flex items-center rounded-md border px-2 py-0.5 text-[0.7rem] font-medium",
+                        "inline-flex items-center rounded-md px-2 py-0.5 text-[0.7rem] font-medium",
                         issue.startsWith("Coffee booked")
-                          ? "border-amber-600/30 text-amber-700 dark:text-amber-400"
-                          : "border-foreground/15 text-muted-foreground",
+                          ? "bg-warning/10 text-warning"
+                          : "bg-foreground/[0.05] text-muted-foreground",
                       )}
                     >
                       {issue}

@@ -28,7 +28,7 @@ export function CoffeeChatCard({ id, name, roles, avatarUrl, interests, onBook, 
     .toUpperCase();
 
   return (
-    <div className="border rounded-xl p-5 flex flex-col gap-4 bg-background hover:shadow-sm transition-shadow">
+    <div className="h-full rounded-xl p-5 flex flex-col gap-4 surface rim-card">
       <div className="flex items-center gap-4">
         {avatarUrl ? (
           <img
@@ -61,7 +61,7 @@ export function CoffeeChatCard({ id, name, roles, avatarUrl, interests, onBook, 
         </div>
       </div>
       {interests && (
-        <p className="text-sm text-muted-foreground leading-relaxed">
+        <p className="line-clamp-3 text-sm text-muted-foreground leading-relaxed" title={interests}>
           <span className="font-medium text-foreground">Interests: </span>{interests}
         </p>
       )}
@@ -76,7 +76,7 @@ export function CoffeeChatCard({ id, name, roles, avatarUrl, interests, onBook, 
           </span>
         </div>
       ) : booked ? (
-        <div className="mt-auto w-full rounded-md border border-green-600/40 bg-green-600/10 px-4 py-2 text-sm font-medium text-green-700 dark:text-green-400 flex items-center justify-center gap-1.5">
+        <div className="mt-auto w-full rounded-md bg-success/10 px-4 py-2 text-sm font-medium text-success flex items-center justify-center gap-1.5">
           <Check size={16} strokeWidth={2.5} />
           Booked
         </div>

@@ -11,7 +11,7 @@ import { CalendarWeekGrid } from "@/components/calendar-week-grid";
 import { CalendarAgenda } from "@/components/calendar-agenda";
 import { EventCard } from "@/components/event-card";
 import { SubscribeMenu } from "@/components/calendar-subscribe-menu";
-import { EventFormDialog, deletePortalEvent } from "@/components/event-form-dialog";
+import { EventFormDialog, deletePortalEventOptimistic } from "@/components/event-form-dialog";
 import { PortalAttendanceModal } from "@/components/portal-attendance-modal";
 import { useRoleSim } from "@/components/role-simulation-provider";
 import { CATEGORY_META, type EventCategory } from "@/lib/event-category";
@@ -29,7 +29,9 @@ import {
   startOfWeek,
   weekDays,
 } from "@/lib/dates";
-import { cn } from "@/lib/utils";
+
+import { Segmented } from "@/components/ui/segmented";
+import { MonthYearPicker } from "@/components/month-year-picker";
 
 const VIEWS = ["month", "week", "agenda"] as const;
 type CalendarViewName = (typeof VIEWS)[number];
@@ -53,6 +55,17 @@ const NEXT_LABEL: Record<CalendarViewName, string> = {
  * that to sit inside a Suspense boundary so the page shell can still prerender
  * — the same reason portals/[id] wraps its useParams() read.
  */
+/** Scroll to #id as soon as it exists (up to ~3s), centred, smooth unless reduced motion. */
+function scrollWhenReady(id: string, framesLeft = 180) {
+  const el = document.getElementById(id);
+  if (el) {
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    el.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "center" });
+    return;
+  }
+  if (framesLeft > 0) requestAnimationFrame(() => scrollWhenReady(id, framesLeft - 1));
+}
+
 export default function CalendarPage() {
   return (
     <Suspense fallback={<CalendarPageSkeleton />}>
@@ -91,7 +104,9 @@ function CalendarPageBody() {
 
   const [formOpen, setFormOpen] = useState(false);
   const [editingEvent, setEditingEvent] = useState<PortalEvent | null>(null);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+  // Deletes are optimistic (the card leaves at once), so nothing is ever
+  // "deleting" on screen; kept for the child components' prop shape.
+  const deletingId: string | null = null;
   const [attendanceOpen, setAttendanceOpen] = useState(false);
 
   const view: CalendarViewName = (VIEWS as readonly string[]).includes(params.get("view") ?? "")
@@ -170,26 +185,33 @@ function CalendarPageBody() {
   // detail rail right below then shows the full card, with its edit/delete/ICS
   // controls. The cell's own key, not the event's start day — a multi-day
   // event's chip on its last day should select that day, not jump backwards.
-  const openEvent = (_ev: PortalEvent, key: string) => selectDay(key);
+  // …and then brings that event's card (or, for "+N more", the day's list)
+  // into view once the route update has rendered it. Polled per frame rather
+  // than held in state: the URL change can remount this component, which
+  // would drop a pending-scroll state.
+  const openEvent = (ev: PortalEvent, key: string) => {
+    selectDay(key);
+    scrollWhenReady(`event-${ev.id}`);
+  };
+  const showMore = (key: string) => {
+    selectDay(key);
+    scrollWhenReady("day-events");
+  };
 
   const handleSaved = (saved: PortalEvent) => {
     applySaved(saved);
     go({ date: new Date(saved.start_time) }, "replace");
   };
 
-  const deleteEvent = async (ev: PortalEvent) => {
+  const deleteEvent = (ev: PortalEvent) => {
     if (!window.confirm(`Delete "${ev.title}"? This can't be undone.`)) return;
-    setDeletingId(ev.id);
-    const ok = await deletePortalEvent(ev.id);
-    if (!ok) { setDeletingId(null); return; }
-    applyDeleted(ev.id);
-    setDeletingId(null);
+    deletePortalEventOptimistic(ev.id, () => applyDeleted(ev.id), () => applySaved(ev));
   };
 
   return (
     <div className="w-full max-w-6xl mx-auto p-5 flex flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-3xl font-bold">Calendar</h1>
+        <h1 className="text-4xl font-bold tracking-tight">Calendar</h1>
         <div className="flex items-center gap-2">
           <SubscribeMenu />
           {canAdd && (
@@ -204,7 +226,7 @@ function CalendarPageBody() {
         <div className="flex items-center gap-1">
           <button
             onClick={() => go({ date: new Date() }, "replace")}
-            className="rounded-md border px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            className="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
             Today
           </button>
@@ -222,37 +244,25 @@ function CalendarPageBody() {
           >
             <ChevronRight size={16} />
           </button>
-          <h2 className="ml-1 select-none text-sm font-semibold">{periodLabel}</h2>
+          {/* The period label opens a month/year/date picker. */}
+          <MonthYearPicker value={anchor} onPick={(d) => go({ date: d }, "replace")}>
+            <button
+              type="button"
+              aria-label={`${periodLabel}, choose a month or date`}
+              className="ml-1 rounded-md px-1.5 py-0.5 text-sm font-semibold transition-colors hover:bg-accent"
+            >
+              {periodLabel}
+            </button>
+          </MonthYearPicker>
         </div>
 
-        {/* Plain aria-pressed buttons in a labelled group, not role="tablist":
-            a tablist with no tabpanels and no arrow-key handling is a half-built
-            ARIA pattern, which reads worse than no roles at all. */}
-        <div
-          role="group"
+        {/* Sliding selection (ui/segmented): a radiogroup, arrows switch view. */}
+        <Segmented
           aria-label="Calendar view"
-          className="inline-flex items-center gap-0.5 rounded-lg border p-0.5"
-        >
-          {VIEWS.map((v) => {
-            const active = v === view;
-            return (
-              <button
-                key={v}
-                type="button"
-                aria-pressed={active}
-                onClick={() => go({ view: v }, "push")}
-                className={cn(
-                  "rounded-md px-3 py-1.5 text-xs font-medium capitalize transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-                  active
-                    ? "bg-foreground text-background"
-                    : "text-muted-foreground hover:bg-accent hover:text-foreground",
-                )}
-              >
-                {v}
-              </button>
-            );
-          })}
-        </div>
+          value={view}
+          onChange={(v) => go({ view: v }, "push")}
+          options={VIEWS.map((v) => ({ value: v, label: <span className="capitalize">{v}</span> }))}
+        />
       </div>
 
       {/* Both dimensions, side by side. Each trigger carries its own label, so
@@ -320,6 +330,7 @@ function CalendarPageBody() {
               resolve={resolve}
               onSelectDay={selectDay}
               onOpenEvent={openEvent}
+              onShowMore={showMore}
             />
           ) : (
             <CalendarWeekGrid
@@ -334,7 +345,7 @@ function CalendarPageBody() {
           )}
 
           {/* Day detail rail, under both the month and the week grid. */}
-          <div className="flex flex-col gap-2">
+          <div id="day-events" className="flex scroll-mt-24 flex-col gap-2">
             <div className="flex items-center justify-between">
               <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 {dateFromKey(selectedKey).toLocaleDateString([], {
@@ -382,7 +393,7 @@ function CalendarPageBody() {
       {/* Club-wide tools. The club calendar has no portal, so its attendance
           sheet and its Google sync have no portal settings page to live on.
           The sheet is open to all; the sync stays exec-only. */}
-      <div className="flex flex-col gap-1.5 border-t pt-3">
+      <div className="flex flex-col gap-1.5 pt-1">
         <div className="flex items-center gap-3">
           <button
             onClick={() => setAttendanceOpen(true)}

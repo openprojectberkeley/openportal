@@ -3,12 +3,6 @@
 import { createClient } from "@/lib/supabase/client";
 import { useCallback, useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, PlusCircle, Pencil, X } from "lucide-react";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,13 +10,17 @@ import { Button } from "@/components/ui/button";
 import { IconPicker } from "@/components/icon-picker";
 import { ColorPicker } from "@/components/color-picker";
 import { PanelListSkeleton } from "@/components/skeletons";
-import { PersonName } from "@/components/person-profile-provider";
+
 import { PortalCreateDialog, type PortalType } from "@/components/portal-create-dialog";
 import { ProjectEditDialog } from "@/components/project-edit-dialog";
-import { AdminCrown } from "@/components/admin-crown";
+
 import { PortalDefaultIcon } from "@/components/portal-default-icon";
 import { AddMemberPicker, useAddMemberFilters } from "@/components/add-member-picker";
-import { Chip, ChipList } from "@/components/ui/chip";
+import { RosterList } from "@/components/roster-list";
+import { useConfirm } from "@/components/ui/use-confirm";
+import { staggerStyle } from "@/lib/motion";
+import { optimistic } from "@/lib/optimistic";
+import { CommandPicker } from "@/components/ui/combobox";
 
 export type MemberOption = { user_id: string; name: string };
 export type RoleOption = { id: string; role_name: string };
@@ -40,9 +38,14 @@ type Portal = {
   type: PortalType;
   project_id: string | null;
   project_name: string | null;
-  members: PortalMember[];
+  /** Null until the row is expanded; the roster loads lazily. */
+  members: PortalMember[] | null;
+  member_count: number;
+  admin_ids: string[];
   roles: PortalRole[];
 };
+
+const memberCount = (p: Portal) => p.members?.length ?? p.member_count;
 
 type PortalFields = { name: string; description: string; icon: string; iconUrl: string | null; color: string };
 const EMPTY_FIELDS: PortalFields = { name: "", description: "", icon: "", iconUrl: null, color: "" };
@@ -57,11 +60,12 @@ export function PortalsPanel({ members, allRoles }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const memberFilters = useAddMemberFilters(true);
+  const [query, setQuery] = useState("");
+  const { ask, dialog: confirmDialog } = useConfirm();
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [fields, setFields] = useState<PortalFields>(EMPTY_FIELDS);
-  const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [projectEditOpen, setProjectEditOpen] = useState(false);
 
@@ -79,12 +83,27 @@ export function PortalsPanel({ members, allRoles }: Props) {
     loadPortals().then(() => setLoading(false));
   }, [loadPortals]);
 
-  const toggle = (id: string) =>
+  // Rows first, details lazy: a row's roster loads the first time it opens,
+  // showing skeleton rows meanwhile.
+  const loadRoster = (id: string) => {
+    fetch(`/api/admin/portals/${id}/members`)
+      .then((r) => r.json())
+      .then((rows) => {
+        if (Array.isArray(rows)) setPortals((prev) => prev.map((p) => (p.id === id ? { ...p, members: rows } : p)));
+      })
+      .catch(() => {});
+  };
+  // The fetch starts outside the state updater (React may run updaters twice).
+  const toggle = (id: string) => {
+    const opening = !expanded.has(id);
+    if (opening && portals.find((p) => p.id === id)?.members === null) loadRoster(id);
     setExpanded((prev) => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
+  };
 
   const openEdit = (p: Portal) => {
     setEditingId(p.id);
@@ -99,12 +118,24 @@ export function PortalsPanel({ members, allRoles }: Props) {
     setDialogOpen(true);
   };
 
-  const saveEdit = async () => {
+  // Every edit here is optimistic: the list changes at once, the write runs
+  // behind it, and a refusal restores the list as it was and toasts (Retry).
+  // Rare admin edits, so restoring the whole snapshot is fine.
+  const mutate = (
+    label: string,
+    key: string,
+    next: (prev: Portal[]) => Portal[],
+    commit: () => PromiseLike<{ error: { message: string } | null; data?: unknown }>,
+  ) => {
+    const before = portals;
+    void optimistic({ label, key, apply: () => setPortals(next), rollback: () => setPortals(before), commit, requireRows: true });
+  };
+
+  const saveEdit = () => {
     if (!editingId) return;
+    const id = editingId;
     const name = fields.name.trim();
     if (!name) { setFormError("Name is required."); return; }
-
-    setSaving(true);
     setFormError(null);
     const supabase = createClient();
     const payload = {
@@ -114,126 +145,149 @@ export function PortalsPanel({ members, allRoles }: Props) {
       icon_url: fields.iconUrl || null,
       color: fields.color.trim() || null,
     };
-
-    const { error: updateError } = await supabase
-      .from("portals")
-      .update({ ...payload, updated_at: new Date().toISOString() })
-      .eq("id", editingId);
-
-    if (updateError) { setFormError(updateError.message); setSaving(false); return; }
-    setPortals((prev) => prev.map((p) => (p.id === editingId ? { ...p, ...payload } : p)));
-    setSaving(false);
     setDialogOpen(false);
-  };
-
-  const deletePortal = async (id: string) => {
-    if (!confirm("Delete this portal? This also removes its roster and events.")) return;
-    const supabase = createClient();
-    const { error: deleteError } = await supabase.from("portals").delete().eq("id", id);
-    if (deleteError) return;
-    setPortals((prev) => prev.filter((p) => p.id !== id));
-  };
-
-  const addMember = async (portal: Portal, member: MemberOption) => {
-    const supabase = createClient();
-    const { error: insertError } = await supabase
-      .from("portal_members")
-      .insert({ portal_id: portal.id, user_id: member.user_id, is_admin: false });
-
-    if (insertError) return;
-    setPortals((prev) =>
-      prev.map((p) =>
-        p.id === portal.id ? { ...p, members: [...p.members, { ...member, is_admin: false }] } : p,
-      ),
+    mutate(
+      "portal",
+      `portal:${id}`,
+      (prev) => prev.map((p) => (p.id === id ? { ...p, ...payload } : p)),
+      () => supabase.from("portals").update({ ...payload, updated_at: new Date().toISOString() }).eq("id", id).select("id"),
     );
   };
 
-  const removeMember = async (portal: Portal, member: PortalMember) => {
-    const supabase = createClient();
-    const { error: deleteError } = await supabase
-      .from("portal_members")
-      .delete()
-      .eq("portal_id", portal.id)
-      .eq("user_id", member.user_id);
+  const deletePortal = (portal: Portal) => {
+    ask({
+      title: `Delete ${portal.name}?`,
+      description: "This also removes its roster and events.",
+      confirmLabel: "Delete",
+      destructive: true,
+      run: () => {
+        const supabase = createClient();
+        mutate("portal deletion", `portal:${portal.id}`, (prev) => prev.filter((p) => p.id !== portal.id), () =>
+          supabase.from("portals").delete().eq("id", portal.id).select("id"),
+        );
+      },
+    });
+  };
 
-    if (deleteError) return;
-    setPortals((prev) =>
-      prev.map((p) =>
-        p.id === portal.id ? { ...p, members: p.members.filter((m) => m.user_id !== member.user_id) } : p,
-      ),
+  const patchPortal = (portalId: string, fn: (p: Portal) => Portal) => (prev: Portal[]) =>
+    prev.map((p) => (p.id === portalId ? fn(p) : p));
+
+  const addMember = (portal: Portal, member: MemberOption) => {
+    const supabase = createClient();
+    mutate(
+      "member",
+      `portal-member:${portal.id}:${member.user_id}`,
+      patchPortal(portal.id, (p) => ({
+        ...p,
+        members: [...(p.members ?? []), { ...member, is_admin: false }],
+        member_count: p.member_count + 1,
+      })),
+      () => supabase.from("portal_members").insert({ portal_id: portal.id, user_id: member.user_id, is_admin: false }).select("user_id"),
     );
   };
 
-  const toggleAdmin = async (portal: Portal, member: PortalMember) => {
+  const removeMember = (portal: Portal, member: PortalMember) => {
+    const supabase = createClient();
+    mutate(
+      "member",
+      `portal-member:${portal.id}:${member.user_id}`,
+      patchPortal(portal.id, (p) => ({
+        ...p,
+        members: (p.members ?? []).filter((m) => m.user_id !== member.user_id),
+        member_count: Math.max(0, p.member_count - 1),
+      })),
+      () => supabase.from("portal_members").delete().eq("portal_id", portal.id).eq("user_id", member.user_id).select("user_id"),
+    );
+  };
+
+  const toggleAdmin = (portal: Portal, member: PortalMember) => {
     const nextIsAdmin = !member.is_admin;
+    ask({
+      title: nextIsAdmin ? `Make ${member.name} an admin of ${portal.name}?` : `Remove ${member.name} as admin of ${portal.name}?`,
+      confirmLabel: nextIsAdmin ? "Make admin" : "Remove admin",
+      destructive: !nextIsAdmin,
+      run: () => applyToggleAdmin(portal, member, nextIsAdmin),
+    });
+  };
+  const applyToggleAdmin = (portal: Portal, member: PortalMember, nextIsAdmin: boolean) => {
     const supabase = createClient();
-    const { error: updateError } = await supabase
-      .from("portal_members")
-      .update({ is_admin: nextIsAdmin })
-      .eq("portal_id", portal.id)
-      .eq("user_id", member.user_id);
-
-    if (updateError) return;
-    setPortals((prev) =>
-      prev.map((p) =>
-        p.id === portal.id
-          ? { ...p, members: p.members.map((m) => (m.user_id === member.user_id ? { ...m, is_admin: nextIsAdmin } : m)) }
-          : p,
-      ),
+    mutate(
+      "admin access",
+      `portal-admin:${portal.id}:${member.user_id}`,
+      patchPortal(portal.id, (p) => ({
+        ...p,
+        members: (p.members ?? []).map((m) => (m.user_id === member.user_id ? { ...m, is_admin: nextIsAdmin } : m)),
+        admin_ids: nextIsAdmin ? [...p.admin_ids, member.user_id] : p.admin_ids.filter((id) => id !== member.user_id),
+      })),
+      () =>
+        supabase
+          .from("portal_members")
+          .update({ is_admin: nextIsAdmin })
+          .eq("portal_id", portal.id)
+          .eq("user_id", member.user_id)
+          .select("user_id"),
     );
   };
 
-  const addRole = async (portal: Portal, role: RoleOption) => {
+  const addRole = (portal: Portal, role: RoleOption) => {
     const supabase = createClient();
-    const { error: insertError } = await supabase
-      .from("portal_roles")
-      .insert({ portal_id: portal.id, role_id: role.id, is_admin: false });
-
-    if (insertError) return;
-    setPortals((prev) =>
-      prev.map((p) =>
-        p.id === portal.id ? { ...p, roles: [...p.roles, { ...role, is_admin: false }] } : p,
-      ),
+    mutate(
+      "role",
+      `portal-role:${portal.id}:${role.id}`,
+      patchPortal(portal.id, (p) => ({ ...p, roles: [...p.roles, { ...role, is_admin: false }] })),
+      () => supabase.from("portal_roles").insert({ portal_id: portal.id, role_id: role.id, is_admin: false }).select("role_id"),
     );
   };
 
-  const removeRole = async (portal: Portal, role: PortalRole) => {
+  const removeRole = (portal: Portal, role: PortalRole) => {
     const supabase = createClient();
-    const { error: deleteError } = await supabase
-      .from("portal_roles")
-      .delete()
-      .eq("portal_id", portal.id)
-      .eq("role_id", role.id);
-
-    if (deleteError) return;
-    setPortals((prev) =>
-      prev.map((p) =>
-        p.id === portal.id ? { ...p, roles: p.roles.filter((r) => r.id !== role.id) } : p,
-      ),
+    mutate(
+      "role",
+      `portal-role:${portal.id}:${role.id}`,
+      patchPortal(portal.id, (p) => ({ ...p, roles: p.roles.filter((r) => r.id !== role.id) })),
+      () => supabase.from("portal_roles").delete().eq("portal_id", portal.id).eq("role_id", role.id).select("role_id"),
     );
   };
 
-  const toggleRoleAdmin = async (portal: Portal, role: PortalRole) => {
+  const toggleRoleAdmin = (portal: Portal, role: PortalRole) => {
     const nextIsAdmin = !role.is_admin;
+    ask({
+      title: nextIsAdmin
+        ? `Make everyone with ${role.role_name} an admin of ${portal.name}?`
+        : `Make ${role.role_name} regular members of ${portal.name}?`,
+      confirmLabel: nextIsAdmin ? "Make admins" : "Make members",
+      destructive: !nextIsAdmin,
+      run: () => applyToggleRoleAdmin(portal, role, nextIsAdmin),
+    });
+  };
+  const applyToggleRoleAdmin = (portal: Portal, role: PortalRole, nextIsAdmin: boolean) => {
     const supabase = createClient();
-    const { error: updateError } = await supabase
-      .from("portal_roles")
-      .update({ is_admin: nextIsAdmin })
-      .eq("portal_id", portal.id)
-      .eq("role_id", role.id);
-
-    if (updateError) return;
-    setPortals((prev) =>
-      prev.map((p) =>
-        p.id === portal.id
-          ? { ...p, roles: p.roles.map((r) => (r.id === role.id ? { ...r, is_admin: nextIsAdmin } : r)) }
-          : p,
-      ),
+    mutate(
+      "role access",
+      `portal-role-admin:${portal.id}:${role.id}`,
+      patchPortal(portal.id, (p) => ({
+        ...p,
+        roles: p.roles.map((r) => (r.id === role.id ? { ...r, is_admin: nextIsAdmin } : r)),
+      })),
+      () =>
+        supabase
+          .from("portal_roles")
+          .update({ is_admin: nextIsAdmin })
+          .eq("portal_id", portal.id)
+          .eq("role_id", role.id)
+          .select("role_id"),
     );
   };
 
   if (loading) return <PanelListSkeleton />;
-  if (error) return <div className="py-8 text-sm text-red-500">{error}</div>;
+  if (error) return <div className="py-8 text-sm text-destructive">{error}</div>;
+
+  const q = query.trim().toLowerCase();
+  const shownPortals = q
+    ? portals.filter((p) =>
+        [p.name, p.description ?? "", p.project_name ?? ""].some((t) => t.toLowerCase().includes(q)),
+      )
+    : portals;
 
   const editingPortal = portals.find((p) => p.id === editingId);
   // Project portals derive name/icon/color/description from the linked project
@@ -242,7 +296,15 @@ export function PortalsPanel({ members, allRoles }: Props) {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex justify-end">
+      {confirmDialog}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search portals..."
+          aria-label="Search portals"
+          className="max-w-xs"
+        />
         <PortalCreateDialog
           allowedTypes={["general", "exec"]}
           memberOptions={members}
@@ -251,17 +313,20 @@ export function PortalsPanel({ members, allRoles }: Props) {
         />
       </div>
 
-      <div className="border rounded-lg overflow-hidden">
-        {portals.map((p, i) => {
+      <div className="flex flex-col gap-0.5">
+        {shownPortals.map((p, i) => {
           const isOpen = expanded.has(p.id);
-          const availableMembers = members.filter((m) => !p.members.some((pm) => pm.user_id === m.user_id));
+          const availableMembers = members.filter((m) => !(p.members ?? []).some((pm) => pm.user_id === m.user_id));
           // Admins of a project portal are its PMs (0013 maps is_pm -> is_admin).
-          const adminNames = p.members.filter((m) => m.is_admin).map((m) => m.name);
+          // Before the roster loads, names come from the light admin id list.
+          const adminNames = p.members
+            ? p.members.filter((m) => m.is_admin).map((m) => m.name)
+            : p.admin_ids.map((id) => members.find((m) => m.user_id === id)?.name).filter(Boolean) as string[];
           const availableRoles = allRoles.filter((r) => !p.roles.some((pr) => pr.id === r.id));
           return (
-            <div key={p.id} className={i > 0 ? "border-t" : ""}>
+            <div key={p.id} className="rounded-lg transition-colors hover:bg-foreground/[0.03] animate-fade-in-up" style={staggerStyle(i)}>
               <div
-                className="flex items-center gap-3 px-4 py-3 hover:bg-accent/50 cursor-pointer"
+                className="flex items-center gap-3 rounded-lg px-4 py-3 cursor-pointer"
                 onClick={() => toggle(p.id)}
               >
                 <span className="text-muted-foreground flex-shrink-0">
@@ -284,12 +349,10 @@ export function PortalsPanel({ members, allRoles }: Props) {
                   />
                 )}
                 <div className="flex items-center gap-2 flex-1 min-w-0 flex-wrap">
-                  <span className="font-medium text-sm">{p.name}</span>
-                  <span className="px-2 py-0.5 rounded-full bg-foreground/10 text-foreground text-xs font-medium">
-                    {TYPE_LABELS[p.type]}
-                  </span>
-                  <span className="text-xs text-muted-foreground">
-                    {p.members.length} member{p.members.length === 1 ? "" : "s"}
+                  <span className="min-w-0 truncate font-medium text-sm">{p.name}</span>
+                  {/* Type and size as one muted line, not a pill. */}
+                  <span className="shrink-0 text-xs text-muted-foreground">
+                    {TYPE_LABELS[p.type]} · {memberCount(p)} member{memberCount(p) === 1 ? "" : "s"}
                   </span>
                 </div>
                 {adminNames.length > 0 && (
@@ -307,115 +370,103 @@ export function PortalsPanel({ members, allRoles }: Props) {
                   <Pencil size={14} />
                 </button>
                 <button
-                  onClick={(e) => { e.stopPropagation(); deletePortal(p.id); }}
-                  className="text-muted-foreground hover:text-red-500 transition-colors flex-shrink-0"
+                  onClick={(e) => { e.stopPropagation(); deletePortal(p); }}
+                  aria-label={`Delete ${p.name}`}
+                  className="text-muted-foreground hover:text-destructive transition-colors flex-shrink-0"
                 >
                   <X size={15} />
                 </button>
               </div>
               {isOpen && (
-                <div className="px-11 pb-4 pt-3 flex flex-col gap-4 bg-accent/20">
-                  {p.description && <p className="text-sm text-muted-foreground">{p.description}</p>}
+                // Opens instantly (height grows in); the roster fills in when
+                // it arrives, skeleton rows until then.
+                <div className="grid animate-expand">
+                <div className="min-h-0 overflow-hidden">
+                <div className="mx-1 mb-1 flex flex-col gap-5 rounded-lg surface px-10 pb-4 pt-3">
+                  {p.description && <p className="break-words text-sm text-muted-foreground">{p.description}</p>}
 
-                  {/* Members roster. Project portals derive members from the
-                      linked project (locked); explicit extras are editable. */}
-                  <div className="flex flex-col gap-1.5">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                        Members
-                      </span>
-                      <span className="text-[10px] font-normal text-muted-foreground/60">({p.members.length})</span>
+                  {/* Project portals derive members from the linked project
+                      (locked); explicit extras are editable. */}
+                  <RosterList
+                    label="Members"
+                    rows={
+                      p.members?.map((m) => ({
+                        id: m.user_id,
+                        name: m.name,
+                        crown: m.is_admin,
+                        owner: m.owner,
+                        locked: m.locked,
+                        note: m.locked ? (m.owner ? "owner" : "via project") : undefined,
+                      })) ?? null
+                    }
+                    crownTitle={(r) => (r.crown ? "Admin — click to remove" : "Make admin")}
+                    onToggleCrown={(r) => {
+                      const m = p.members?.find((x) => x.user_id === r.id);
+                      if (m) toggleAdmin(p, m);
+                    }}
+                    onRemove={(r) => {
+                      const m = p.members?.find((x) => x.user_id === r.id);
+                      if (m) removeMember(p, m);
+                    }}
+                    addControl={
                       <AddMemberPicker
                         options={availableMembers}
                         onAdd={(m) => addMember(p, m)}
                         filters={memberFilters}
                         side="right"
                         trigger={
-                          <button className="text-muted-foreground hover:text-foreground transition-colors">
+                          <button aria-label={`Add member to ${p.name}`} className="text-muted-foreground hover:text-foreground transition-colors">
                             <PlusCircle size={14} />
                           </button>
                         }
                       />
-                    </div>
-                    <ChipList empty="No members yet.">
-                      {p.members.map((m) => (
-                        <Chip
-                          key={m.user_id}
-                          onRemove={m.locked ? undefined : () => removeMember(p, m)}
-                          removeLabel={`Remove ${m.name} from ${p.name}`}
-                        >
-                          <PersonName userId={m.user_id} name={m.name} />
-                          {m.locked && (
-                            <span className="text-[10px] text-muted-foreground/70 italic">
-                              {m.owner ? "owner" : "via project"}
-                            </span>
-                          )}
-                          <AdminCrown
-                            active={m.is_admin}
-                            owner={m.owner}
-                            locked={m.locked}
-                            onToggle={m.locked ? undefined : () => toggleAdmin(p, m)}
-                            size={13}
-                          />
-                        </Chip>
-                      ))}
-                    </ChipList>
-                  </div>
+                    }
+                  />
 
                   {/* Auto-assigned roles: everyone with the role joins the portal;
-                      the Admin toggle sets the tier that mapping grants. */}
-                  <div className="flex flex-col gap-1.5">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                        Roles
-                      </span>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <button className="text-muted-foreground hover:text-foreground transition-colors">
-                            <PlusCircle size={14} />
-                          </button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="start">
-                          {availableRoles.length === 0 ? (
-                            <div className="px-2 py-1.5 text-xs text-muted-foreground">
-                              No roles left to add
-                            </div>
-                          ) : (
-                            availableRoles.map((r) => (
-                              <DropdownMenuItem key={r.id} onSelect={() => addRole(p, r)}>
-                                {r.role_name}
-                              </DropdownMenuItem>
-                            ))
-                          )}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-                    {p.roles.length === 0 ? (
-                      <p className="text-xs text-muted-foreground">
-                        No roles. Anyone with a mapped role is auto-added to this portal at the chosen tier.
-                      </p>
-                    ) : (
-                      <ChipList>
-                        {p.roles.map((r) => (
-                          <Chip
-                            key={r.id}
-                            onRemove={() => removeRole(p, r)}
-                            removeLabel={`Remove ${r.role_name} from ${p.name}`}
-                          >
-                            <span>{r.role_name}</span>
-                            <AdminCrown active={r.is_admin} onToggle={() => toggleRoleAdmin(p, r)} size={13} />
-                          </Chip>
-                        ))}
-                      </ChipList>
-                    )}
-                  </div>
+                      the crown sets the tier that mapping grants. */}
+                  <RosterList
+                    label="Roles"
+                    person={false}
+                    rows={p.roles.map((r) => ({ id: r.id, name: r.role_name, crown: r.is_admin }))}
+                    emptyText="No roles. Anyone with a mapped role is auto-added at the chosen tier."
+                    crownTitle={(r) => (r.crown ? "Admins — click to make members" : "Make this role admins")}
+                    onToggleCrown={(r) => {
+                      const role = p.roles.find((x) => x.id === r.id);
+                      if (role) toggleRoleAdmin(p, role);
+                    }}
+                    onRemove={(r) => {
+                      const role = p.roles.find((x) => x.id === r.id);
+                      if (role) removeRole(p, role);
+                    }}
+                    addControl={
+                      <CommandPicker
+                        options={availableRoles.map((r) => ({ value: String(r.id), label: r.role_name }))}
+                        onSelect={(id) => {
+                          const r = availableRoles.find((x) => String(x.id) === id);
+                          if (r) addRole(p, r);
+                        }}
+                        searchPlaceholder="Search roles…"
+                        emptyText="No roles left to add"
+                        contentClassName="w-56"
+                      >
+                        <button aria-label={`Add role to ${p.name}`} className="text-muted-foreground hover:text-foreground transition-colors">
+                          <PlusCircle size={14} />
+                        </button>
+                      </CommandPicker>
+                    }
+                  />
+                </div>
+                </div>
                 </div>
               )}
             </div>
           );
         })}
-        {portals.length === 0 && (
-          <div className="px-4 py-8 text-center text-sm text-muted-foreground">No portals yet.</div>
+        {shownPortals.length === 0 && (
+          <div className="px-4 py-8 text-center text-sm text-muted-foreground">
+            {portals.length === 0 ? "No portals yet." : "No portals match."}
+          </div>
         )}
       </div>
 
@@ -429,7 +480,7 @@ export function PortalsPanel({ members, allRoles }: Props) {
               <div className="flex flex-col gap-3">
                 <div className="flex items-start gap-3">
                   <div
-                    className="h-12 w-12 flex-shrink-0 rounded-md border flex items-center justify-center overflow-hidden bg-muted/30"
+                    className="h-12 w-12 flex-shrink-0 rounded-md flex items-center justify-center overflow-hidden bg-muted"
                     style={{ backgroundColor: fields.color || undefined }}
                   >
                     {fields.iconUrl ? (
@@ -497,7 +548,7 @@ export function PortalsPanel({ members, allRoles }: Props) {
             )}
             {/* Linked project — edit the underlying project's details. */}
             {editingPortal?.type === "project" && editingPortal.project_id && (
-              <div className="flex items-center justify-between gap-2 border-t pt-4">
+              <div className="flex items-center justify-between gap-2 pt-2">
                 <div className="flex flex-col">
                   <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Project</span>
                   <span className="text-xs text-muted-foreground">Edit the linked project&apos;s details.</span>
@@ -513,8 +564,8 @@ export function PortalsPanel({ members, allRoles }: Props) {
                 {editingIsProject ? "Close" : "Cancel"}
               </Button>
               {!editingIsProject && (
-                <Button onClick={saveEdit} disabled={saving}>
-                  {saving ? "Saving..." : "Save"}
+                <Button onClick={saveEdit}>
+                  Save
                 </Button>
               )}
             </div>

@@ -1,7 +1,11 @@
 "use client";
 
 import { createClient } from "@/lib/supabase/client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { centredOriginFromClick } from "@/lib/click-origin";
+import { optimistic } from "@/lib/optimistic";
+import { MultiCombobox, joinList, splitList } from "@/components/ui/combobox";
+import { BERKELEY_MAJORS } from "@/lib/majors";
 import { createPortal } from "react-dom";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -68,12 +72,20 @@ export function ProfileDialog({ open, onOpenChange, userId, onSave }: Props) {
   const [fields, setFields] = useState<ProfileFields>(EMPTY);
   const [pronounsPublic, setPronounsPublic] = useState(true);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
+  const loadedRef = useRef<{ fields: ProfileFields; avatarUrl: string | null } | null>(null);
 
   useEffect(() => { setMounted(true); }, []);
+
+  // Same entrance as ui/dialog: grow out of the press that opened it (the
+  // navbar menu item), set before first paint.
+  useLayoutEffect(() => {
+    if (open && mounted && panelRef.current) {
+      panelRef.current.style.transformOrigin = centredOriginFromClick();
+    }
+  }, [open, mounted]);
 
   useEffect(() => {
     if (!open) return;
@@ -85,6 +97,20 @@ export function ProfileDialog({ open, onOpenChange, userId, onSave }: Props) {
       .maybeSingle()
       .then(({ data }) => {
         if (data) {
+          loadedRef.current = {
+            fields: {
+              preferred_firstname: data.preferred_firstname ?? "",
+              lastname: data.lastname ?? "",
+              major: data.major ?? "",
+              grad_year: data.grad_year ?? "",
+              phone: data.phone ?? "",
+              linkedin: data.linkedin ?? "",
+              github: data.github ?? "",
+              interests: data.interests ?? "",
+              pronouns: data.pronouns ?? "",
+            },
+            avatarUrl: data.avatar_url ?? null,
+          };
           setFields({
             preferred_firstname: data.preferred_firstname ?? "",
             lastname: data.lastname ?? "",
@@ -109,24 +135,32 @@ export function ProfileDialog({ open, onOpenChange, userId, onSave }: Props) {
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onOpenChange]);
 
-  const handleSave = async () => {
-    setLoading(true);
+  // Closes and updates the navbar at once; the row is written behind it. A
+  // refusal puts the navbar back to the profile as it was loaded and toasts
+  // with Retry (which re-sends these exact values).
+  const handleSave = () => {
     setError(null);
     const supabase = createClient();
-    const { error: updateError } = await supabase
-      .from("members")
-      .update({ ...fields, pronouns_public: pronounsPublic, avatar_url: avatarUrl })
-      .eq("user_id", userId);
-
-    if (updateError) {
-      setError(updateError.message);
-      setLoading(false);
-      return;
-    }
-
-    onSave?.(fields, avatarUrl);
-    onOpenChange(false);
-    setLoading(false);
+    const saved = { fields, avatarUrl, pronounsPublic };
+    const before = loadedRef.current;
+    void optimistic({
+      label: "profile",
+      key: `profile:${userId}`,
+      apply: () => {
+        onSave?.(saved.fields, saved.avatarUrl);
+        onOpenChange(false);
+      },
+      rollback: () => {
+        if (before) onSave?.(before.fields, before.avatarUrl);
+      },
+      commit: () =>
+        supabase
+          .from("members")
+          .update({ ...saved.fields, pronouns_public: saved.pronounsPublic, avatar_url: saved.avatarUrl })
+          .eq("user_id", userId)
+          .select("user_id"),
+      requireRows: true,
+    });
   };
 
   if (!mounted || !open) return null;
@@ -134,7 +168,18 @@ export function ProfileDialog({ open, onOpenChange, userId, onSave }: Props) {
   const renderField = (key: keyof ProfileFields) => (
     <div key={key} className="flex flex-col gap-1">
       <Label htmlFor={key}>{LABELS[key]}</Label>
-      {key === "pronouns" ? (
+      {key === "major" ? (
+        // Pick from the list or type your own; stored comma-separated.
+        <MultiCombobox
+          aria-label="Major(s)"
+          creatable
+          value={splitList(fields.major)}
+          onChange={(v) => setFields((f) => ({ ...f, major: joinList(v) }))}
+          options={BERKELEY_MAJORS.map((m) => ({ value: m, label: m }))}
+          placeholder="Major(s)"
+          searchPlaceholder="Search or type a major…"
+        />
+      ) : key === "pronouns" ? (
         <PronounsPicker
           value={fields[key]}
           onChange={(v) => setFields((f) => ({ ...f, pronouns: v }))}
@@ -188,12 +233,12 @@ export function ProfileDialog({ open, onOpenChange, userId, onSave }: Props) {
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div
-        className="fixed inset-0 bg-black/50"
+        className="fixed inset-0 bg-black/40 backdrop-blur-[2px] animate-in fade-in-0 duration-3 ease-out-quart"
         onClick={() => onOpenChange(false)}
       />
       <div
         ref={panelRef}
-        className="relative z-10 w-full max-w-lg rounded-lg border bg-background shadow-lg flex flex-col max-h-[90vh]"
+        className="relative z-10 w-full max-w-lg rounded-lg border glass-strong shadow-overlay flex flex-col max-h-[90vh] animate-in fade-in-0 zoom-in-50 duration-[280ms] ease-out-expo"
       >
         <div className="flex items-center justify-between px-6 pt-6 pb-4 flex-shrink-0">
           <h2 className="text-lg font-semibold">Edit profile</h2>
@@ -243,8 +288,8 @@ export function ProfileDialog({ open, onOpenChange, userId, onSave }: Props) {
             <Button variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button onClick={handleSave} disabled={loading}>
-              {loading ? "Saving..." : "Save"}
+            <Button onClick={handleSave}>
+              Save
             </Button>
           </div>
         </ScrollArea>

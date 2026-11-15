@@ -27,6 +27,8 @@ import {
   answerComplete,
   isChoiceType,
 } from "@/lib/application";
+import { optimistic } from "@/lib/optimistic";
+import { Combobox } from "@/components/ui/combobox";
 
 type Props = {
   projectId: string;
@@ -62,7 +64,6 @@ export function ProjectApplicationModal({ projectId, projectName, rankingId, ope
   const [essayRequired, setEssayRequired] = useState(true);
   const [essay, setEssay] = useState("");
   const [answers, setAnswers] = useState<Record<string, AnswerValue>>({});
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Snapshot of the loaded state, to detect unsaved changes on close.
   const initialEssayRef = useRef("");
@@ -125,19 +126,15 @@ export function ProjectApplicationModal({ projectId, projectName, rankingId, ope
   const isComplete =
     (!essayRequired || essayHasText(essay)) && questions.every((q) => answerComplete(q, answers[q.id]));
 
-  const save = async () => {
-    setSaving(true);
+  // Closes and marks the project done/not-done immediately; the essay and
+  // answers are written behind it. The values are captured here, so a failed
+  // save's Retry (in the toast) re-sends exactly what was typed even though
+  // the modal is already closed. A failure shows the project as not done.
+  const save = () => {
     setError(null);
     const supabase = createClient();
-
-    const { error: rankingError } = await supabase
-      .from("application_rankings")
-      .update({ essay: essay.trim() || null, completed: isComplete, updated_at: new Date().toISOString() })
-      .eq("id", rankingId);
-    if (rankingError) { setError(rankingError.message); setSaving(false); return; }
-
-    // Replace this project's answers wholesale so cleared fields are removed.
-    await supabase.from("application_answers").delete().eq("ranking_id", rankingId);
+    const essayValue = essay.trim() || null;
+    const complete = isComplete;
     const rows = questions
       .map((q) => {
         const v = getAnswer(q.id);
@@ -147,14 +144,28 @@ export function ProjectApplicationModal({ projectId, projectName, rankingId, ope
         return v.text.trim() ? { ranking_id: rankingId, question_id: q.id, answer: v.text.trim(), answer_options: null } : null;
       })
       .filter(Boolean) as { ranking_id: string; question_id: string; answer: string | null; answer_options: string[] | null }[];
-    if (rows.length) {
-      const { error: answersError } = await supabase.from("application_answers").insert(rows);
-      if (answersError) { setError(answersError.message); setSaving(false); return; }
-    }
 
-    setSaving(false);
-    onSaved(isComplete);
-    onOpenChange(false);
+    void optimistic({
+      label: `${projectName} application`,
+      key: `project-application:${rankingId}`,
+      apply: () => {
+        onSaved(complete);
+        onOpenChange(false);
+      },
+      rollback: () => onSaved(false),
+      commit: async () => {
+        const { error: rankingError } = await supabase
+          .from("application_rankings")
+          .update({ essay: essayValue, completed: complete, updated_at: new Date().toISOString() })
+          .eq("id", rankingId);
+        if (rankingError) return { error: rankingError };
+        // Replace this project's answers wholesale so cleared fields are removed.
+        const { error: clearError } = await supabase.from("application_answers").delete().eq("ranking_id", rankingId);
+        if (clearError) return { error: clearError };
+        if (rows.length) return supabase.from("application_answers").insert(rows);
+        return { error: null };
+      },
+    });
   };
 
   const essayWords = wordCount(essay);
@@ -247,21 +258,33 @@ export function ProjectApplicationModal({ projectId, projectName, rankingId, ope
                   )}
 
                   {q.type === "dropdown" && (
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <button className="flex items-center justify-between gap-2 border rounded-md px-3 py-2 text-sm bg-background hover:bg-accent transition-colors">
-                          {v.options[0] ?? <span className="text-muted-foreground">Select…</span>}
-                          <ChevronDown size={14} className="text-muted-foreground" />
-                        </button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="start" className="w-[--radix-dropdown-menu-trigger-width]">
-                        {(q.options ?? []).map((opt) => (
-                          <DropdownMenuItem key={opt} onSelect={() => setSingle(q.id, opt)}>
-                            {opt}
-                          </DropdownMenuItem>
-                        ))}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                    // Searchable once a question has more than a handful of
+                    // options; a plain list below that.
+                    (q.options ?? []).length > 8 ? (
+                      <Combobox
+                        aria-label={q.prompt}
+                        value={v.options[0] ?? null}
+                        onChange={(opt) => setSingle(q.id, opt)}
+                        options={(q.options ?? []).map((opt) => ({ value: opt, label: opt }))}
+                        placeholder="Select…"
+                      />
+                    ) : (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button className="flex items-center justify-between gap-2 border border-input rounded-md px-3 py-2 text-sm bg-transparent hover:bg-accent transition-colors">
+                            {v.options[0] ?? <span className="text-muted-foreground">Select…</span>}
+                            <ChevronDown size={14} className="text-muted-foreground" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="start" className="w-[--radix-dropdown-menu-trigger-width]">
+                          {(q.options ?? []).map((opt) => (
+                            <DropdownMenuItem key={opt} onSelect={() => setSingle(q.id, opt)}>
+                              {opt}
+                            </DropdownMenuItem>
+                          ))}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )
                   )}
 
                   {q.type === "checkboxes" && (
@@ -283,9 +306,9 @@ export function ProjectApplicationModal({ projectId, projectName, rankingId, ope
 
             {error && <p className="text-sm text-red-500">{error}</p>}
 
-            <div className="flex justify-end gap-2 border-t pt-4">
+            <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" onClick={() => handleOpenChange(false)}>Cancel</Button>
-              <Button onClick={save} disabled={saving}>{saving ? "Saving…" : "Save"}</Button>
+              <Button onClick={save}>Save</Button>
             </div>
           </div>
         )}

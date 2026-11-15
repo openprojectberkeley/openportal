@@ -45,7 +45,8 @@ export function NotificationBell() {
         >
           <Bell size={18} />
           {unreadCount > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 min-w-[1rem] h-4 px-1 rounded-full bg-red-500 text-white text-[10px] font-semibold leading-none flex items-center justify-center">
+            // Keyed on the count so a new notification re-plays the pop.
+            <span key={unreadCount} className="absolute -top-0.5 -right-0.5 min-w-[1rem] h-4 px-1 rounded-full tabular-nums animate-pop bg-destructive text-destructive-foreground text-[10px] font-semibold leading-none flex items-center justify-center">
               {unreadCount > 9 ? "9+" : unreadCount}
             </span>
           )}
@@ -55,7 +56,7 @@ export function NotificationBell() {
         {/* The menu's scroll padding (p-1 on the content viewport) is cancelled
             here so the header rule and rows stay flush to the edges. */}
         <div className="-m-1">
-          <div className="px-3 py-2 border-b text-sm font-semibold">Notifications</div>
+          <div className="px-3 pb-1 pt-2 text-sm font-semibold">Notifications</div>
           {items.length === 0 ? (
             <p className="px-3 py-6 text-center text-sm text-muted-foreground">You&apos;re all caught up.</p>
           ) : (
@@ -64,16 +65,16 @@ export function NotificationBell() {
                 /* The dismiss control is a SIBLING of the row button, not a
                    child: nesting a button inside a button is invalid HTML and
                    the inner click wouldn't be isolable from the navigation. */
-                <div key={n.id} className="relative group border-b last:border-b-0">
+                <div key={n.id} className="relative group">
                   <button
                     onClick={() => { markRead(n.id); router.push(hrefFor(n, userId)); }}
                     className="w-full text-left pl-3 pr-9 py-2.5 hover:bg-accent transition-colors flex gap-2"
                   >
-                    <span className={`mt-1.5 h-1.5 w-1.5 rounded-full flex-shrink-0 ${n.read ? "bg-transparent" : "bg-blue-500"}`} />
+                    <span className={`mt-1.5 h-1.5 w-1.5 rounded-full flex-shrink-0 ${n.read ? "bg-transparent" : "bg-info"}`} />
                     <span className="flex flex-col gap-0.5 min-w-0">
                       <span className="text-sm font-medium">{n.title}</span>
                       {n.body && <span className="text-xs text-muted-foreground leading-snug">{n.body}</span>}
-                      <span className="text-[11px] text-muted-foreground/70">{relativeTime(n.created_at)}</span>
+                      <span className="text-[11px] tabular-nums text-muted-foreground/70">{relativeTime(n.created_at)}</span>
                     </span>
                   </button>
                   <button

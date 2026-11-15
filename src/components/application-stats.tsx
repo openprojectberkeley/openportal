@@ -12,7 +12,7 @@ export type Stats = {
 
 function Tile({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-xl border bg-background px-4 py-3">
+    <div className="rounded-xl surface rim-card px-4 py-3">
       <div className="text-2xl font-bold tabular-nums">{value}</div>
       <div className="text-xs text-muted-foreground">{label}</div>
     </div>
@@ -25,7 +25,7 @@ export function ApplicationStats({ stats }: { stats: Stats | null }) {
       <div className="flex flex-col gap-2">
         <div className="grid grid-cols-3 gap-3">
           {[0, 1, 2].map((i) => (
-            <div key={i} className="h-[4.75rem] rounded-xl border bg-muted animate-pulse" />
+            <div key={i} className="h-[4.75rem] rounded-xl bg-muted animate-pulse" />
           ))}
         </div>
         <div className="h-3 w-48 rounded bg-muted animate-pulse" />

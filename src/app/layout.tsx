@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
-import { Geist } from "next/font/google";
+import { Geist, Geist_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import { Analytics } from "@vercel/analytics/next";
 import { ThemeProvider } from "next-themes";
 import { RoleSimulationProvider } from "@/components/role-simulation-provider";
 import { PersonProfileProvider } from "@/components/person-profile-provider";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { WindowScrollbar } from "@/components/overlay-scrollbar";
+import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
 
 const defaultUrl = process.env.VERCEL_URL
@@ -24,6 +26,26 @@ const geistSans = Geist({
   subsets: ["latin"],
 });
 
+// Numbers that need to line up (scores, countdowns, codes) use `font-mono`,
+// which tailwind.config.ts points at this variable.
+const geistMono = Geist_Mono({
+  variable: "--font-geist-mono",
+  display: "swap",
+  subsets: ["latin"],
+});
+
+// Display face for headings (h1–h3, dialog titles, wordmarks): Satoshi, a
+// geometric grotesk with more character than Geist at large sizes, still clean
+// enough for UI. Body copy stays Geist. Self-hosted (Fontshare / ITF Free Font
+// License, see src/fonts/satoshi/LICENSE.md); exposed as `font-display`.
+const satoshi = localFont({
+  src: "../fonts/satoshi/Satoshi-Variable.woff2",
+  variable: "--font-display",
+  weight: "300 900",
+  display: "swap",
+  adjustFontFallback: "Arial",
+});
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -32,7 +54,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body
-        className={`${geistSans.className} antialiased`}
+        className={`${geistSans.className} ${geistMono.variable} ${satoshi.variable} antialiased`}
         suppressHydrationWarning
       >
         <ThemeProvider
@@ -49,6 +71,7 @@ export default function RootLayout({
             </RoleSimulationProvider>
           </TooltipProvider>
           <WindowScrollbar />
+          <Toaster />
         </ThemeProvider>
         <Analytics />
       </body>

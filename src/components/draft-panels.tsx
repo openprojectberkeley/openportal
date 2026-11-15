@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useDroppable } from "@dnd-kit/core";
 import { Lock } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+
 import { accentFill } from "@/lib/portal-color";
 import { Button } from "@/components/ui/button";
 import { StaticApplicantCard, applicantName, type AppRow } from "@/components/applicant-meta";
@@ -75,7 +75,7 @@ function DraftStatus({
   }
 
   return (
-    <div className="flex items-start gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+    <div className="flex items-start gap-2 rounded-lg surface px-3 py-2">
       <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${dot}`} aria-hidden />
       <div className="flex flex-col gap-0.5">
         <span className="text-sm font-medium">{headline}</span>
@@ -178,7 +178,7 @@ export function DraftWindowPanel({
       <div className="flex flex-col gap-2.5">
         <div className="flex items-center justify-between gap-2">
           <div className="flex flex-col gap-0.5">
-            <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            <h2 className="text-xs font-semibold uppercase tracking-wide tabular-nums text-muted-foreground">
               Confirmed{confirmedPicks.length ? ` (${confirmedPicks.length})` : ""}
             </h2>
             {confirmedPicks.length > 0 && (
@@ -200,7 +200,7 @@ export function DraftWindowPanel({
           )}
         </div>
         {confirmedPicks.length === 0 ? (
-          <div className="px-4 py-6 text-center text-sm text-muted-foreground border rounded-xl">
+          <div className="px-4 py-6 text-center text-sm text-muted-foreground rounded-xl surface">
             No picks confirmed yet.
           </div>
         ) : (
@@ -216,11 +216,10 @@ export function DraftWindowPanel({
                   className="flex items-center gap-2 rounded-lg px-3 py-2"
                 >
                   <span className="flex-1 min-w-0 truncate text-sm font-medium">{app ? applicantName(app) : "Applicant"}</span>
-                  {/* text-current/border-current so the badge rides the accent's
-                      readable foreground instead of the theme's fixed one. */}
-                  <Badge variant="outline" className="border-current/40 text-current">
-                    Round {p.round.round_number}
-                  </Badge>
+                  {/* Plain "R2" in the accent's readable foreground, not a pill. */}
+                  <span className="shrink-0 text-xs font-medium tabular-nums opacity-70" title={`Round ${p.round.round_number}`}>
+                    R{p.round.round_number}
+                  </span>
                 </div>
               );
             })}
@@ -231,7 +230,7 @@ export function DraftWindowPanel({
       {/* Draft window */}
       <div className="flex flex-col gap-2.5">
         <div className="flex items-center justify-between gap-2">
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          <h2 className="text-xs font-semibold uppercase tracking-wide tabular-nums text-muted-foreground">
             Draft window{canStage && nextRound ? ` (${draftWindowPicks.length}/${nextRound.pick_count})` : ""}
           </h2>
           {phase === "in_progress" && nextRound && (
@@ -252,10 +251,10 @@ export function DraftWindowPanel({
           // applicant staged here gets the same white on their card over in the
           // Applicants column, so the two read as one section. Cards inside sit
           // on the plain background, a shade below the panel.
-          className={`flex flex-col gap-2 rounded-xl border-2 border-dashed p-3 transition-colors ${
-            !canStage ? "border-muted-foreground/20 bg-muted/20"
-            : isOver ? "border-foreground/50 bg-accent"
-            : "border-foreground/25 bg-card"
+          className={`flex flex-col gap-2 rounded-xl border border-dashed p-3 transition-colors ${
+            !canStage ? "border-foreground/10 bg-muted/20"
+            : isOver ? "border-foreground/30 bg-accent"
+            : "border-foreground/15 bg-card"
           }`}
         >
           {!canStage ? (
@@ -273,7 +272,7 @@ export function DraftWindowPanel({
               const app = appById.get(p.application_id);
               if (!app) {
                 return (
-                  <div key={p.id} className="flex items-center gap-2 border border-amber-400/50 rounded-lg px-3 py-2 bg-amber-50 dark:bg-amber-950/30">
+                  <div key={p.id} className="flex items-center gap-2 rounded-lg px-3 py-2 bg-warning/10">
                     <span className="flex-1 min-w-0 truncate text-sm text-muted-foreground italic">
                       Applicant no longer in this project&apos;s review list
                     </span>

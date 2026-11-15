@@ -76,7 +76,7 @@ export function WindowScrollbar() {
         onPointerDown={onThumbPointerDown}
         className={cn(
           "absolute right-0 rounded-full bg-foreground",
-          !dragging && "transition-[opacity,width] duration-200 ease-out",
+          !dragging && "transition-[opacity,width] duration-instant ease-out-quart",
         )}
         style={{
           top: `${offsetRatio * (1 - sizeRatio) * 100}%`,
@@ -195,7 +195,7 @@ function ElementScrollbar({
         className={cn(
           "absolute rounded-full bg-foreground",
           vertical ? "right-0" : "bottom-0",
-          !dragging && "transition-[opacity,width,height] duration-200 ease-out",
+          !dragging && "transition-[opacity,width,height] duration-instant ease-out-quart",
         )}
         style={{
           ...(vertical

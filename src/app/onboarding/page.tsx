@@ -17,6 +17,8 @@ const CLASS_YEARS = ["Freshman", "Sophomore", "Junior", "Senior", "Postgrad"] as
 import { AvatarPicker } from "@/components/avatar-picker";
 import { Checkbox } from "@/components/ui/checkbox";
 import { PronounsPicker } from "@/components/pronouns-field";
+import { MultiCombobox, joinList, splitList } from "@/components/ui/combobox";
+import { BERKELEY_MAJORS } from "@/lib/majors";
 
 // Progressively formats digits as (xxx) xxx-xxxx while typing.
 function formatPhoneNumber(value: string): string {
@@ -158,7 +160,7 @@ export default function OnboardingPage() {
     <div className="flex flex-1 w-full items-center justify-center p-6">
       <div className="flex flex-col gap-6 w-full max-w-md">
         <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-bold">Welcome to Open Project!</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Welcome to Open Project!</h1>
           <p className="text-sm text-muted-foreground">
             This is Open Portal, our hub for everything Open Project — let&apos;s get your profile set up.
           </p>
@@ -219,13 +221,15 @@ export default function OnboardingPage() {
           <div className="grid grid-cols-3 gap-3">
             <div className="flex flex-col gap-1">
               <label className="text-sm font-medium">Major(s)</label>
-              <input
-                type="text"
-                value={major}
-                onChange={(e) => setMajor(e.target.value)}
+              {/* Pick from the list or type your own; stored comma-separated. */}
+              <MultiCombobox
+                aria-label="Major(s)"
+                creatable
+                value={splitList(major)}
+                onChange={(v) => setMajor(joinList(v))}
+                options={BERKELEY_MAJORS.map((m) => ({ value: m, label: m }))}
                 placeholder="Major(s)"
-                required
-                className="border bg-transparent rounded-md px-3 py-2 text-sm w-full"
+                searchPlaceholder="Search or type a major…"
               />
             </div>
             <div className="flex flex-col gap-1">

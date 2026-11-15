@@ -3,10 +3,8 @@
 import { createClient } from "@/lib/supabase/client";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PlusCircle } from "lucide-react";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/overlay-scrollbar";
+import { CommandPicker, type ComboOption } from "@/components/ui/combobox";
 
 export type MemberOption = { user_id: string; name: string };
 
@@ -70,9 +68,6 @@ export function useAddMemberFilters(enabled: boolean): AddMemberFilters {
   return filters;
 }
 
-const selectClass =
-  "h-8 flex-1 min-w-0 rounded-md border border-input bg-transparent px-2 text-xs text-foreground shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
-
 type Props = {
   options: MemberOption[];
   onAdd: (m: MemberOption) => void;
@@ -82,14 +77,13 @@ type Props = {
   align?: "start" | "center" | "end";
 };
 
-// Compact popover for adding a member: a search box plus role and project
-// filters over a scrollable result list. Add-only — the caller owns the
-// mutation and its own roster state.
+// Searchable add-member picker (cmdk). One search box does the work of the
+// old name search + role and project <select>s: each member carries their
+// roles and projects as search keywords, so typing "design" or a project name
+// narrows to those people, and their roles show as a hint on the right.
+// Arrow keys + Enter pick. Stays open so several people can be added in a row.
+// Add-only: the caller owns the mutation and its own roster state.
 export function AddMemberPicker({ options, onAdd, filters, trigger, side = "bottom", align = "start" }: Props) {
-  const [open, setOpen] = useState(false);
-  const [search, setSearch] = useState("");
-  const [roleFilter, setRoleFilter] = useState<number | null>(null);
-  const [projectFilter, setProjectFilter] = useState<string | null>(null);
   const { roles, projects, memberRoleIds, memberProjectIds } = filters;
 
   // When the picker is rendered inside a Radix Dialog, portal the popover into
@@ -101,96 +95,44 @@ export function AddMemberPicker({ options, onAdd, filters, trigger, side = "bott
     if (node) setDialogContainer(node.closest<HTMLElement>("[role='dialog']"));
   }, []);
 
-  const results = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return options.filter(
-      (m) =>
-        (q === "" || m.name.toLowerCase().includes(q)) &&
-        (roleFilter == null || memberRoleIds.get(m.user_id)?.has(roleFilter)) &&
-        (projectFilter == null || memberProjectIds.get(m.user_id)?.has(projectFilter)),
-    );
-  }, [options, search, roleFilter, projectFilter, memberRoleIds, memberProjectIds]);
-
-  // Reset the transient filter/search state whenever the popover closes.
-  const handleOpenChange = (next: boolean) => {
-    setOpen(next);
-    if (!next) {
-      setSearch("");
-      setRoleFilter(null);
-      setProjectFilter(null);
-    }
-  };
+  const comboOptions = useMemo<ComboOption[]>(() => {
+    const roleName = new Map(roles.map((r) => [r.id, r.role_name]));
+    const projectName = new Map(projects.map((p) => [p.id, p.name]));
+    return options.map((m) => {
+      const memberRoles = [...(memberRoleIds.get(m.user_id) ?? [])].map((id) => roleName.get(id)).filter(Boolean) as string[];
+      const memberProjects = [...(memberProjectIds.get(m.user_id) ?? [])].map((id) => projectName.get(id)).filter(Boolean) as string[];
+      return {
+        value: m.user_id,
+        label: m.name,
+        keywords: [...memberRoles, ...memberProjects],
+        hint: memberRoles.slice(0, 2).join(", ") || undefined,
+      };
+    });
+  }, [options, roles, projects, memberRoleIds, memberProjectIds]);
 
   return (
-    <Popover open={open} onOpenChange={handleOpenChange}>
+    <>
       {/* Zero-box probe used to locate an enclosing Dialog for the portal. */}
       <span ref={probeRef} className="hidden" aria-hidden />
-      <PopoverTrigger asChild>
+      <CommandPicker
+        options={comboOptions}
+        onSelect={(id) => {
+          const m = options.find((o) => o.user_id === id);
+          if (m) onAdd(m);
+        }}
+        keepOpen
+        container={dialogContainer}
+        align={align}
+        searchPlaceholder="Name, role or project…"
+        emptyText={options.length === 0 ? "No members left to add" : "No matches"}
+        contentClassName={side === "top" ? "w-80" : "w-80"}
+      >
         {trigger ?? (
           <Button size="sm" variant="outline">
             <PlusCircle size={14} /> Add member
           </Button>
         )}
-      </PopoverTrigger>
-      <PopoverContent container={dialogContainer} side={side} align={align} className="w-72 p-2">
-        <div className="flex flex-col gap-2">
-          <Input
-            autoFocus
-            placeholder="Search members…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="h-8"
-          />
-          <div className="flex gap-2">
-            <select
-              className={selectClass}
-              value={roleFilter ?? ""}
-              onChange={(e) => setRoleFilter(e.target.value ? Number(e.target.value) : null)}
-            >
-              <option value="">All roles</option>
-              {roles.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.role_name}
-                </option>
-              ))}
-            </select>
-            <select
-              className={selectClass}
-              value={projectFilter ?? ""}
-              onChange={(e) => setProjectFilter(e.target.value || null)}
-            >
-              <option value="">All projects</option>
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <ScrollArea className="max-h-64">
-            {options.length === 0 ? (
-              <p className="px-2 py-3 text-xs text-center text-muted-foreground">No members left to add</p>
-            ) : results.length === 0 ? (
-              <p className="px-2 py-3 text-xs text-center text-muted-foreground">No matches</p>
-            ) : (
-              <div className="flex flex-col">
-                {results.map((m) => (
-                  <button
-                    key={m.user_id}
-                    onClick={() => {
-                      onAdd(m);
-                      handleOpenChange(false);
-                    }}
-                    className="rounded-sm px-2 py-1.5 text-left text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent"
-                  >
-                    {m.name}
-                  </button>
-                ))}
-              </div>
-            )}
-          </ScrollArea>
-        </div>
-      </PopoverContent>
-    </Popover>
+      </CommandPicker>
+    </>
   );
 }

@@ -14,7 +14,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Badge } from "@/components/ui/badge";
+
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
@@ -41,6 +41,8 @@ import {
 import { csvSlug, downloadCsv } from "@/lib/csv";
 import { isReturningMember, type MemberStatus } from "@/lib/member-status";
 import { cn, compareReviewPriority, isLate, isRecruitingValid } from "@/lib/utils";
+import { optimistic } from "@/lib/optimistic";
+import { Combobox, splitList } from "@/components/ui/combobox";
 
 type PageProject = { id: string; name: string; type: string; essay_prompt: string | null };
 
@@ -733,7 +735,8 @@ export function ApplicationSheetModal({
 
         const classLabels = [
           ...(r.tech_classes ?? []).map(techClassLabel),
-          ...(r.tech_classes_other?.trim() ? [r.tech_classes_other.trim()] : []),
+          // One label per class: the field is a tag list stored comma-separated.
+          ...splitList(r.tech_classes_other),
         ];
 
         return {
@@ -798,8 +801,16 @@ export function ApplicationSheetModal({
   const classOptions = useMemo(() => {
     const fromCanon = TECH_CLASSES.map((c) => ({ value: c.key, label: c.label }));
     if (!rows) return fromCanon;
-    const hasOther = rows.some((r) => !!r.techClassesOther?.trim());
-    return hasOther ? [...fromCanon, { value: "__other__", label: "Other" }] : fromCanon;
+    // "Other relevant classes" is a tag list, so each distinct class anyone
+    // entered is its own filter option (case-insensitive), after the canon set.
+    const others = new Map<string, string>();
+    for (const r of rows) for (const c of splitList(r.techClassesOther)) {
+      if (!others.has(c.toLowerCase())) others.set(c.toLowerCase(), c);
+    }
+    const extra = [...others.entries()]
+      .sort((a, b) => a[1].localeCompare(b[1]))
+      .map(([key, label]) => ({ value: `other:${key}`, label }));
+    return [...fromCanon, ...extra];
   }, [rows]);
 
   // Only render as many choice columns as anyone actually used, so a period
@@ -876,10 +887,8 @@ export function ApplicationSheetModal({
       if (yearFilter.size && !yearFilter.has(r.gradYear)) return false;
       if (classFilter.size) {
         const keys = new Set(r.techClasses);
-        const wantsOther = classFilter.has("__other__");
-        const hitCanon = [...classFilter].some((k) => k !== "__other__" && keys.has(k));
-        const hitOther = wantsOther && !!r.techClassesOther?.trim();
-        if (!hitCanon && !hitOther) return false;
+        const otherKeys = new Set(splitList(r.techClassesOther).map((c) => `other:${c.toLowerCase()}`));
+        if (![...classFilter].some((k) => keys.has(k) || otherKeys.has(k))) return false;
       }
       if (coffeeFilter !== "any" && r.coffee !== coffeeFilter) return false;
       if (infoFilter === "yes" && !r.infosession) return false;
@@ -1122,15 +1131,23 @@ export function ApplicationSheetModal({
   const handleDrop = async () => {
     if (!dropTarget) return;
     setDropError(null);
+    const target = dropTarget;
     const supabase = createClient();
-    const { error: err } = await supabase.rpc("reject_application", {
-      p_application_id: dropTarget.id,
+    let previous: ReviewStatus | null = null;
+    void optimistic({
+      label: "drop",
+      key: `sheet-drop:${target.id}`,
+      apply: () =>
+        patchRow(target.applicantId, (r) => {
+          previous = r.status;
+          return { ...r, status: "rejected" as ReviewStatus };
+        }),
+      rollback: () => {
+        if (previous) patchRow(target.applicantId, (r) => ({ ...r, status: previous as ReviewStatus }));
+      },
+      commit: () => supabase.rpc("reject_application", { p_application_id: target.id }),
+      onFailed: (message) => setDropError(message),
     });
-    if (err) {
-      setDropError(err.message);
-      return false;
-    }
-    patchRow(dropTarget.applicantId, (r) => ({ ...r, status: "rejected" as ReviewStatus }));
   };
 
   const onCoffeeSaved = (applicantId: string, next: CoffeeEditResult) => {
@@ -1180,43 +1197,37 @@ export function ApplicationSheetModal({
           {allProjects && pages && pages.length > 0 && (
             <>
               <Button
-                size="sm"
+                size="icon"
                 variant="outline"
-                className="h-7 px-2 text-xs"
+                className="h-7 w-7"
+                aria-label="Previous page"
                 disabled={safeProjectPage === 0}
                 onClick={() => setProjectPage(safeProjectPage - 1)}
               >
-                <ChevronLeft size={13} className="mr-1" />
-                Previous
+                <ChevronLeft size={14} />
               </Button>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button className="flex items-center gap-2 rounded-md border bg-background px-2.5 py-1 text-xs hover:bg-accent transition-colors">
-                    <span className="font-medium">{pageLabel ?? "Select page"}</span>
-                    <ChevronDown size={12} className="text-muted-foreground" />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="max-h-72">
-                  {pages.map((p, i) => (
-                    <DropdownMenuItem
-                      key={p.kind === "overview" ? "__overview__" : p.project.id}
-                      className="text-xs"
-                      onSelect={() => setProjectPage(i)}
-                    >
-                      {p.kind === "overview" ? "All applicants" : p.project.name}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <Combobox
+                aria-label="Jump to page"
+                className="h-7 min-h-7 w-auto min-w-40 px-2.5 py-1 text-xs"
+                contentClassName="w-64"
+                value={String(safeProjectPage)}
+                onChange={(v) => setProjectPage(Number(v))}
+                options={pages.map((p, i) => ({
+                  value: String(i),
+                  label: p.kind === "overview" ? "All applicants" : p.project.name,
+                }))}
+                placeholder="Select page"
+                searchPlaceholder="Jump to project…"
+              />
               <Button
-                size="sm"
+                size="icon"
                 variant="outline"
-                className="h-7 px-2 text-xs"
+                className="h-7 w-7"
+                aria-label="Next page"
                 disabled={safeProjectPage >= pages.length - 1}
                 onClick={() => setProjectPage(safeProjectPage + 1)}
               >
-                Next
-                <ChevronRight size={13} className="ml-1" />
+                <ChevronRight size={14} />
               </Button>
               <span className="text-xs text-muted-foreground tabular-nums">
                 Page {safeProjectPage + 1} / {pages.length}
@@ -1713,14 +1724,15 @@ export function ApplicationSheetModal({
                         <LateBadge
                           submittedAt={r.submittedAt}
                           endsAt={periodEndsAt}
-                          className="ml-1.5 text-[0.6rem] px-1 py-0"
+                          className="ml-1.5"
                         />
                       </td>
                       <td className={td}>
+                        {/* Coloured text, like the Valid column: the header says what it is. */}
                         {r.status === "accepted" ? (
-                          <Badge className="bg-green-600 hover:bg-green-600 text-[0.65rem] px-1.5 py-0">Accepted</Badge>
+                          <span className="font-medium text-success">Accepted</span>
                         ) : r.status === "rejected" ? (
-                          <Badge variant="destructive" className="text-[0.65rem] px-1.5 py-0">Rejected</Badge>
+                          <span className="font-medium text-destructive">Rejected</span>
                         ) : (
                           <span className="text-muted-foreground">—</span>
                         )}
@@ -1764,25 +1776,27 @@ export function ApplicationSheetModal({
             </span>
             <div className="flex items-center gap-2">
               <Button
-                size="sm"
+                size="icon"
                 variant="outline"
-                className="h-7 px-2 text-xs"
+                className="h-7 w-7"
+                aria-label="Previous page"
                 disabled={safePage === 0}
                 onClick={() => setPage(safePage - 1)}
               >
-                Previous
+                <ChevronLeft size={14} />
               </Button>
               <span className="tabular-nums">
                 {safePage + 1} / {pageCount}
               </span>
               <Button
-                size="sm"
+                size="icon"
                 variant="outline"
-                className="h-7 px-2 text-xs"
+                className="h-7 w-7"
+                aria-label="Next page"
                 disabled={safePage >= pageCount - 1}
                 onClick={() => setPage(safePage + 1)}
               >
-                Next
+                <ChevronRight size={14} />
               </Button>
             </div>
           </div>

@@ -9,6 +9,9 @@ import { PersonName } from "@/components/person-profile-provider";
 import { AddMemberPicker, useAddMemberFilters } from "@/components/add-member-picker";
 import { MemberRosterSkeleton } from "@/components/skeletons";
 import { AdminCrown } from "@/components/admin-crown";
+import { optimistic } from "@/lib/optimistic";
+import { useConfirm } from "@/components/ui/use-confirm";
+import { Input } from "@/components/ui/input";
 
 // `managed` rows mirror the project roster (0013 sync triggers), so edits to
 // them go through project_members instead. Owner rows are locked and their
@@ -79,32 +82,71 @@ export function PortalMembersModal({ portalId, open, onOpenChange, canEdit }: Pr
     });
   }, [open, portalId, canEdit]);
 
-  const addMember = async (m: MemberOption) => {
+  // All three show the change immediately and confirm in the background; a
+  // refused write puts the row back and toasts.
+  const addMember = (m: MemberOption) => {
     const supabase = createClient();
-    const { error } = projectId
-      ? await supabase.from("project_members").insert({ project_id: projectId, user_id: m.user_id, is_pm: false })
-      : await supabase.from("portal_members").insert({ portal_id: portalId, user_id: m.user_id, is_admin: false });
-    if (error) return;
-    setRows((prev) => [...prev, { ...m, is_admin: false, managed: !!projectId, owner: false }].sort(byName));
+    void optimistic({
+      label: "member",
+      key: `portal-member:${m.user_id}`,
+      apply: () =>
+        setRows((prev) =>
+          prev.some((r) => r.user_id === m.user_id)
+            ? prev
+            : [...prev, { ...m, is_admin: false, managed: !!projectId, owner: false }].sort(byName),
+        ),
+      rollback: () => setRows((prev) => prev.filter((r) => r.user_id !== m.user_id)),
+      commit: () =>
+        projectId
+          ? supabase.from("project_members").insert({ project_id: projectId, user_id: m.user_id, is_pm: false })
+          : supabase.from("portal_members").insert({ portal_id: portalId, user_id: m.user_id, is_admin: false }),
+    });
   };
 
-  const removeMember = async (row: MemberRow) => {
+  const removeMember = (row: MemberRow) => {
     const supabase = createClient();
-    const { error } = row.managed && projectId
-      ? await supabase.from("project_members").delete().eq("project_id", projectId).eq("user_id", row.user_id)
-      : await supabase.from("portal_members").delete().eq("portal_id", portalId).eq("user_id", row.user_id);
-    if (error) return;
-    setRows((prev) => prev.filter((r) => r.user_id !== row.user_id));
+    void optimistic({
+      label: "member",
+      key: `portal-member:${row.user_id}`,
+      apply: () => setRows((prev) => prev.filter((r) => r.user_id !== row.user_id)),
+      rollback: () =>
+        setRows((prev) => (prev.some((r) => r.user_id === row.user_id) ? prev : [...prev, row].sort(byName))),
+      commit: () =>
+        row.managed && projectId
+          ? supabase.from("project_members").delete().eq("project_id", projectId).eq("user_id", row.user_id).select("user_id")
+          : supabase.from("portal_members").delete().eq("portal_id", portalId).eq("user_id", row.user_id).select("user_id"),
+      requireRows: true,
+    });
   };
 
-  const toggleAdmin = async (row: MemberRow) => {
+  // Access changes ask first (DESIGN.md), then apply optimistically.
+  const { ask, dialog: confirmDialog } = useConfirm();
+  const [query, setQuery] = useState("");
+  const toggleAdmin = (row: MemberRow) => {
     const next = !row.is_admin;
+    ask({
+      title: next ? `Make ${row.name} an admin?` : `Remove ${row.name} as admin?`,
+      description: next ? "Admins can edit this portal and its roster." : undefined,
+      confirmLabel: next ? "Make admin" : "Remove admin",
+      destructive: !next,
+      run: () => applyToggleAdmin(row, next),
+    });
+  };
+  const applyToggleAdmin = (row: MemberRow, next: boolean) => {
     const supabase = createClient();
-    const { error } = row.managed && projectId
-      ? await supabase.from("project_members").update({ is_pm: next }).eq("project_id", projectId).eq("user_id", row.user_id)
-      : await supabase.from("portal_members").update({ is_admin: next }).eq("portal_id", portalId).eq("user_id", row.user_id);
-    if (error) return;
-    setRows((prev) => prev.map((r) => (r.user_id === row.user_id ? { ...r, is_admin: next } : r)));
+    const setAdmin = (v: boolean) =>
+      setRows((prev) => prev.map((r) => (r.user_id === row.user_id ? { ...r, is_admin: v } : r)));
+    void optimistic({
+      label: "admin access",
+      key: `portal-admin:${row.user_id}`,
+      apply: () => setAdmin(next),
+      rollback: () => setAdmin(!next),
+      commit: () =>
+        row.managed && projectId
+          ? supabase.from("project_members").update({ is_pm: next }).eq("project_id", projectId).eq("user_id", row.user_id).select("user_id")
+          : supabase.from("portal_members").update({ is_admin: next }).eq("portal_id", portalId).eq("user_id", row.user_id).select("user_id"),
+      requireRows: true,
+    });
   };
 
   // Owner rows are always locked; managed rows are editable only when the
@@ -112,6 +154,8 @@ export function PortalMembersModal({ portalId, open, onOpenChange, canEdit }: Pr
   const isLocked = (r: MemberRow) => r.owner || (r.managed && !projectId);
 
   const available = allMembers.filter((m) => !rows.some((r) => r.user_id === m.user_id));
+  const q = query.trim().toLowerCase();
+  const shownRows = q ? rows.filter((r) => r.name.toLowerCase().includes(q)) : rows;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -127,15 +171,25 @@ export function PortalMembersModal({ portalId, open, onOpenChange, canEdit }: Pr
           </DialogTitle>
         </DialogHeader>
 
+        {confirmDialog}
+        {!loading && rows.length > 5 && (
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search members…"
+            aria-label="Search members"
+            className="h-8 flex-shrink-0 text-sm"
+          />
+        )}
         {/* Scrollable roster fills the remaining height; overflow scrolls here. */}
         <ScrollArea className="flex-1 min-h-0">
           {loading ? (
             <MemberRosterSkeleton />
-          ) : rows.length === 0 ? (
-            <p className="text-sm text-muted-foreground py-4 text-center">No members yet.</p>
+          ) : shownRows.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-4 text-center">{rows.length === 0 ? "No members yet." : "No matches."}</p>
           ) : (
             <div className="flex flex-col gap-1">
-              {rows.map((r) => (
+              {shownRows.map((r) => (
                 <div key={r.user_id} className="flex items-center gap-2 text-sm py-1">
                   <PersonName userId={r.user_id} name={r.name} className="flex-1 min-w-0 truncate" />
                   <AdminCrown
@@ -147,7 +201,7 @@ export function PortalMembersModal({ portalId, open, onOpenChange, canEdit }: Pr
                   {/* The remove column is always reserved so crowns stay aligned
                       even when a member can't be removed. */}
                   {!isLocked(r) && canEdit ? (
-                    <button onClick={() => removeMember(r)} className="w-4 flex-shrink-0 flex justify-center text-muted-foreground hover:text-red-500 transition-colors">
+                    <button onClick={() => removeMember(r)} aria-label={`Remove ${r.name}`} className="w-4 flex-shrink-0 flex justify-center text-muted-foreground hover:text-destructive transition-colors">
                       <X size={13} />
                     </button>
                   ) : (

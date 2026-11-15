@@ -3,7 +3,6 @@
 import { createClient } from "@/lib/supabase/client";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import { CoffeeChatCard, type CoffeeChatCardProps } from "@/components/coffee-chat-card";
 import { PersonName, initials } from "@/components/person-profile-provider";
 import { gcalUrl } from "@/lib/gcal";
@@ -12,7 +11,11 @@ import { loadCoffeeChatWindowBounds, earliestBookableIso } from "@/lib/coffee-ch
 import { CoffeeTeamSkeleton } from "@/components/skeletons";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { roleRank, sortRoles } from "@/lib/role-order";
-import { MapPin } from "lucide-react";
+import { MapPin, Search } from "lucide-react";
+import { staggerStyle } from "@/lib/motion";
+import { Input } from "@/components/ui/input";
+import { background, optimistic, sessionUserId } from "@/lib/optimistic";
+import { BackLink } from "@/components/back-link";
 
 // At most this many cancellations per rolling 24h, to curb slot churn (there's
 // no reschedule — moving a chat means cancel + book again).
@@ -35,6 +38,7 @@ type Booking = {
 export default function CoffeeChatPage() {
   const router = useRouter();
   const [members, setMembers] = useState<MemberCard[]>([]);
+  const [teamQuery, setTeamQuery] = useState("");
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
   const [cancelTarget, setCancelTarget] = useState<Booking | null>(null);
@@ -197,8 +201,9 @@ export default function CoffeeChatPage() {
     if (!booking) return false;
     setCancelError(null);
     const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return false;
+    const userId = await sessionUserId(supabase);
+    if (!userId) return false;
+    const user = { id: userId };
 
     // Rate limit: at most CANCEL_LIMIT_24H cancellations per rolling 24h.
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
@@ -212,48 +217,75 @@ export default function CoffeeChatPage() {
       return false;
     }
 
-    // Notify the host first (the row still binds both parties), then release.
-    await supabase.rpc("notify_coffee_chat_counterparty", {
-      p_chat_id: booking.id,
-      p_type: "chat_cancelled_by_applicant",
-      p_message: null,
-    });
-
-    // Free the slot back up — guard on applicant_id so we only clear our own.
-    // Confirm via `error`, not the returned rows: the freed row (applicant_id
-    // null, member someone else) can fall outside our SELECT visibility, so a
-    // successful release could still return zero rows and look like a failure.
-    const { error } = await supabase
-      .from("coffee_chats")
-      .update({ applicant_id: null })
-      .eq("id", booking.id)
-      .eq("applicant_id", user.id);
-
-    if (error) {
-      setCancelError("Couldn't cancel that chat. Please try again.");
-      return false;
-    }
-
-    // Log the cancellation for the rate limit.
-    await supabase.from("coffee_chat_cancellations").insert({
-      user_id: user.id,
-      coffee_chat_id: booking.id,
-      member_id: booking.memberUserId,
-      meeting_time: booking.meeting_time,
-    });
-
+    // Past the rate limit (which must be checked first), the cancel is shown
+    // at once: the booking leaves the list and the host's card flips back to
+    // bookable. Notify, release and log run behind it; a refusal puts the
+    // booking back and toasts. Either way a background reload re-derives the
+    // freed slot from the DB (no full page reload any more).
+    const bookingsBefore = bookings;
+    const membersBefore = members;
     setCancelTarget(null);
-    // Reload so everything re-derives from the DB: the booking disappears,
-    // the member's card flips from "Booked" back to bookable, and their freed
-    // slot becomes available again.
-    window.location.reload();
+    void optimistic({
+      label: "cancellation",
+      key: `coffee-cancel:${booking.id}`,
+      apply: () => {
+        setBookings((prev) => prev.filter((b) => b.id !== booking.id));
+        setMembers((prev) =>
+          prev.map((m) => (m.user_id === booking.memberUserId ? { ...m, booked: false } : m)),
+        );
+      },
+      rollback: () => {
+        setBookings(bookingsBefore);
+        setMembers(membersBefore);
+      },
+      commit: async () => {
+        // Notify the host first (the row still binds both parties), then release.
+        await supabase.rpc("notify_coffee_chat_counterparty", {
+          p_chat_id: booking.id,
+          p_type: "chat_cancelled_by_applicant",
+          p_message: null,
+        });
+        // Free the slot back up — guard on applicant_id so we only clear our
+        // own. Confirm via `error`, not the returned rows: the freed row
+        // (applicant_id null, member someone else) can fall outside our SELECT
+        // visibility, so a successful release could return zero rows.
+        const { error } = await supabase
+          .from("coffee_chats")
+          .update({ applicant_id: null })
+          .eq("id", booking.id)
+          .eq("applicant_id", user.id);
+        if (error) return { error };
+        // Log the cancellation for the rate limit.
+        background(
+          () =>
+            supabase.from("coffee_chat_cancellations").insert({
+              user_id: user.id,
+              coffee_chat_id: booking.id,
+              member_id: booking.memberUserId,
+              meeting_time: booking.meeting_time,
+            }),
+          "log coffee chat cancellation",
+        );
+        return { error: null };
+      },
+      onCommitted: () => void load(),
+    });
+    return true;
   };
+
+  // Team search over name, roles and interests (interests is free text).
+  const tq = teamQuery.trim().toLowerCase();
+  const shownMembers = tq
+    ? members.filter((m) =>
+        [m.name, ...(m.roles ?? []).map((r) => r.role_name), m.interests ?? ""].some((t) => t.toLowerCase().includes(tq)),
+      )
+    : members;
 
   return (
     <div className="w-full max-w-5xl mx-auto p-6 flex flex-col gap-8">
       <div className="flex flex-col gap-1">
-        <Link href="/" className="text-sm text-muted-foreground hover:text-foreground">← Back</Link>
-        <h1 className="text-2xl font-bold">Coffee Chat</h1>
+        <BackLink href="/" label="Dashboard" />
+        <h1 className="text-2xl font-bold tracking-tight">Coffee Chat</h1>
         <p className="text-sm text-muted-foreground">Book a 1:1 with a member of our team.</p>
       </div>
 
@@ -267,7 +299,7 @@ export default function CoffeeChatPage() {
           return (
             <div
               key={b.id}
-              className={`border rounded-xl p-4 flex items-center justify-between gap-4 flex-wrap ${b.isPast ? "opacity-50" : ""}`}
+              className={`rounded-xl surface p-4 flex items-center justify-between gap-4 flex-wrap ${b.isPast ? "opacity-50" : ""}`}
             >
               <div className="flex items-center gap-3 min-w-0">
                 {b.memberAvatarUrl ? (
@@ -359,13 +391,31 @@ export default function CoffeeChatPage() {
         </section>
       ) : members.length > 0 ? (
         <section className="flex flex-col gap-3">
-          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-            Our Team <span className="text-xs font-normal text-muted-foreground/60">({members.length})</span>
-          </h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {members.map((m) => (
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+              Our Team <span className="text-xs font-normal text-muted-foreground/60">({shownMembers.length})</span>
+            </h2>
+            {/* Name, role or interest: "design", "ML", a first name. */}
+            <div className="relative w-full sm:w-64">
+              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" aria-hidden />
+              <Input
+                value={teamQuery}
+                onChange={(e) => setTeamQuery(e.target.value)}
+                placeholder="Search name, role or interest…"
+                aria-label="Search the team"
+                className="h-8 pl-8 text-sm"
+              />
+            </div>
+          </div>
+          {shownMembers.length === 0 && (
+            <p className="rounded-xl surface px-4 py-8 text-center text-sm text-muted-foreground">
+              Nobody matches &ldquo;{teamQuery.trim()}&rdquo;.
+            </p>
+          )}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 auto-rows-fr gap-4">
+            {shownMembers.map((m, i) => (
+              <div key={m.user_id} className="flex h-full animate-fade-in-up [&>*]:flex-1" style={staggerStyle(i)}>
               <CoffeeChatCard
-                key={m.user_id}
                 id={m.user_id}
                 name={m.name}
                 roles={m.roles}
@@ -375,6 +425,7 @@ export default function CoffeeChatPage() {
                 booked={m.booked}
                 onBook={() => router.push(`/coffee-chat/book/${m.user_id}`)}
               />
+              </div>
             ))}
           </div>
         </section>

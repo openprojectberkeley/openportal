@@ -17,13 +17,18 @@ import { IconPicker } from "@/components/icon-picker";
 import { ColorPicker } from "@/components/color-picker";
 import { uploadProjectIcon } from "@/lib/project-icon-upload";
 import { PanelListSkeleton } from "@/components/skeletons";
-import { PersonName } from "@/components/person-profile-provider";
+
 import { ProjectQuestionsDialog } from "@/components/project-questions-dialog";
 import { type Difficulty, DIFFICULTIES, DIFFICULTY_LABELS } from "@/lib/projects";
 import { AddMemberPicker, useAddMemberFilters } from "@/components/add-member-picker";
 import { familyLabel, NO_FAMILY_LABEL, useFamilyOptions } from "@/lib/use-families";
-import { accentStyle } from "@/lib/portal-color";
-import { Chip, ChipList } from "@/components/ui/chip";
+
+import { RosterList } from "@/components/roster-list";
+import { useConfirm } from "@/components/ui/use-confirm";
+import { staggerStyle } from "@/lib/motion";
+import { optimistic } from "@/lib/optimistic";
+
+import { Disclosure } from "@/components/ui/disclosure";
 
 type ProjectMember = { user_id: string; name: string; is_pm: boolean };
 
@@ -47,8 +52,12 @@ type Project = {
   icon_url: string | null;
   color: string | null;
   family_id: string | null;
-  members: ProjectMember[];
+  /** Null until the row is expanded; the roster loads lazily. */
+  members: ProjectMember[] | null;
+  member_count: number;
 };
+
+const memberCount = (p: Project) => p.members?.length ?? p.member_count;
 
 export type MemberOption = { user_id: string; name: string };
 
@@ -95,6 +104,8 @@ export function ProjectsPanel({ members }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const memberFilters = useAddMemberFilters(true);
+  const [query, setQuery] = useState("");
+  const { ask, dialog: confirmDialog } = useConfirm();
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -118,12 +129,26 @@ export function ProjectsPanel({ members }: Props) {
       .catch(() => { setError("Failed to load."); setLoading(false); });
   }, []);
 
-  const toggle = (id: string) =>
+  // Rows first, details lazy: the roster loads the first time a row opens.
+  const loadRoster = (id: string) => {
+    fetch(`/api/admin/projects/${id}/members`)
+      .then((r) => r.json())
+      .then((rows) => {
+        if (Array.isArray(rows)) setProjects((prev) => prev.map((p) => (p.id === id ? { ...p, members: rows } : p)));
+      })
+      .catch(() => {});
+  };
+  // The fetch starts outside the state updater (React may run updaters twice).
+  const toggle = (id: string) => {
+    const opening = !expanded.has(id);
+    if (opening && projects.find((p) => p.id === id)?.members === null) loadRoster(id);
     setExpanded((prev) => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
+  };
 
   const openCreate = () => {
     setEditingId(null);
@@ -151,6 +176,18 @@ export function ProjectsPanel({ members }: Props) {
     setIconBlob(null);
     setFormError(null);
     setDialogOpen(true);
+  };
+
+  // Optimistic edits: the list changes at once, the write runs behind it, and
+  // a refusal restores the list snapshot and toasts (with Retry).
+  const mutate = (
+    label: string,
+    key: string,
+    next: (prev: Project[]) => Project[],
+    commit: () => PromiseLike<{ error: { message: string } | null; data?: unknown }>,
+  ) => {
+    const before = projects;
+    void optimistic({ label, key, apply: () => setProjects(next), rollback: () => setProjects(before), commit, requireRows: true });
   };
 
   const saveProject = async () => {
@@ -182,15 +219,21 @@ export function ProjectsPanel({ members }: Props) {
 
     if (editingId) {
       // Edit uses immediate icon upload, so fields.iconUrl is already a real URL.
+      // Optimistic: applied and closed at once, restored if refused.
+      const id = editingId;
       const payload = { ...base, icon_url: fields.iconUrl || null };
-      const { error: updateError } = await supabase
-        .from("projects")
-        .update({ ...payload, updated_at: new Date().toISOString() })
-        .eq("id", editingId);
-
-      if (updateError) { setFormError(updateError.message); setSaving(false); return; }
-      setProjects((prev) => prev.map((p) => (p.id === editingId ? { ...p, ...payload } : p)));
+      setSaving(false);
+      setDialogOpen(false);
+      mutate(
+        "project",
+        `project:${id}`,
+        (prev) => prev.map((p) => (p.id === id ? { ...p, ...payload } : p)),
+        () => supabase.from("projects").update({ ...payload, updated_at: new Date().toISOString() }).eq("id", id).select("id"),
+      );
+      return;
     } else {
+      // Create still waits: the new row's id is needed for the deferred icon
+      // upload and for every edit made to it afterwards.
       const { data, error: insertError } = await supabase
         .from("projects")
         .insert(base)
@@ -212,107 +255,124 @@ export function ProjectsPanel({ members }: Props) {
           return;
         }
       }
-      setProjects((prev) => [...prev, { ...created, members: [] }]);
+      setProjects((prev) => [...prev, { ...created, members: [], member_count: 0 }]);
     }
 
     setSaving(false);
     setDialogOpen(false);
   };
 
-  const deleteProject = async (id: string) => {
-    if (!confirm("Delete this project? This also removes its member roster.")) return;
-    const supabase = createClient();
-    const { error: deleteError } = await supabase.from("projects").delete().eq("id", id);
-    if (deleteError) return;
-    setProjects((prev) => prev.filter((p) => p.id !== id));
+  const deleteProject = (project: Project) => {
+    ask({
+      title: `Delete ${project.name}?`,
+      description: "This also removes its member roster.",
+      confirmLabel: "Delete",
+      destructive: true,
+      run: () => {
+        const supabase = createClient();
+        mutate("project deletion", `project:${project.id}`, (prev) => prev.filter((p) => p.id !== project.id), () =>
+          supabase.from("projects").delete().eq("id", project.id).select("id"),
+        );
+      },
+    });
   };
 
-  const addMember = async (project: Project, member: MemberOption) => {
-    const supabase = createClient();
-    const { error: insertError } = await supabase
-      .from("project_members")
-      .insert({ project_id: project.id, user_id: member.user_id, is_pm: false });
+  const patchProject = (projectId: string, fn: (p: Project) => Project) => (prev: Project[]) =>
+    prev.map((p) => (p.id === projectId ? fn(p) : p));
 
-    if (insertError) return;
-    setProjects((prev) =>
-      prev.map((p) =>
-        p.id === project.id ? { ...p, members: [...p.members, { ...member, is_pm: false }] } : p,
-      ),
+  const addMember = (project: Project, member: MemberOption) => {
+    const supabase = createClient();
+    mutate(
+      "member",
+      `project-member:${project.id}:${member.user_id}`,
+      patchProject(project.id, (p) => ({
+        ...p,
+        members: [...(p.members ?? []), { ...member, is_pm: false }],
+        member_count: p.member_count + 1,
+      })),
+      () => supabase.from("project_members").insert({ project_id: project.id, user_id: member.user_id, is_pm: false }).select("user_id"),
     );
   };
 
-  const removeMember = async (project: Project, member: ProjectMember) => {
+  const removeMember = (project: Project, member: ProjectMember) => {
     const supabase = createClient();
-    const { error: deleteError } = await supabase
-      .from("project_members")
-      .delete()
-      .eq("project_id", project.id)
-      .eq("user_id", member.user_id);
-
-    if (deleteError) return;
-    setProjects((prev) =>
-      prev.map((p) =>
-        p.id === project.id ? { ...p, members: p.members.filter((m) => m.user_id !== member.user_id) } : p,
-      ),
+    mutate(
+      "member",
+      `project-member:${project.id}:${member.user_id}`,
+      patchProject(project.id, (p) => ({
+        ...p,
+        members: (p.members ?? []).filter((m) => m.user_id !== member.user_id),
+        member_count: Math.max(0, p.member_count - 1),
+      })),
+      () =>
+        supabase.from("project_members").delete().eq("project_id", project.id).eq("user_id", member.user_id).select("user_id"),
     );
   };
 
-  const togglePm = async (project: Project, member: ProjectMember) => {
+  const togglePm = (project: Project, member: ProjectMember) => {
     const nextIsPm = !member.is_pm;
+    ask({
+      title: nextIsPm ? `Make ${member.name} PM of ${project.name}?` : `Remove ${member.name} as PM of ${project.name}?`,
+      confirmLabel: nextIsPm ? "Make PM" : "Remove PM",
+      destructive: !nextIsPm,
+      run: () => applyTogglePm(project, member, nextIsPm),
+    });
+  };
+  const applyTogglePm = (project: Project, member: ProjectMember, nextIsPm: boolean) => {
     const supabase = createClient();
-    const { error: updateError } = await supabase
-      .from("project_members")
-      .update({ is_pm: nextIsPm })
-      .eq("project_id", project.id)
-      .eq("user_id", member.user_id);
-
-    if (updateError) return;
-    setProjects((prev) =>
-      prev.map((p) =>
-        p.id === project.id
-          ? { ...p, members: p.members.map((m) => (m.user_id === member.user_id ? { ...m, is_pm: nextIsPm } : m)) }
-          : p,
-      ),
+    mutate(
+      "PM status",
+      `project-pm:${project.id}:${member.user_id}`,
+      patchProject(project.id, (p) => ({
+        ...p,
+        members: (p.members ?? []).map((m) => (m.user_id === member.user_id ? { ...m, is_pm: nextIsPm } : m)),
+      })),
+      () =>
+        supabase
+          .from("project_members")
+          .update({ is_pm: nextIsPm })
+          .eq("project_id", project.id)
+          .eq("user_id", member.user_id)
+          .select("user_id"),
     );
   };
 
   if (loading) return <PanelListSkeleton />;
-  if (error) return <div className="py-8 text-sm text-red-500">{error}</div>;
+  if (error) return <div className="py-8 text-sm text-destructive">{error}</div>;
 
   const renderRow = (p: Project, i: number) => {
     const isOpen = expanded.has(p.id);
-    const available = members.filter((m) => !p.members.some((pm) => pm.user_id === m.user_id));
+    const available = members.filter((m) => !(p.members ?? []).some((pm) => pm.user_id === m.user_id));
     const meta = [
       p.difficulty ? DIFFICULTY_LABELS[p.difficulty] : null,
       p.estimated_members != null ? `~${p.estimated_members} members` : null,
       p.num_subteams != null ? `${p.num_subteams} subteam${p.num_subteams === 1 ? "" : "s"}` : null,
     ].filter(Boolean) as string[];
     return (
-      <div key={p.id} className={i > 0 ? "border-t" : ""}>
+      <div key={p.id} className="rounded-lg transition-colors hover:bg-foreground/[0.03] animate-fade-in-up" style={staggerStyle(i)}>
         <div
-          className="flex items-center gap-3 px-4 py-3 hover:bg-accent/50 cursor-pointer"
+          className="flex items-center gap-3 rounded-lg px-4 py-3 cursor-pointer"
           onClick={() => toggle(p.id)}
         >
           <span className="text-muted-foreground flex-shrink-0">
             {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
           </span>
           <div className="flex items-center gap-2 flex-1 min-w-0 flex-wrap">
-            <span className="font-medium text-sm">{p.name}</span>
-            {p.client && (
-              <span className="px-2 py-0.5 rounded-full bg-foreground/10 text-foreground text-xs font-medium">
-                {p.client}
-              </span>
-            )}
+            <span className="min-w-0 truncate font-medium text-sm">{p.name}</span>
+            {/* Client as muted text, family as its colour dot + name: no pills. */}
+            {p.client && <span className="min-w-0 max-w-[10rem] truncate text-xs text-muted-foreground">{p.client}</span>}
             {p.family_id && (
-              <span
-                className="px-2 py-0.5 rounded-full text-xs font-medium border"
-                style={accentStyle(families.find((f) => f.id === p.family_id)?.color ?? null)}
-              >
-                {familyLabel(families, p.family_id)}
+              <span className="inline-flex min-w-0 max-w-[10rem] items-center gap-1.5 text-xs text-muted-foreground">
+                <span
+                  aria-hidden
+                  className="h-2 w-2 shrink-0 rounded-full"
+                  style={{ backgroundColor: families.find((f) => f.id === p.family_id)?.color ?? "hsl(var(--muted-foreground))" }}
+                />
+                <span className="truncate">{familyLabel(families, p.family_id)}</span>
               </span>
             )}
             <span className="text-xs text-muted-foreground">
-              {p.members.length} member{p.members.length === 1 ? "" : "s"}
+              {memberCount(p)} member{memberCount(p) === 1 ? "" : "s"}
             </span>
           </div>
           <button
@@ -322,59 +382,50 @@ export function ProjectsPanel({ members }: Props) {
             <Pencil size={14} />
           </button>
           <button
-            onClick={(e) => { e.stopPropagation(); deleteProject(p.id); }}
-            className="text-muted-foreground hover:text-red-500 transition-colors flex-shrink-0"
+            onClick={(e) => { e.stopPropagation(); deleteProject(p); }}
+            aria-label={`Delete ${p.name}`}
+            className="text-muted-foreground hover:text-destructive transition-colors flex-shrink-0"
           >
             <X size={15} />
           </button>
         </div>
         {isOpen && (
-          <div className="px-11 pb-4 pt-3 flex flex-col gap-3 bg-accent/20">
-            {p.description && <p className="text-sm text-muted-foreground">{p.description}</p>}
+          // Opens instantly; the roster fills in when it arrives.
+          <div className="grid animate-expand">
+          <div className="min-h-0 overflow-hidden">
+          <div className="mx-1 mb-1 flex flex-col gap-3 rounded-lg surface px-10 pb-4 pt-3">
+            {p.description && <p className="break-words text-sm text-muted-foreground">{p.description}</p>}
             {meta.length > 0 && (
               <p className="text-xs text-muted-foreground">{meta.join(" · ")}</p>
             )}
-            <div className="flex flex-col gap-1.5">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                  Members
-                </span>
-                <span className="text-[10px] font-normal text-muted-foreground/60">({p.members.length})</span>
+            <RosterList
+              label="Members"
+              rows={p.members?.map((m) => ({ id: m.user_id, name: m.name, crown: m.is_pm })) ?? null}
+              crownTitle={(r) => (r.crown ? "PM — click to remove" : "Make PM")}
+              onToggleCrown={(r) => {
+                const m = p.members?.find((x) => x.user_id === r.id);
+                if (m) togglePm(p, m);
+              }}
+              onRemove={(r) => {
+                const m = p.members?.find((x) => x.user_id === r.id);
+                if (m) removeMember(p, m);
+              }}
+              addControl={
                 <AddMemberPicker
                   options={available}
                   onAdd={(m) => addMember(p, m)}
                   filters={memberFilters}
                   side="right"
                   trigger={
-                    <button className="text-muted-foreground hover:text-foreground transition-colors">
+                    <button aria-label={`Add member to ${p.name}`} className="text-muted-foreground hover:text-foreground transition-colors">
                       <PlusCircle size={14} />
                     </button>
                   }
                 />
-              </div>
-              <ChipList empty="No members yet.">
-                {p.members.map((m) => (
-                  <Chip
-                    key={m.user_id}
-                    onRemove={() => removeMember(p, m)}
-                    removeLabel={`Remove ${m.name} from ${p.name}`}
-                  >
-                    <PersonName userId={m.user_id} name={m.name} />
-                    <button
-                      onClick={() => togglePm(p, m)}
-                      aria-pressed={m.is_pm}
-                      className={`rounded-full px-1.5 text-[10px] font-semibold leading-4 transition-colors ${
-                        m.is_pm
-                          ? "bg-foreground text-background"
-                          : "bg-foreground/10 text-muted-foreground hover:bg-foreground/20"
-                      }`}
-                    >
-                      PM
-                    </button>
-                  </Chip>
-                ))}
-              </ChipList>
-            </div>
+              }
+            />
+          </div>
+          </div>
           </div>
         )}
       </div>
@@ -387,7 +438,7 @@ export function ProjectsPanel({ members }: Props) {
         <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">{title}</h2>
         <span className="text-[10px] font-normal text-muted-foreground/60">({list.length})</span>
       </div>
-      <div className="border rounded-lg overflow-hidden">
+      <div className="flex flex-col gap-0.5">
         {list.map((p, i) => renderRow(p, i))}
         {list.length === 0 && (
           <div className="px-4 py-8 text-center text-sm text-muted-foreground">No projects in this track yet.</div>
@@ -396,19 +447,40 @@ export function ProjectsPanel({ members }: Props) {
     </div>
   );
 
-  const studioProjects = projects.filter((p) => p.type === "studio");
-  const launchProjects = projects.filter((p) => p.type === "launch");
+  // Search filters before the Studio/Launch split; a track with no matches
+  // hides while searching.
+  const q = query.trim().toLowerCase();
+  const matching = q
+    ? projects.filter((p) =>
+        [p.name, p.client ?? "", p.description ?? "", p.family_id ? familyLabel(families, p.family_id) : ""].some((t) =>
+          t.toLowerCase().includes(q),
+        ),
+      )
+    : projects;
+  const studioProjects = matching.filter((p) => p.type === "studio");
+  const launchProjects = matching.filter((p) => p.type === "launch");
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex justify-end">
+      {confirmDialog}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search projects..."
+          aria-label="Search projects"
+          className="max-w-xs"
+        />
         <Button size="sm" onClick={openCreate}>
           <PlusCircle size={15} /> New project
         </Button>
       </div>
 
-      {renderSection(TYPE_LABELS.studio, studioProjects)}
-      {renderSection(TYPE_LABELS.launch, launchProjects)}
+      {(!q || studioProjects.length > 0) && renderSection(TYPE_LABELS.studio, studioProjects)}
+      {(!q || launchProjects.length > 0) && renderSection(TYPE_LABELS.launch, launchProjects)}
+      {q && matching.length === 0 && (
+        <p className="px-4 py-8 text-center text-sm text-muted-foreground">No projects match.</p>
+      )}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>
@@ -423,23 +495,6 @@ export function ProjectsPanel({ members }: Props) {
                 value={fields.name}
                 onChange={(e) => setFields((f) => ({ ...f, name: e.target.value }))}
               />
-            </div>
-            <div className="flex gap-3">
-              <div className="flex flex-col gap-1 w-28">
-                <Label>Icon</Label>
-                <IconPicker
-                  value={fields.icon}
-                  onChange={(v) => setFields((f) => ({ ...f, icon: v }))}
-                  imageUrl={fields.iconUrl}
-                  onImageChange={(url) => setFields((f) => ({ ...f, iconUrl: url }))}
-                  onImageBlob={setIconBlob}
-                  projectId={editingId ?? undefined}
-                />
-              </div>
-              <div className="flex flex-col gap-1 flex-1">
-                <Label>Accent color</Label>
-                <ColorPicker value={fields.color} onChange={(v) => setFields((f) => ({ ...f, color: v }))} />
-              </div>
             </div>
             <div className="flex flex-col gap-1">
               <Label>Type</Label>
@@ -494,70 +549,107 @@ export function ProjectsPanel({ members }: Props) {
                 </p>
               )}
             </div>
-            <div className="flex flex-col gap-1">
-              <Label htmlFor="project-client">Client{fields.type === "studio" && <span className="text-red-500"> *</span>}</Label>
-              <Input
-                id="project-client"
-                value={fields.client}
-                onChange={(e) => setFields((f) => ({ ...f, client: e.target.value }))}
-                placeholder={fields.type === "studio" ? "Required for OP Studio" : "Optional"}
-              />
-            </div>
-            <div className="grid grid-cols-3 gap-3">
+            {/* Client is required for OP Studio, so it stays in view there. */}
+            {fields.type === "studio" && (
               <div className="flex flex-col gap-1">
-                <Label>Difficulty</Label>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <button className="flex items-center justify-between gap-2 border rounded-md px-3 py-2 text-sm bg-background hover:bg-accent transition-colors">
-                      {fields.difficulty ? DIFFICULTY_LABELS[fields.difficulty] : "—"}
-                      <ChevronDown size={14} className="text-muted-foreground" />
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start">
-                    <DropdownMenuItem onSelect={() => setFields((f) => ({ ...f, difficulty: "" }))}>—</DropdownMenuItem>
-                    {DIFFICULTIES.map((d) => (
-                      <DropdownMenuItem key={d} onSelect={() => setFields((f) => ({ ...f, difficulty: d }))}>
-                        {DIFFICULTY_LABELS[d]}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-              <div className="flex flex-col gap-1">
-                <Label htmlFor="project-members">Members</Label>
+                <Label htmlFor="project-client">Client<span className="text-destructive"> *</span></Label>
                 <Input
-                  id="project-members"
-                  type="number"
-                  min={0}
-                  value={fields.estimated_members}
-                  onChange={(e) => setFields((f) => ({ ...f, estimated_members: e.target.value }))}
-                  placeholder="Est."
+                  id="project-client"
+                  value={fields.client}
+                  onChange={(e) => setFields((f) => ({ ...f, client: e.target.value }))}
+                  placeholder="Required for OP Studio"
                 />
               </div>
+            )}
+            {/* Everything else is optional: open when editing a project that has any of it. */}
+            <Disclosure
+              key={editingId ?? "new"}
+              hint="icon, colour, size, description"
+              defaultOpen={!!(fields.icon || fields.iconUrl || fields.color || fields.difficulty || fields.estimated_members || fields.num_subteams || fields.description || (fields.type !== "studio" && fields.client))}
+            >
+              {fields.type !== "studio" && (
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="project-client">Client</Label>
+                  <Input
+                    id="project-client"
+                    value={fields.client}
+                    onChange={(e) => setFields((f) => ({ ...f, client: e.target.value }))}
+                  />
+                </div>
+              )}
+              <div className="flex gap-3">
+                <div className="flex flex-col gap-1 w-28">
+                  <Label>Icon</Label>
+                  <IconPicker
+                    value={fields.icon}
+                    onChange={(v) => setFields((f) => ({ ...f, icon: v }))}
+                    imageUrl={fields.iconUrl}
+                    onImageChange={(url) => setFields((f) => ({ ...f, iconUrl: url }))}
+                    onImageBlob={setIconBlob}
+                    projectId={editingId ?? undefined}
+                  />
+                </div>
+                <div className="flex flex-col gap-1 flex-1">
+                  <Label>Accent color</Label>
+                  <ColorPicker value={fields.color} onChange={(v) => setFields((f) => ({ ...f, color: v }))} />
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="flex flex-col gap-1">
+                  <Label>Difficulty</Label>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button className="flex items-center justify-between gap-2 border rounded-md px-3 py-2 text-sm bg-background hover:bg-accent transition-colors">
+                        {fields.difficulty ? DIFFICULTY_LABELS[fields.difficulty] : "—"}
+                        <ChevronDown size={14} className="text-muted-foreground" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start">
+                      <DropdownMenuItem onSelect={() => setFields((f) => ({ ...f, difficulty: "" }))}>—</DropdownMenuItem>
+                      {DIFFICULTIES.map((d) => (
+                        <DropdownMenuItem key={d} onSelect={() => setFields((f) => ({ ...f, difficulty: d }))}>
+                          {DIFFICULTY_LABELS[d]}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="project-members">Members</Label>
+                  <Input
+                    id="project-members"
+                    type="number"
+                    min={0}
+                    value={fields.estimated_members}
+                    onChange={(e) => setFields((f) => ({ ...f, estimated_members: e.target.value }))}
+                    placeholder="Est."
+                  />
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Label htmlFor="project-subteams">Subteams</Label>
+                  <Input
+                    id="project-subteams"
+                    type="number"
+                    min={0}
+                    value={fields.num_subteams}
+                    onChange={(e) => setFields((f) => ({ ...f, num_subteams: e.target.value }))}
+                    placeholder="#"
+                  />
+                </div>
+              </div>
               <div className="flex flex-col gap-1">
-                <Label htmlFor="project-subteams">Subteams</Label>
-                <Input
-                  id="project-subteams"
-                  type="number"
-                  min={0}
-                  value={fields.num_subteams}
-                  onChange={(e) => setFields((f) => ({ ...f, num_subteams: e.target.value }))}
-                  placeholder="#"
+                <Label htmlFor="project-description">Description</Label>
+                <textarea
+                  id="project-description"
+                  value={fields.description}
+                  onChange={(e) => setFields((f) => ({ ...f, description: e.target.value }))}
+                  rows={3}
+                  className="border rounded-md px-3 py-2 text-sm w-full resize-none bg-background focus:outline-none focus:ring-1 focus:ring-ring"
                 />
               </div>
-            </div>
-            <div className="flex flex-col gap-1">
-              <Label htmlFor="project-description">Description</Label>
-              <textarea
-                id="project-description"
-                value={fields.description}
-                onChange={(e) => setFields((f) => ({ ...f, description: e.target.value }))}
-                rows={3}
-                className="border rounded-md px-3 py-2 text-sm w-full resize-none bg-background focus:outline-none focus:ring-1 focus:ring-ring"
-              />
-            </div>
+            </Disclosure>
             {editingId && (
-              <div className="flex items-center justify-between gap-2 border-t pt-4">
+              <div className="flex items-center justify-between gap-2 pt-2">
                 <div className="flex flex-col">
                   <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Application questions</span>
                   <span className="text-xs text-muted-foreground">Custom questions applicants answer for this project.</span>

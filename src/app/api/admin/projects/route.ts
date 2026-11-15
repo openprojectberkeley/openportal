@@ -18,24 +18,17 @@ export async function GET() {
       .from("projects")
       .select("id, name, client, description, type, difficulty, estimated_members, num_subteams, icon, icon_url, color, family_id")
       .order("name"),
-    supabase
-      .from("project_members")
-      .select("project_id, user_id, is_pm, members(user_id, preferred_firstname, lastname)"),
+    // Light: counts only. The roster loads on expand (/api/admin/projects/[id]/members).
+    supabase.from("project_members").select("project_id"),
   ]);
 
-  const membersMap = new Map<string, { user_id: string; name: string; is_pm: boolean }[]>();
-  for (const pm of projectMembers ?? []) {
-    if (!membersMap.has(pm.project_id)) membersMap.set(pm.project_id, []);
-    const member = pm.members as unknown as { user_id: string; preferred_firstname: string | null; lastname: string | null } | null;
-    if (member) {
-      const name = [member.preferred_firstname, member.lastname].filter(Boolean).join(" ") || "—";
-      membersMap.get(pm.project_id)!.push({ user_id: member.user_id, name, is_pm: pm.is_pm });
-    }
-  }
+  const countMap = new Map<string, number>();
+  for (const pm of projectMembers ?? []) countMap.set(pm.project_id, (countMap.get(pm.project_id) ?? 0) + 1);
 
   const result = (projects ?? []).map((p) => ({
     ...p,
-    members: membersMap.get(p.id) ?? [],
+    members: null,
+    member_count: countMap.get(p.id) ?? 0,
   }));
 
   return NextResponse.json(result);

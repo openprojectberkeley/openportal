@@ -2,17 +2,20 @@
 
 import { MapPin, Pencil, Trash2, CalendarPlus, ExternalLink } from "lucide-react";
 import { CATEGORY_META, isRoleGated } from "@/lib/event-category";
-import { eventSurface } from "@/lib/event-tint";
-import { accentSheen } from "@/lib/portal-color";
+import { eventBarColor, eventTintColor } from "@/lib/event-tint";
+import { readableAccentText } from "@/lib/portal-color";
 import { formatEventDate, formatEventTime } from "@/lib/dates";
 import { downloadEventIcs } from "@/lib/ics";
 import { cn } from "@/lib/utils";
 import type { PortalEvent } from "@/lib/use-calendar-events";
 
 /**
- * One event, tinted with its category's (or its portal's) accent — whole-card,
- * not a badge. Shared by the mini calendar panel, the calendar page's day rail
- * and the agenda view, so an event reads the same wherever it appears.
+ * One event: no card, no outline, just the information beside a rounded
+ * colour bar (its category's colour, or its portal's for general events),
+ * with the category and portal labels in readable versions of their colours.
+ * Shared by the mini calendar panel, the calendar page's day rail and the
+ * agenda view, so an event reads the same wherever it appears. `id` lets the
+ * calendar scroll to it (#event-<id>).
  */
 export function EventCard({
   ev,
@@ -35,20 +38,18 @@ export function EventCard({
   onClick?: () => void;
   actions?: boolean;
 }) {
-  // Opaque card color, reused for the hover overlay's gradient so it washes out
-  // the content beneath the buttons in the card's own colour. Flat on purpose —
-  // the sheen is a separate backgroundImage, since this one gets spliced into a
-  // linear-gradient() below.
-  const cardBg = eventSurface(ev.category, color, 18);
+  const bar = eventBarColor(ev.category, color);
+  const portalTint = color ?? eventTintColor(ev.category, color);
   return (
     <div
+      id={`event-${ev.id}`}
       className={cn(
-        "group/event relative overflow-hidden rounded-md px-2.5 py-2 flex flex-col gap-1",
+        "group/event relative flex scroll-mt-24 flex-col gap-1 rounded-md py-1.5 pl-4 pr-2.5",
         onClick && "cursor-pointer",
       )}
-      style={{ backgroundColor: cardBg, backgroundImage: accentSheen() }}
       onClick={onClick}
     >
+      <span aria-hidden className="absolute bottom-1.5 left-0 top-1.5 w-[3px] rounded-full" style={{ backgroundColor: bar }} />
       <div className="flex items-start gap-2">
         <div className="flex flex-col gap-0.5 min-w-0 flex-1">
           <span className="text-sm font-medium">{ev.title}</span>
@@ -69,7 +70,7 @@ export function EventCard({
           {ev.category !== "general" && (
             <span
               className="text-[10px] font-medium whitespace-nowrap"
-              style={{ color: CATEGORY_META[ev.category].color }}
+              style={{ color: readableAccentText(CATEGORY_META[ev.category].color) }}
               title={isRoleGated(ev.category) ? "Visible to board and exec only" : undefined}
             >
               {CATEGORY_META[ev.category].label}
@@ -77,7 +78,11 @@ export function EventCard({
             </span>
           )}
           {name && (
-            <span className="text-[10px] text-muted-foreground whitespace-nowrap max-w-[8rem] truncate" title={name}>
+            <span
+              className="text-[10px] font-medium whitespace-nowrap max-w-[8rem] truncate"
+              style={portalTint ? { color: readableAccentText(portalTint) } : undefined}
+              title={name}
+            >
               {name}
             </span>
           )}
@@ -89,7 +94,7 @@ export function EventCard({
       {actions && (
         <div
           className="absolute inset-0 flex items-end justify-end p-1.5 opacity-0 group-hover/event:opacity-100 focus-within:opacity-100 transition-opacity pointer-events-none"
-          style={{ background: `linear-gradient(to top left, ${cardBg} 0%, ${cardBg} 22%, transparent 60%)` }}
+          style={{ background: "linear-gradient(to top left, hsl(var(--background)) 0%, hsl(var(--background)) 22%, transparent 60%)" }}
         >
           <div className="flex items-center gap-0.5 pointer-events-auto">
             {ev.external_link && (
@@ -125,7 +130,7 @@ export function EventCard({
               <button
                 onClick={(e) => { e.stopPropagation(); onDelete(); }}
                 disabled={deleting}
-                className="text-muted-foreground hover:text-red-500 transition-colors p-1 rounded disabled:opacity-40"
+                className="text-muted-foreground hover:text-destructive transition-colors p-1 rounded disabled:opacity-40"
                 aria-label={`Delete ${ev.title}`}
               >
                 <Trash2 size={13} />

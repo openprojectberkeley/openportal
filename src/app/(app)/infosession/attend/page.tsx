@@ -1,8 +1,8 @@
 "use client";
 
 import { createClient } from "@/lib/supabase/client";
-import Link from "next/link";
 import { useState } from "react";
+import { BackLink } from "@/components/back-link";
 
 export default function AttendPage() {
   const [code, setCode] = useState("");
@@ -73,11 +73,9 @@ export default function AttendPage() {
       <div className="flex flex-1 w-full items-center justify-center p-6">
         <div className="flex flex-col gap-4 w-full max-w-sm text-center">
           <div className="text-4xl">✓</div>
-          <h1 className="text-2xl font-bold">Attendance recorded!</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Attendance recorded!</h1>
           <p className="text-sm text-muted-foreground">Thanks for coming to the infosession.</p>
-          <Link href="/" className="text-sm text-muted-foreground hover:text-foreground mt-2">
-            ← Back to apply
-          </Link>
+          <BackLink href="/" label="Dashboard" />
         </div>
       </div>
     );
@@ -86,11 +84,11 @@ export default function AttendPage() {
   return (
     <div className="w-full max-w-lg mx-auto p-6 flex flex-col gap-8">
       <div className="flex flex-col gap-1">
-        <Link href="/infosession" className="text-sm text-muted-foreground hover:text-foreground">← Back</Link>
-        <h1 className="text-2xl font-bold">Submit Attendance</h1>
+        <BackLink href="/infosession" label="Infosession" />
+        <h1 className="text-2xl font-bold tracking-tight">Submit Attendance</h1>
       </div>
 
-      <div className="border rounded-xl p-6 flex flex-col gap-4 bg-accent/20">
+      <div className="rounded-xl p-6 flex flex-col gap-4 surface">
         <p className="text-sm leading-relaxed">
           Speak to a PM during the meet and greet portion of the infosession.
           After your conversation, ask the PM for a <span className="font-medium">code</span>.

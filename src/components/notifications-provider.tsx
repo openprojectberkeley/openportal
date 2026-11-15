@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { optimistic } from "@/lib/optimistic";
 
 export type AppNotification = {
   id: string;
@@ -209,24 +210,54 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
     const userId = userIdRef.current;
     if (!userId) return;
     if (!items.some((n) => !n.read)) return;
-    setItems((prev) => prev.map((n) => (n.read ? n : { ...n, read: true }))); // optimistic
+    const unreadIds = new Set(items.filter((n) => !n.read).map((n) => n.id));
     const supabase = createClient();
-    await supabase.from("notifications").update({ read: true }).eq("user_id", userId).eq("read", false);
+    void optimistic({
+      label: "read state",
+      key: "notifications:read-all",
+      apply: () => setItems((prev) => prev.map((n) => (n.read ? n : { ...n, read: true }))),
+      rollback: () => setItems((prev) => prev.map((n) => (unreadIds.has(n.id) ? { ...n, read: false } : n))),
+      commit: () => supabase.from("notifications").update({ read: true }).eq("user_id", userId).eq("read", false),
+    });
   }, [items]);
 
   const markRead = useCallback(async (id: string) => {
-    setItems((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
     const supabase = createClient();
-    await supabase.from("notifications").update({ read: true }).eq("id", id);
+    void optimistic({
+      label: "read state",
+      key: `notification:${id}`,
+      apply: () => setItems((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n))),
+      rollback: () => setItems((prev) => prev.map((n) => (n.id === id ? { ...n, read: false } : n))),
+      commit: () => supabase.from("notifications").update({ read: true }).eq("id", id),
+    });
   }, []);
 
   // Clear a single notification. Deleted rather than just marked read: opening
   // the panel already marks everything read, so dismissing is the only action
   // that meaningfully removes an item. RLS allows deleting own rows.
   const dismiss = useCallback(async (id: string) => {
-    setItems((prev) => prev.filter((n) => n.id !== id)); // optimistic
+    let removed: { item: AppNotification; index: number } | null = null;
     const supabase = createClient();
-    await supabase.from("notifications").delete().eq("id", id);
+    void optimistic({
+      label: "notification",
+      key: `notification:${id}`,
+      apply: () =>
+        setItems((prev) => {
+          const index = prev.findIndex((n) => n.id === id);
+          if (index !== -1) removed = { item: prev[index], index };
+          return prev.filter((n) => n.id !== id);
+        }),
+      rollback: () =>
+        setItems((prev) => {
+          const r = removed;
+          if (!r || prev.some((n) => n.id === id)) return prev;
+          const next = [...prev];
+          next.splice(Math.min(r.index, next.length), 0, r.item);
+          return next;
+        }),
+      commit: () => supabase.from("notifications").delete().eq("id", id).select("id"),
+      requireRows: true,
+    });
   }, []);
 
   const unreadCount = items.reduce((n, item) => n + (item.read ? 0 : 1), 0);

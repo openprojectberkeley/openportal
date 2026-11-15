@@ -18,43 +18,23 @@ export function accentTint(
   return `color-mix(in srgb, ${color} ${pct}%, ${base})`;
 }
 
-// A light diagonal sheen for a surface painted with an accent: a white lift at
-// the top-left, through the untouched colour, to a shade at the bottom-right.
-// Returned as a `backgroundImage` so it layers over whatever `backgroundColor`
-// the caller already set — the flat tint on a card, the raw accent on a hover
-// swipe — without needing to know which.
+// The one edge every accent surface wears: a 1px inset ring in the accent at
+// low alpha. It replaces the diagonal white/black sheen these surfaces used to
+// carry. A tint mixed toward a near-black dark-mode background goes murky at
+// its edges; a hairline of the colour itself is what keeps it crisp, and it
+// reads the same on every accent in both themes without a gradient.
 //
-// Plain white/black alpha stops rather than a gradient between two color-mix()
-// of the accent: that nests color-mix inside linear-gradient, which some engines
-// drop outright, and it bakes the theme into the colour stops. The alphas come
-// from globals.css, which the .dark block re-balances, so one gradient works on
-// every accent in both themes.
-//
-// `strength`: "card" over a tinted surface, where the text is the theme
-// foreground and the sheen can run both ways.
-//
-// "accent" over the RAW accent, where readableTextColor() text sits directly on
-// top — that variant lifts only, never darkens. readableTextColor picks BLACK
-// for nearly every accent in the picker's palette (its crossover is 0.179 and
-// even #6366f1 lands at 0.185), so darkening is the direction that erodes
-// contrast: indigo sits at 4.70:1 flat, and a drop of just 0.02 already pulls it
-// under that. A lift costs nothing at any size — it only moves black text
-// further from its background — so the sheen reads as light falling on the
-// top-left corner and settles on the untouched accent, never below it.
-export function accentSheen(strength: "card" | "accent" = "card", angle = "145deg"): string {
-  if (strength === "accent") {
-    return `linear-gradient(${angle}, rgb(255 255 255 / var(--sheen-lift-accent)) 0%, rgb(255 255 255 / 0) 100%)`;
-  }
-  return (
-    `linear-gradient(${angle}, rgb(255 255 255 / var(--sheen-lift)) 0%,` +
-    ` rgb(255 255 255 / 0) 48%, rgb(0 0 0 / var(--sheen-drop)) 100%)`
-  );
+// A box-shadow rather than a border so it costs no layout and composes with a
+// caller's own `border` class (which stays the theme's neutral border).
+export function accentRing(color: string | null | undefined, pct = 14): string | undefined {
+  if (!color) return undefined;
+  return `inset 0 0 0 1px color-mix(in srgb, ${color} ${pct}%, transparent)`;
 }
 
 // Background for a card painted with a project's accent. Inline rather than a
 // Tailwind class because the color is per-project data, not a theme token.
-// The sheen rides on top of the flat tint rather than replacing it, so a caller
-// whose class list sets no background still has an opaque fill.
+// Flat tint plus the accent ring: no gradient, so the colour reads as the
+// colour, not as a lit plastic tile.
 //
 // Deliberately sets no border colour: a saturated accent outline around a dark
 // tinted fill reads as a warning box and fights every other card on the page.
@@ -73,9 +53,8 @@ export function accentSheen(strength: "card" | "accent" = "card", angle = "145de
 // badge on a project row. Those want the accent clearly present rather than
 // barely there, hence 22%: enough that the colour is the first thing you read
 // off the card, while ordinary foreground text still sits on it legibly.
-// Full-strength accent fill: the raw colour under the same sheen a portal
-// card's hover swipe uses, with text set to whichever of black/white survives
-// on top. This is the loud sibling of accentStyle's tint — for surfaces whose
+// Full-strength accent fill: the raw colour, flat, with text set to whichever
+// of black/white survives on top. This is the loud sibling of accentStyle's tint — for surfaces whose
 // whole job is to carry a project's or family's colour (the scoreboard cards,
 // the draft board's column heads).
 //
@@ -86,7 +65,6 @@ export function accentFill(accent: string | null | undefined): CSSProperties | u
   if (!accent) return undefined;
   return {
     backgroundColor: accent,
-    backgroundImage: accentSheen("accent"),
     color: readableTextColor(accent),
   };
 }
@@ -95,24 +73,54 @@ export function accentStyle(accent: string | null | undefined, pct = 22): CSSPro
   return accent
     ? {
         backgroundColor: accentTint(accent, pct, "hsl(var(--muted))"),
-        backgroundImage: accentSheen(),
+        boxShadow: accentRing(accent),
       }
     : undefined;
+}
+
+// WCAG relative luminance of a hex colour (0 black … 1 white), or null when it
+// isn't a parseable hex.
+export function accentLuminance(color: string | null | undefined): number | null {
+  if (!color) return null;
+  const hex = color.replace("#", "").trim();
+  const full = hex.length === 3 ? hex.split("").map((c) => c + c).join("") : hex;
+  if (!/^[0-9a-fA-F]{6}$/.test(full)) return null;
+  const channel = (i: number) => {
+    const v = parseInt(full.slice(i, i + 2), 16) / 255;
+    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * channel(0) + 0.7152 * channel(2) + 0.0722 * channel(4);
+}
+
+// A data mark (score bar, chart segment) in an accent that may be too dark to
+// see: a navy portal colour on dark mode's near-black track all but vanishes.
+// Below the threshold the colour is pulled 35% toward the theme foreground,
+// which lifts it in dark mode and darkens it (harmlessly) in light mode, so the
+// mark stays the same hue family and stays visible in both.
+/**
+ * An accent as readable TEXT on the page (labels like an event's category or
+ * portal name). Mixing 30% toward the theme foreground darkens light colours
+ * in light mode and lightens dark ones in dark mode, so amber/green on a light
+ * page and navy on a dark one both stay legible. Not for text laid over the
+ * accent itself; that's readableTextColor.
+ */
+export function readableAccentText(color: string): string {
+  return `color-mix(in srgb, ${color} 70%, hsl(var(--foreground)))`;
+}
+
+export function visibleMarkColor(color: string): string {
+  const l = accentLuminance(color);
+  return l !== null && l < 0.06
+    ? `color-mix(in srgb, ${color} 65%, hsl(var(--foreground)))`
+    : color;
 }
 
 // Black or white — whichever has the higher contrast against `color` — so text
 // laid over the accent stays legible. Uses the WCAG relative-luminance crossover
 // (~0.179); falls back to white for missing/invalid colors.
 export function readableTextColor(color: string | null | undefined): string {
-  if (!color) return "#ffffff";
-  const hex = color.replace("#", "").trim();
-  const full = hex.length === 3 ? hex.split("").map((c) => c + c).join("") : hex;
-  if (!/^[0-9a-fA-F]{6}$/.test(full)) return "#ffffff";
-  const channel = (i: number) => {
-    const s = parseInt(full.slice(i, i + 2), 16) / 255;
-    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
-  };
-  const luminance = 0.2126 * channel(0) + 0.7152 * channel(2) + 0.0722 * channel(4);
+  const luminance = accentLuminance(color);
+  if (luminance === null) return "#ffffff";
   return luminance > 0.179 ? "#000000" : "#ffffff";
 }
 

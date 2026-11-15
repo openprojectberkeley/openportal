@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useParams, useRouter } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
-import { ChevronLeft, ClipboardCheck, Cog, Users } from "lucide-react";
+import { ClipboardCheck, Cog, Users } from "lucide-react";
 import { useRoleSim } from "@/components/role-simulation-provider";
 import { CalendarPanel } from "@/components/calendar-panel";
 import { PortalDetailSkeleton } from "@/components/skeletons";
@@ -14,6 +14,7 @@ import { PortalMembersModal } from "@/components/portal-members-modal";
 import { PortalAttendanceModal } from "@/components/portal-attendance-modal";
 import { PortalDefaultIcon } from "@/components/portal-default-icon";
 import { PortalContent } from "@/components/portal-content";
+import { BackLink } from "@/components/back-link";
 
 type Portal = {
   id: string;
@@ -110,12 +111,7 @@ function PortalDetail() {
 
   return (
     <div className="w-full max-w-6xl mx-auto p-5 flex flex-col gap-6">
-      <Link
-        href="/"
-        className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors w-fit"
-      >
-        <ChevronLeft size={15} /> Dashboard
-      </Link>
+      <BackLink href="/" label="Dashboard" />
 
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
@@ -135,7 +131,7 @@ function PortalDetail() {
               style={{ color: portal.color || undefined }}
             />
           )}
-          <h1 className="text-3xl font-bold truncate">{portal.name}</h1>
+          <h1 className="text-4xl font-bold tracking-tight truncate">{portal.name}</h1>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
           <Button variant="outline" size="sm" onClick={() => setMembersOpen(true)}>

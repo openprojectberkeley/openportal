@@ -18,30 +18,19 @@ export async function GET() {
       .from("portals")
       .select("id, name, description, icon, icon_url, color, type, project_id, projects(name)")
       .order("name"),
-    // `managed` rows are project-derived, `is_owner` marks the creator — both
-    // are locked (edited only by triggers, never from the UI).
-    supabase
-      .from("portal_members")
-      .select("portal_id, user_id, is_admin, managed, is_owner, members(user_id, preferred_firstname, lastname)"),
+    // Light: just who's in and who's admin, for the row's count and admin
+    // names. The full roster loads on expand (/api/admin/portals/[id]/members).
+    supabase.from("portal_members").select("portal_id, user_id, is_admin"),
     supabase
       .from("portal_roles")
       .select("portal_id, role_id, is_admin, roles(id, role_name)"),
   ]);
 
-  const membersMap = new Map<string, { user_id: string; name: string; is_admin: boolean; locked: boolean; owner: boolean }[]>();
+  const countMap = new Map<string, number>();
+  const adminIdsMap = new Map<string, string[]>();
   for (const pm of portalMembers ?? []) {
-    if (!membersMap.has(pm.portal_id)) membersMap.set(pm.portal_id, []);
-    const member = pm.members as unknown as { user_id: string; preferred_firstname: string | null; lastname: string | null } | null;
-    if (member) {
-      const name = [member.preferred_firstname, member.lastname].filter(Boolean).join(" ") || "—";
-      membersMap.get(pm.portal_id)!.push({
-        user_id: member.user_id,
-        name,
-        is_admin: pm.is_admin,
-        locked: pm.managed || pm.is_owner,
-        owner: pm.is_owner,
-      });
-    }
+    countMap.set(pm.portal_id, (countMap.get(pm.portal_id) ?? 0) + 1);
+    if (pm.is_admin) adminIdsMap.set(pm.portal_id, [...(adminIdsMap.get(pm.portal_id) ?? []), pm.user_id]);
   }
 
   const rolesMap = new Map<string, { id: string; role_name: string; is_admin: boolean }[]>();
@@ -63,7 +52,9 @@ export async function GET() {
       type: p.type,
       project_id: p.project_id,
       project_name: project?.name ?? null,
-      members: membersMap.get(p.id) ?? [],
+      members: null,
+      member_count: countMap.get(p.id) ?? 0,
+      admin_ids: adminIdsMap.get(p.id) ?? [],
       roles: rolesMap.get(p.id) ?? [],
     };
   });

@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/supabase/client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, GripVertical, Play, Plus, RotateCcw, Trash2, Undo2, X } from "lucide-react";
+import { Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, GripVertical, MoreHorizontal, Play, Plus, RotateCcw, Trash2, Undo2, X } from "lucide-react";
 import {
   DndContext,
   PointerSensor,
@@ -13,7 +13,7 @@ import {
 } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Badge } from "@/components/ui/badge";
+
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ReturningIndicator } from "@/components/applicant-meta";
@@ -34,6 +34,8 @@ import { useDraftRealtime } from "@/lib/use-draft-realtime";
 import { rankLabel } from "@/lib/application-rank";
 import { isRecruitingValid } from "@/lib/utils";
 import { chunkIds, selectInChunks } from "@/lib/postgrest-chunk";
+import { optimistic } from "@/lib/optimistic";
+import { CommandPicker } from "@/components/ui/combobox";
 
 type Period = { id: string; name: string; status: "draft" | "open" | "closed"; starts_at: string; ends_at: string };
 
@@ -508,13 +510,21 @@ export function DraftRoundsManager() {
     setRoundPage((p) => Math.min(Math.max(p, 0), Math.max(rounds.length - 1, 0)));
   }, [rounds]);
 
-  const setPick = async (periodId: string, pickId: string | null) => {
+  // The pick marker moves at once (execs click next/previous rapidly during a
+  // live draft); the write follows and a refusal moves it back.
+  const setPick = (periodId: string, pickId: string | null) => {
+    const previous = currentPickId;
     const supabase = createClient();
-    const { error: writeError } = await supabase
-      .from("draft_state")
-      .upsert({ period_id: periodId, current_pick_id: pickId, updated_at: new Date().toISOString() });
-    if (writeError) { setError("Couldn't save draft position."); return; }
-    setCurrentPickId(pickId);
+    void optimistic({
+      label: "draft position",
+      key: `draft-pick:${periodId}`,
+      apply: () => setCurrentPickId(pickId),
+      rollback: () => setCurrentPickId(previous),
+      commit: () =>
+        supabase
+          .from("draft_state")
+          .upsert({ period_id: periodId, current_pick_id: pickId, updated_at: new Date().toISOString() }),
+    });
   };
 
   const startDraft = () => {
@@ -716,29 +726,34 @@ export function DraftRoundsManager() {
     );
   };
 
-  const persistOrder = async (list: RoundProject[]) => {
+  const persistOrder = async (list: RoundProject[]): Promise<boolean> => {
     const supabase = createClient();
     const results = await Promise.all(
       list.map((p) => supabase.from("draft_round_projects").update({ pick_order: p.pick_order }).eq("id", p.id)),
     );
     const failed = results.find((r) => r.error)?.error;
     if (failed) setError("Couldn't save the new order.");
+    return !failed;
   };
 
+  // Computed from the current state (not inside a setRounds updater: React
+  // may run updaters twice, which would fire the write twice).
   const reorderRound = (roundId: string, event: DragEndEvent) => {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
-    setRounds((prev) =>
-      (prev ?? []).map((r) => {
-        if (r.id !== roundId) return r;
-        const oldIndex = r.projects.findIndex((p) => p.id === active.id);
-        const newIndex = r.projects.findIndex((p) => p.id === over.id);
-        if (oldIndex === -1 || newIndex === -1) return r;
-        const reordered = arrayMove(r.projects, oldIndex, newIndex).map((p, i) => ({ ...p, pick_order: i + 1 }));
-        persistOrder(reordered);
-        return { ...r, projects: reordered };
-      }),
-    );
+    const round = rounds?.find((r) => r.id === roundId);
+    if (!round) return;
+    const oldIndex = round.projects.findIndex((p) => p.id === active.id);
+    const newIndex = round.projects.findIndex((p) => p.id === over.id);
+    if (oldIndex === -1 || newIndex === -1) return;
+    const before = round.projects;
+    const reordered = arrayMove(before, oldIndex, newIndex).map((p, i) => ({ ...p, pick_order: i + 1 }));
+    const setProjects = (projects: typeof before) =>
+      setRounds((prev) => (prev ?? []).map((r) => (r.id === roundId ? { ...r, projects } : r)));
+    setProjects(reordered);
+    void persistOrder(reordered).then((ok) => {
+      if (!ok) setProjects(before);
+    });
   };
 
   const updatePickCount = (roundId: string, rowId: string, value: number) => {
@@ -784,7 +799,7 @@ export function DraftRoundsManager() {
       )}
 
       {selectedPeriodId && rounds !== null && rounds.length > 0 && (
-        <div className="border rounded-xl p-4 flex flex-wrap items-center justify-between gap-3 bg-muted/30">
+        <div className="rounded-xl p-4 flex flex-wrap items-center justify-between gap-3 surface">
           {completedAt ? (
             <>
               <div className="flex items-center gap-2 text-sm">
@@ -814,11 +829,11 @@ export function DraftRoundsManager() {
                   {draftedLabel && (
                     <>
                       Pick {draftedLabel}
-                      <span className="mx-1.5 text-border">·</span>
+                      <span className="mx-1.5 text-muted-foreground/40">·</span>
                     </>
                   )}
                   Round {currentStop.round_number}
-                  <span className="mx-1.5 text-border">·</span>
+                  <span className="mx-1.5 text-muted-foreground/40">·</span>
                   turn {currentIndex + 1} of {sequence.length}
                 </span>
                 <span className="text-sm font-semibold">
@@ -829,13 +844,11 @@ export function DraftRoundsManager() {
                 </span>
               </div>
               <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" onClick={() => stepTo(currentIndex - 1)} disabled={currentIndex <= 0}>
-                  <ChevronLeft size={14} className="mr-1" />
-                  Back
+                <Button variant="outline" size="icon" className="h-8 w-8" aria-label="Previous pick" onClick={() => stepTo(currentIndex - 1)} disabled={currentIndex <= 0}>
+                  <ChevronLeft size={15} />
                 </Button>
-                <Button size="sm" onClick={() => stepTo(currentIndex + 1)} disabled={currentIndex >= sequence.length - 1}>
-                  Next
-                  <ChevronRight size={14} className="ml-1" />
+                <Button size="icon" className="h-8 w-8" aria-label="Next pick" onClick={() => stepTo(currentIndex + 1)} disabled={currentIndex >= sequence.length - 1}>
+                  <ChevronRight size={15} />
                 </Button>
                 <Button
                   size="sm"
@@ -871,6 +884,7 @@ export function DraftRoundsManager() {
                   variant="outline"
                   size="icon"
                   className="h-7 w-7"
+                  aria-label="Previous round"
                   disabled={roundPage <= 0}
                   onClick={() => setRoundPage((p) => p - 1)}
                 >
@@ -883,6 +897,7 @@ export function DraftRoundsManager() {
                   variant="outline"
                   size="icon"
                   className="h-7 w-7"
+                  aria-label="Next round"
                   disabled={roundPage >= rounds.length - 1}
                   onClick={() => setRoundPage((p) => p + 1)}
                 >
@@ -929,7 +944,7 @@ export function DraftRoundsManager() {
             {rounds === null ? (
               <div className="h-24 rounded-xl bg-muted animate-pulse" />
             ) : rounds.length === 0 ? (
-              <div className="px-4 py-10 text-center text-sm text-muted-foreground border rounded-xl flex flex-col gap-3 items-center">
+              <div className="px-4 py-10 text-center text-sm text-muted-foreground rounded-xl surface flex flex-col gap-3 items-center">
                 No rounds yet. Add one to start setting up the draft.
                 <Button variant="outline" size="sm" onClick={addRound}>
                   <Plus size={14} className="mr-1.5" />
@@ -1114,7 +1129,7 @@ function PicksThisRound({
   onAddManually: (roundProjectId: string, projectId: string, projectName: string) => void;
 }) {
   return (
-    <div className="border rounded-xl p-4 flex flex-col gap-3">
+    <div className="rounded-xl surface p-4 flex flex-col gap-3">
       {!started ? (
         <p className="text-xs text-muted-foreground py-2">The draft hasn&apos;t started yet — picks appear here as they&apos;re staged.</p>
       ) : round.projects.length === 0 ? (
@@ -1131,14 +1146,20 @@ function PicksThisRound({
             return (
               <div
                 key={rp.id}
-                className={`flex flex-col gap-1.5 rounded-lg border p-2 ${
-                  rp.id === currentPickId ? "border-primary ring-1 ring-primary" : "border-transparent"
+                className={`flex flex-col gap-1.5 rounded-lg p-2 ${
+                  rp.id === currentPickId ? "bg-background shadow-edge" : ""
                 }`}
               >
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex min-w-0 items-center gap-2">
                     <ProjectIcon project={rp} className="h-5 w-5" />
                     <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground truncate">{rp.name}</span>
+                    {row.appIds.length > 0 && (
+                      <span className={`inline-flex shrink-0 items-center gap-1 text-[11px] font-medium ${confirmed ? "text-success" : "text-muted-foreground"}`}>
+                        <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${confirmed ? "bg-success" : "bg-muted-foreground/50"}`} />
+                        {confirmed ? "Confirmed" : "Staged"}
+                      </span>
+                    )}
                   </div>
                   <div className="flex shrink-0 items-center gap-1">
                     {confirmed && (
@@ -1162,7 +1183,7 @@ function PicksThisRound({
                     const ind = indByAppId[appId];
                     const rank = rankByAppProject[`${appId}:${rp.project_id}`] ?? 0;
                     return (
-                      <div key={`${appId}-${i}`} className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm bg-background">
+                      <div key={`${appId}-${i}`} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm bg-background shadow-edge">
                         <button
                           type="button"
                           onClick={() => onOpenApplicant(appId)}
@@ -1183,17 +1204,15 @@ function PicksThisRound({
                         <LateBadge submittedAt={ind?.submittedAt} endsAt={periodEndsAt} />
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            {confirmed ? (
-                              <Badge className="ml-auto inline-flex items-center gap-1 bg-green-600 hover:bg-green-600 shrink-0 cursor-pointer">
-                                <ChevronDown size={12} className="opacity-80" />
-                                Confirmed
-                              </Badge>
-                            ) : (
-                              <Badge variant="outline" className="ml-auto inline-flex items-center gap-1 shrink-0 cursor-pointer">
-                                <ChevronDown size={12} className="opacity-60" />
-                                Staged
-                              </Badge>
-                            )}
+                            {/* The row header says Confirmed/Staged once; each pick
+                                keeps only a quiet menu to change it. */}
+                            <button
+                              type="button"
+                              aria-label={confirmed ? "Confirmed — change" : "Staged — change"}
+                              className="ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground"
+                            >
+                              <MoreHorizontal size={14} />
+                            </button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem onSelect={() => onSetSubmitted(rp.id, true)}>
@@ -1281,29 +1300,30 @@ function RoundCard({
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
   return (
-    <div className="border rounded-xl p-4 flex flex-col gap-3">
+    <div className="rounded-xl surface p-4 flex flex-col gap-3">
       {addableProjects.length > 0 && (
         <div className="flex items-center justify-end">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs">
-                <Plus size={13} className="mr-1.5" />
-                Add project
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              {addableProjects.map((p) => (
-                <DropdownMenuItem key={p.id} onSelect={() => onAddProject(p)}>
-                  {p.name}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <CommandPicker
+            align="end"
+            options={addableProjects.map((p) => ({ value: p.id, label: p.name }))}
+            onSelect={(id) => {
+              const p = addableProjects.find((x) => x.id === id);
+              if (p) onAddProject(p);
+            }}
+            searchPlaceholder="Search projects…"
+            emptyText="No projects left to add"
+            contentClassName="w-64"
+          >
+            <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs">
+              <Plus size={13} className="mr-1.5" />
+              Add project
+            </Button>
+          </CommandPicker>
         </div>
       )}
 
       {round.projects.length === 0 ? (
-        <div className="px-4 py-6 text-center text-sm text-muted-foreground border rounded-lg">
+        <div className="px-4 py-6 text-center text-sm text-muted-foreground rounded-lg bg-background/60">
           No projects in this round.
         </div>
       ) : (
@@ -1358,7 +1378,6 @@ function ProjectTile({
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isDragging ? 0.5 : 1,
-    borderLeftColor: rp.color || undefined,
   };
   const stagedCount = board?.appIds.length ?? 0;
   const confirmed = !!board?.submittedAt;
@@ -1367,8 +1386,8 @@ function ProjectTile({
     <div
       ref={setNodeRef}
       style={style}
-      className={`flex items-center gap-2 rounded-lg border border-l-4 px-2.5 py-2 bg-background ${
-        isCurrent ? "border-primary ring-1 ring-primary" : ""
+      className={`flex items-center gap-2 rounded-lg px-2.5 py-2 ${
+        isCurrent ? "bg-accent shadow-[inset_0_0_0_1px_hsl(var(--foreground)/0.14)]" : "bg-background shadow-edge"
       }`}
     >
       <button
@@ -1390,7 +1409,7 @@ function ProjectTile({
         <span className="truncate text-sm font-medium">{rp.name}</span>
       </button>
       {confirmed ? (
-        <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-green-600">
+        <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-success">
           <Check size={13} /> Confirmed
         </span>
       ) : stagedCount > 0 ? (

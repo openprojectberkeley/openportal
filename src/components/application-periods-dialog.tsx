@@ -9,6 +9,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/overlay-scrollbar";
+import { optimistic } from "@/lib/optimistic";
+import { Segmented } from "@/components/ui/segmented";
 
 export type PeriodStatus = "draft" | "open" | "closed";
 
@@ -44,20 +46,12 @@ function StatusPicker({
   onChange: (s: PeriodStatus) => void;
 }) {
   return (
-    <div className="inline-flex rounded-md border p-0.5 text-xs font-medium">
-      {STATUSES.map((s) => (
-        <button
-          key={s}
-          type="button"
-          onClick={() => onChange(s)}
-          className={`px-2.5 py-1 rounded-[5px] transition-colors ${
-            value === s ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          {STATUS_LABELS[s]}
-        </button>
-      ))}
-    </div>
+    <Segmented
+      aria-label="Period status"
+      value={value}
+      onChange={onChange}
+      options={STATUSES.map((s) => ({ value: s, label: STATUS_LABELS[s] }))}
+    />
   );
 }
 
@@ -237,7 +231,7 @@ function GrantAccessPicker({
 // fetched once at the dialog level and passed down.
 function ExtendedAccessSection({ periodId, allMembers }: { periodId: string; allMembers: MemberOption[] }) {
   const [grants, setGrants] = useState<AccessGrant[] | null>(null);
-  const [removingId, setRemovingId] = useState<string | null>(null);
+  const removingId: string | null = null; // revokes are optimistic
   const [error, setError] = useState<string | null>(null);
   // Which grant's expiry is being edited inline, and its in-progress value.
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -284,45 +278,68 @@ function ExtendedAccessSection({ periodId, allMembers }: { periodId: string; all
     [allMembers, grants],
   );
 
-  const grant = async (m: MemberOption, expiresAt: string) => {
+  // All three are optimistic: the list changes at once, the write follows,
+  // a refusal restores the list and shows why; a reload then syncs real ids.
+  const mutateGrants = (
+    label: string,
+    key: string,
+    next: (prev: AccessGrant[]) => AccessGrant[],
+    commit: () => PromiseLike<{ error: { message: string; code?: string } | null; data?: unknown }>,
+  ) => {
     setError(null);
-    const supabase = createClient();
-    const { error: err } = await supabase
-      .from("application_period_access")
-      .insert({ period_id: periodId, user_id: m.user_id, expires_at: expiresAt });
-    if (err && err.code !== UNIQUE_VIOLATION_CODE) { setError(err.message); return; }
-    load();
+    const before = grants;
+    void optimistic({
+      label,
+      key,
+      apply: () => setGrants((prev) => next(prev ?? [])),
+      rollback: () => setGrants(before),
+      commit,
+      onCommitted: () => void load(),
+      onFailed: (message) => setError(message),
+    });
   };
 
-  const saveExpiry = async (g: AccessGrant) => {
+  const grant = (m: MemberOption, expiresAt: string) => {
+    const supabase = createClient();
+    mutateGrants(
+      "access grant",
+      `grant:${m.user_id}`,
+      (prev) => [...prev, { id: `temp-${m.user_id}`, user_id: m.user_id, name: m.name, expires_at: expiresAt }],
+      async () => {
+        const res = await supabase
+          .from("application_period_access")
+          .insert({ period_id: periodId, user_id: m.user_id, expires_at: expiresAt });
+        // Already granted is fine: the reload shows the existing grant.
+        return res.error?.code === UNIQUE_VIOLATION_CODE ? { error: null } : res;
+      },
+    );
+  };
+
+  const saveExpiry = (g: AccessGrant) => {
     if (!editValue) return;
-    setError(null);
+    const expires = toIso(editValue);
     const supabase = createClient();
-    const { error: err } = await supabase
-      .from("application_period_access")
-      .update({ expires_at: toIso(editValue) })
-      .eq("id", g.id);
-    if (err) { setError(err.message); return; }
     setEditingId(null);
-    load();
+    mutateGrants(
+      "expiry",
+      `grant:${g.user_id}`,
+      (prev) => prev.map((x) => (x.id === g.id ? { ...x, expires_at: expires } : x)),
+      () => supabase.from("application_period_access").update({ expires_at: expires }).eq("id", g.id),
+    );
   };
 
-  const revoke = async (g: AccessGrant) => {
-    setError(null);
-    setRemovingId(g.user_id);
+  const revoke = (g: AccessGrant) => {
     const supabase = createClient();
-    const { error: err } = await supabase
-      .from("application_period_access")
-      .delete()
-      .eq("period_id", periodId)
-      .eq("user_id", g.user_id);
-    setRemovingId(null);
-    if (err) { setError(err.message); return; }
-    load();
+    mutateGrants(
+      "revocation",
+      `grant:${g.user_id}`,
+      (prev) => prev.filter((x) => x.user_id !== g.user_id),
+      () => supabase.from("application_period_access").delete().eq("period_id", periodId).eq("user_id", g.user_id),
+    );
   };
 
   return (
-    <div className="flex flex-col gap-2 border-t pt-2.5 mt-1">
+    <div className="flex flex-col gap-2 pt-1 mt-1">
       <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
         Extended access
       </Label>

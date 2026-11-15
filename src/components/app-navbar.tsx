@@ -16,9 +16,10 @@ import { useRoleSim } from "@/components/role-simulation-provider";
 import { NotificationBell } from "@/components/notification-bell";
 import { OpenPortalBrandIcon } from "@/components/open-portal-brand-icon";
 import { NavTabs, NavTabsFallback, type NavTabSpec } from "@/components/nav-tab";
+import { HeaderAnnouncements } from "@/components/announcement-banners";
 
 // The header's primary navigation. Adding a destination is one line here; the
-// swipe hover and the active-route styling come with NavTab.
+// hover underline and the active-route block come with NavTabs.
 const TABS: NavTabSpec[] = [
   { href: "/", icon: LayoutDashboard, label: "Dashboard" }, // "exact" by default
   { href: "/calendar", icon: CalendarDays, label: "Calendar" },
@@ -77,16 +78,21 @@ export function AppNavbar({ tabs = true }: { tabs?: boolean } = {}) {
 
   return (
     <>
-      <nav
-        data-app-header
-        className="sticky top-0 z-40 w-full flex justify-center border-b border-b-foreground/10 h-16 bg-background"
-      >
-        <div className="w-full max-w-6xl flex justify-between items-center p-3 px-5 text-sm">
-          <div className="flex items-center gap-2 sm:gap-4">
+      {/* One sticky unit: the header bar plus any live announcement strip
+          hanging off its bottom edge, so they scroll as one. data-app-header
+          lets the overlay scrollbar start below both. */}
+      <div data-app-header className="sticky top-0 z-40 w-full">
+      <nav className="glass-bar relative w-full flex justify-center h-16">
+        {/* Bottom rule. The active tab's block and the hover underline sit on it. */}
+        <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-border" />
+        {/* No vertical padding: the tabs are full header height so the active
+            block and the hover underline stand on the bottom rule. */}
+        <div className="w-full max-w-6xl flex justify-between items-center h-full px-5 text-sm">
+          <div className="flex h-full items-center gap-2 sm:gap-4">
             <Link href="/" className="flex items-center gap-2 font-semibold" aria-label="Open Portal">
               <OpenPortalBrandIcon className="h-7 w-auto" aria-hidden />
               {/* The brand text drops below sm so three labelled tabs fit. */}
-              <span className="hidden sm:inline">Open Portal</span>
+              <span className="hidden font-display text-[15px] font-bold tracking-tight sm:inline">Open Portal</span>
             </Link>
             {/* Not gated on `member`: the tabs need only the pathname, and
                 gating primary navigation behind two round trips would leave the
@@ -149,6 +155,8 @@ export function AppNavbar({ tabs = true }: { tabs?: boolean } = {}) {
           )}
         </div>
       </nav>
+      {tabs && <HeaderAnnouncements />}
+      </div>
       {member && (
         <ProfileDialog
           open={profileOpen}

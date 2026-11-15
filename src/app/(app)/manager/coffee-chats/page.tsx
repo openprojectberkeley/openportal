@@ -12,6 +12,11 @@ import { ScrollArea } from "@/components/overlay-scrollbar";
 import { SlotCardsSkeleton } from "@/components/skeletons";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { background, optimistic, sessionUserId } from "@/lib/optimistic";
+import { toast } from "sonner";
+import { Segmented } from "@/components/ui/segmented";
+import { InfoHint } from "@/components/ui/info-hint";
+import { BackLink } from "@/components/back-link";
 
 const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
 
@@ -186,7 +191,6 @@ export default function ManagerCoffeeChatsPage() {
   const [settingsReady, setSettingsReady] = useState(false);
   const [draftStart, setDraftStart] = useState(toDateInputValue(DEFAULT_RANGE_START));
   const [draftEnd, setDraftEnd] = useState(toDateInputValue(DEFAULT_RANGE_END));
-  const [savingWindow, setSavingWindow] = useState(false);
   const [windowError, setWindowError] = useState<string | null>(null);
 
   const [weekOffset, setWeekOffset] = useState(0);
@@ -211,7 +215,6 @@ export default function ManagerCoffeeChatsPage() {
   // Host default meeting location / link, applied to newly-saved availability.
   const [defaultLocation, setDefaultLocation] = useState("");
   const [draftDefaultLocation, setDraftDefaultLocation] = useState("");
-  const [savingDefaultLocation, setSavingDefaultLocation] = useState(false);
 
   // Destructive-action + editor dialogs.
   const [clearOpen, setClearOpen] = useState(false);
@@ -454,18 +457,29 @@ export default function ManagerCoffeeChatsPage() {
     const end = parseLocalDate(draftEnd);
     if (start > end) { setWindowError("Start date must be on or before end date."); return; }
 
-    setSavingWindow(true);
+    // The grid re-ranges at once; the setting is written behind it.
     const supabase = createClient();
-    const { error } = await supabase
-      .from("app_settings")
-      .upsert({ id: 1, coffee_chat_start: draftStart, coffee_chat_end: draftEnd, updated_at: new Date().toISOString() });
-
-    if (error) { setWindowError(error.message); setSavingWindow(false); return; }
-
-    setRangeStart(start);
-    setRangeEnd(end);
-    setWeekOffset((w) => Math.min(weekCountFor(start, end) - 1, Math.max(0, w)));
-    setSavingWindow(false);
+    const prevStart = rangeStart;
+    const prevEnd = rangeEnd;
+    void optimistic({
+      label: "coffee chat window",
+      key: "coffee-window",
+      apply: () => {
+        setRangeStart(start);
+        setRangeEnd(end);
+        setWeekOffset((w) => Math.min(weekCountFor(start, end) - 1, Math.max(0, w)));
+      },
+      rollback: () => {
+        setRangeStart(prevStart);
+        setRangeEnd(prevEnd);
+        setWeekOffset((w) => Math.min(weekCountFor(prevStart, prevEnd) - 1, Math.max(0, w)));
+      },
+      commit: () =>
+        supabase
+          .from("app_settings")
+          .upsert({ id: 1, coffee_chat_start: draftStart, coffee_chat_end: draftEnd, updated_at: new Date().toISOString() }),
+      onFailed: (message) => setWindowError(message),
+    });
   };
 
   // An hour's availability can be edited if it's inside the window and not in
@@ -627,13 +641,25 @@ export default function ManagerCoffeeChatsPage() {
 
   const hasChanges = dirtyHours().size > 0;
 
+  // Optimistic: the grid is marked saved the moment Save is clicked (dbSlots
+  // takes the painted selection), and the deletes/inserts run behind it. Any
+  // refused write reloads the real state from the server and toasts. `saving`
+  // stays on meanwhile only to stop a second save racing the first.
   const handleSave = async () => {
     setSaving(true);
     const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { setSaving(false); return; }
+    const userId = await sessionUserId(supabase);
+    if (!userId) { setSaving(false); return; }
+    const user = { id: userId };
 
+    // Diffed against the pre-save state captured in this closure.
     const dirty = dirtyHours();
+    setDbSlots(new Map(selected));
+    const failures: string[] = [];
+    const track = async (q: PromiseLike<{ error: { message: string } | null }>) => {
+      const { error } = await q;
+      if (error) failures.push(error.message);
+    };
 
     // Range-delete every unbooked row within an hour (used only for "clean"
     // hours with no bookings — a partially-booked hour is diffed per sub-slot
@@ -691,58 +717,70 @@ export default function ManagerCoffeeChatsPage() {
           return d.toISOString();
         };
         for (const off of desired) if (!current.has(off)) rowsToInsert.push(...buildRows(hk, D, [off]));
-        for (const off of current) if (!desired.has(off)) await removeSubSlot(subSlotIso(off));
+        for (const off of current) if (!desired.has(off)) await track(removeSubSlot(subSlotIso(off)));
       } else {
         // Clean hour: wipe and rebuild from the current segments.
-        await deleteHour(hk);
+        await track(deleteHour(hk));
         const f = fillsByHour.get(hk);
         if (f) rowsToInsert.push(...buildRows(hk, f.duration, [...f.offsets]));
       }
     }
     if (rowsToInsert.length > 0) {
-      await supabase.from("coffee_chats").insert(rowsToInsert);
+      await track(supabase.from("coffee_chats").insert(rowsToInsert));
     }
 
-    // Re-fetch so the grid and upcoming list reflect the saved state.
+    if (failures.length) {
+      toast.error("Couldn't save availability", {
+        description: "Some slots didn't save; the grid now shows what's actually saved.",
+      });
+    }
+    // Re-fetch so the upcoming list (and, after a failure, the grid) reflects
+    // the server's state.
     await load();
     setSaving(false);
   };
 
   // complete and no_show are mutually exclusive states, so marking one clears
-  // the other. Either toggle patches both slot lists optimistically.
-  const toggleComplete = async (rowId: string, meetingTime: string, next: boolean) => {
-    const supabase = createClient();
-    const { error } = await supabase
-      .from("coffee_chats")
-      .update({ complete: next, ...(next ? { no_show: false } : {}) })
-      .eq("id", rowId);
-    if (error) return;
-    const patch = (prev: UpcomingSlot[]) =>
+  // the other. Both lists update at once; the write confirms in the
+  // background and puts the attendee's old flags back if it's refused.
+  const setChatFlags = (
+    rowId: string,
+    meetingTime: string,
+    flags: { complete?: boolean; no_show?: boolean },
+  ) => {
+    const before = [...upcomingSlots, ...pastSlots]
+      .find((s) => s.meeting_time === meetingTime)
+      ?.attendees.find((a) => a.id === rowId);
+    const patchWith = (f: { complete?: boolean; no_show?: boolean }) => (prev: UpcomingSlot[]) =>
       prev.map((slot) =>
         slot.meeting_time !== meetingTime
           ? slot
-          : { ...slot, attendees: slot.attendees.map((a) => (a.id === rowId ? { ...a, complete: next, no_show: next ? false : a.no_show } : a)) },
+          : { ...slot, attendees: slot.attendees.map((a) => (a.id === rowId ? { ...a, ...f } : a)) },
       );
-    setUpcomingSlots(patch);
-    setPastSlots(patch);
+    const supabase = createClient();
+    void optimistic({
+      label: "coffee chat",
+      key: `coffee-chat:${rowId}`,
+      apply: () => {
+        setUpcomingSlots(patchWith(flags));
+        setPastSlots(patchWith(flags));
+      },
+      rollback: () => {
+        if (!before) return;
+        const old = { complete: before.complete, no_show: before.no_show };
+        setUpcomingSlots(patchWith(old));
+        setPastSlots(patchWith(old));
+      },
+      commit: () => supabase.from("coffee_chats").update(flags).eq("id", rowId).select("id"),
+      requireRows: true,
+    });
   };
 
-  const toggleNoShow = async (rowId: string, meetingTime: string, next: boolean) => {
-    const supabase = createClient();
-    const { error } = await supabase
-      .from("coffee_chats")
-      .update({ no_show: next, ...(next ? { complete: false } : {}) })
-      .eq("id", rowId);
-    if (error) return;
-    const patch = (prev: UpcomingSlot[]) =>
-      prev.map((slot) =>
-        slot.meeting_time !== meetingTime
-          ? slot
-          : { ...slot, attendees: slot.attendees.map((a) => (a.id === rowId ? { ...a, no_show: next, complete: next ? false : a.complete } : a)) },
-      );
-    setUpcomingSlots(patch);
-    setPastSlots(patch);
-  };
+  const toggleComplete = (rowId: string, meetingTime: string, next: boolean) =>
+    setChatFlags(rowId, meetingTime, { complete: next, ...(next ? { no_show: false } : {}) });
+
+  const toggleNoShow = (rowId: string, meetingTime: string, next: boolean) =>
+    setChatFlags(rowId, meetingTime, { no_show: next, ...(next ? { complete: false } : {}) });
 
   // Pull the manager's Google Calendar free/busy across the whole window and
   // auto-fill every editable, currently-empty hour that has no overlapping
@@ -813,24 +851,52 @@ export default function ManagerCoffeeChatsPage() {
 
   // Host cancels one booking: notify the applicant first (the row still binds
   // both parties), then release the seat.
+  // The attendee leaves the slot on screen at once; notify + release run
+  // behind it, and a refusal puts them back.
   const cancelBooking = async () => {
     if (!cancelTarget) return false;
+    const target = cancelTarget;
+    const message = cancelMessage.trim() || null;
     const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return false;
-    await supabase.rpc("notify_coffee_chat_counterparty", {
-      p_chat_id: cancelTarget.id,
-      p_type: "chat_cancelled_by_host",
-      p_message: cancelMessage.trim() || null,
-    });
-    const { error } = await supabase
-      .from("coffee_chats")
-      .update({ applicant_id: null })
-      .eq("id", cancelTarget.id)
-      .eq("member_id", user.id);
-    if (error) return false;
+    const userId = await sessionUserId(supabase);
+    if (!userId) return false;
+    const upcomingBefore = upcomingSlots;
+    const pastBefore = pastSlots;
+    const dropAttendee = (prev: UpcomingSlot[]) =>
+      prev.map((s) =>
+        s.meeting_time !== target.meeting_time
+          ? s
+          : { ...s, attendees: s.attendees.filter((a) => a.id !== target.id), filled: Math.max(0, s.filled - 1) },
+      );
     setCancelMessage("");
-    await load();
+    void optimistic({
+      label: "cancellation",
+      key: `coffee-cancel:${target.id}`,
+      apply: () => {
+        setUpcomingSlots(dropAttendee);
+        setPastSlots(dropAttendee);
+      },
+      rollback: () => {
+        setUpcomingSlots(upcomingBefore);
+        setPastSlots(pastBefore);
+        setCancelMessage(message ?? "");
+      },
+      commit: async () => {
+        await supabase.rpc("notify_coffee_chat_counterparty", {
+          p_chat_id: target.id,
+          p_type: "chat_cancelled_by_host",
+          p_message: message,
+        });
+        return supabase
+          .from("coffee_chats")
+          .update({ applicant_id: null })
+          .eq("id", target.id)
+          .eq("member_id", userId)
+          .select("id");
+      },
+      requireRows: true,
+      onCommitted: () => void load(),
+    });
   };
 
   // Set / update the meeting location for one booked sub-slot (all its seats),
@@ -839,43 +905,68 @@ export default function ManagerCoffeeChatsPage() {
   // it; clearing it reverts to following the host default (location_is_custom =
   // false, location reset to the current default) rather than blanking the
   // booker's view. See migration 0055_coffee_chat_location_is_custom.sql.
+  // The slot shows the new location at once; the write follows and the
+  // attendee notifications go out in the background once it lands.
   const saveSlotLocation = async () => {
     if (!locationTarget) return false;
+    const target = locationTarget;
     const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return false;
+    const userId = await sessionUserId(supabase);
+    if (!userId) return false;
     const raw = locationDraft.trim() || null;
     const value = raw ?? (defaultLocation.trim() || null);
-    const { error } = await supabase
-      .from("coffee_chats")
-      .update({ location: value, location_is_custom: raw !== null })
-      .eq("member_id", user.id)
-      .eq("meeting_time", locationTarget.meeting_time);
-    if (error) return false;
-    if (value) {
-      const type = locationTarget.hadLocation ? "location_updated" : "location_added";
-      for (const id of locationTarget.attendeeIds) {
-        await supabase.rpc("notify_coffee_chat_counterparty", { p_chat_id: id, p_type: type });
-      }
-    }
-    await load();
+    const previous = [...upcomingSlots, ...pastSlots].find((s) => s.meeting_time === target.meeting_time)?.location ?? null;
+    const withLocation = (loc: string | null) => (prev: UpcomingSlot[]) =>
+      prev.map((s) => (s.meeting_time === target.meeting_time ? { ...s, location: loc } : s));
+    void optimistic({
+      label: "location",
+      key: `coffee-location:${target.meeting_time}`,
+      apply: () => {
+        setUpcomingSlots(withLocation(value));
+        setPastSlots(withLocation(value));
+      },
+      rollback: () => {
+        setUpcomingSlots(withLocation(previous));
+        setPastSlots(withLocation(previous));
+      },
+      commit: () =>
+        supabase
+          .from("coffee_chats")
+          .update({ location: value, location_is_custom: raw !== null })
+          .eq("member_id", userId)
+          .eq("meeting_time", target.meeting_time)
+          .select("id"),
+      requireRows: true,
+      onCommitted: () => {
+        if (!value) return;
+        const type = target.hadLocation ? "location_updated" : "location_added";
+        for (const id of target.attendeeIds) {
+          background(
+            () => supabase.rpc("notify_coffee_chat_counterparty", { p_chat_id: id, p_type: type }),
+            "notify location change",
+          );
+        }
+      },
+    });
   };
 
-  const saveDefaultLocation = async () => {
+  const saveDefaultLocation = () => {
     const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    setSavingDefaultLocation(true);
     const value = draftDefaultLocation.trim() || null;
+    const previous = defaultLocation;
     // Sets the host default AND propagates it to every upcoming booked chat that
     // is following the default (location_is_custom = false), regardless of its
     // current value; manual per-slot overrides are preserved. Affected attendees
     // are notified. See migration 0055_coffee_chat_location_is_custom.sql.
-    await supabase.rpc("set_default_chat_location", { p_location: value });
-    setDefaultLocation(value ?? "");
-    setSavingDefaultLocation(false);
-    // Reload so booked-slot cards reflect the rewritten locations.
-    await load();
+    // Shown at once; the reload afterwards picks up the rewritten slots.
+    void optimistic({
+      label: "default location",
+      key: "coffee-default-location",
+      apply: () => setDefaultLocation(value ?? ""),
+      rollback: () => setDefaultLocation(previous),
+      commit: () => supabase.rpc("set_default_chat_location", { p_location: value }),
+      onCommitted: () => void load(),
+    });
   };
 
   const defaultLocationDirty = draftDefaultLocation.trim() !== defaultLocation.trim();
@@ -887,7 +978,7 @@ export default function ManagerCoffeeChatsPage() {
     const d = new Date(slot.meeting_time);
     const resolvedLocation = slot.location || defaultLocation.trim() || null;
     return (
-      <div key={slot.meeting_time} className={`border rounded-xl p-4 flex flex-col gap-2 ${isPast ? "opacity-50" : ""}`}>
+      <div key={slot.meeting_time} className={`rounded-xl surface p-4 flex flex-col gap-2 ${isPast ? "opacity-50" : ""}`}>
         <div className="flex items-center justify-between">
           <div>
             <p className="text-sm font-medium">
@@ -964,7 +1055,7 @@ export default function ManagerCoffeeChatsPage() {
                   className={`flex items-center justify-center w-5 h-5 rounded-md transition-colors ${
                     a.complete
                       ? "bg-green-500 text-white shadow-sm"
-                      : "border border-green-600/40 bg-green-500/10 text-green-700 hover:bg-green-500/20 dark:text-green-400"
+                      : "bg-success/10 text-success hover:bg-success/20"
                   }`}
                 >
                   <Check size={12} />
@@ -977,7 +1068,7 @@ export default function ManagerCoffeeChatsPage() {
                   className={`flex items-center justify-center w-5 h-5 rounded-md transition-colors ${
                     a.no_show
                       ? "bg-red-500 text-white shadow-sm"
-                      : "border border-red-500/40 bg-red-500/10 text-red-600 hover:bg-red-500/20 dark:text-red-400"
+                      : "bg-destructive/10 text-destructive hover:bg-destructive/20"
                   }`}
                 >
                   <UserX size={12} />
@@ -1019,9 +1110,9 @@ export default function ManagerCoffeeChatsPage() {
         <Script src="https://accounts.google.com/gsi/client" strategy="afterInteractive" />
       )}
       <div className="flex flex-col gap-1">
-        <Link href="/manager" className="text-sm text-muted-foreground hover:text-foreground">← Back</Link>
+        <BackLink href="/manager" label="Manager" />
         <div className="flex items-center justify-between gap-3 flex-wrap">
-          <h1 className="text-2xl font-bold">Coffee Chats</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Coffee Chats</h1>
           <Link
             href="/manager/coffee-chats/all"
             className="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-accent transition-colors"
@@ -1033,7 +1124,7 @@ export default function ManagerCoffeeChatsPage() {
 
       {/* Bookable window — VP Tech/President only */}
       {canEditWindow && (
-        <div className="flex flex-col gap-3 border rounded-xl p-4">
+        <div className="flex flex-col gap-3 rounded-xl surface p-4">
           <div className="flex flex-col gap-0.5">
             <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Coffee Chat Window</h2>
             <p className="text-xs text-muted-foreground">
@@ -1063,10 +1154,10 @@ export default function ManagerCoffeeChatsPage() {
             </label>
             <button
               onClick={saveWindow}
-              disabled={savingWindow || !windowDirty}
+              disabled={!windowDirty}
               className="rounded-md bg-foreground text-background px-3 py-2 text-sm font-medium hover:opacity-80 transition-opacity disabled:opacity-30"
             >
-              {savingWindow ? "Saving…" : "Save window"}
+              Save window
             </button>
           </div>
           {windowError && <p className="text-sm text-red-500">{windowError}</p>}
@@ -1110,7 +1201,7 @@ export default function ManagerCoffeeChatsPage() {
             <button
               onClick={() => setClearOpen(true)}
               disabled={saving || (selected.size === 0 && dbSlots.size === 0)}
-              className="rounded-md border border-red-500/40 text-red-500 px-3 py-1.5 text-xs font-medium hover:bg-red-500/10 transition-colors disabled:opacity-30"
+              className="rounded-md bg-destructive/10 text-destructive px-3 py-1.5 text-xs font-medium hover:bg-destructive/20 transition-colors disabled:opacity-30"
             >
               Clear all
             </button>
@@ -1127,23 +1218,14 @@ export default function ManagerCoffeeChatsPage() {
         {/* Duration brush — sets the length tagged onto newly painted tiles */}
         <div className="flex items-center gap-2">
           <span className="text-xs text-muted-foreground">New slots:</span>
-          <div className="flex items-center gap-0.5 rounded-md border p-0.5">
-            {DURATIONS.map((d) => (
-              <button
-                key={d}
-                type="button"
-                onClick={() => setBrushDuration(d)}
-                className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
-                  brushDuration === d ? "bg-foreground text-background" : "text-muted-foreground hover:bg-accent"
-                }`}
-              >
-                {d}m
-              </button>
-            ))}
-          </div>
-          <span className="text-xs text-muted-foreground">
-            (drag on the grid to paint {brushDuration}-minute segments)
-          </span>
+          <Segmented
+            aria-label="New slot length"
+            size="xs"
+            value={String(brushDuration)}
+            onChange={(v) => setBrushDuration(Number(v) as Duration)}
+            options={DURATIONS.map((d) => ({ value: String(d), label: `${d}m` }))}
+          />
+          <InfoHint label="About slot length">Drag on the grid to paint {brushDuration}-minute segments.</InfoHint>
         </div>
 
         {/* Default meeting location / link — inherited by newly-saved slots */}
@@ -1158,10 +1240,10 @@ export default function ManagerCoffeeChatsPage() {
           />
           <button
             onClick={saveDefaultLocation}
-            disabled={savingDefaultLocation || !defaultLocationDirty}
+            disabled={!defaultLocationDirty}
             className="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-accent transition-colors disabled:opacity-30"
           >
-            {savingDefaultLocation ? "Saving…" : "Save default"}
+            Save default
           </button>
         </div>
 
@@ -1173,6 +1255,7 @@ export default function ManagerCoffeeChatsPage() {
           <button
             onClick={() => setWeekOffset((w) => Math.max(0, w - 1))}
             disabled={weekOffset === 0}
+            aria-label="Previous week"
             className="p-1 rounded hover:bg-accent disabled:opacity-30 transition-colors"
           >
             <ChevronLeft size={16} />
@@ -1185,6 +1268,7 @@ export default function ManagerCoffeeChatsPage() {
           <button
             onClick={() => setWeekOffset((w) => Math.min(weekCount - 1, w + 1))}
             disabled={weekOffset >= weekCount - 1}
+            aria-label="Next week"
             className="p-1 rounded hover:bg-accent disabled:opacity-30 transition-colors"
           >
             <ChevronRight size={16} />
@@ -1244,8 +1328,8 @@ export default function ManagerCoffeeChatsPage() {
                     // Continuous-column framing: full side borders, rounded only
                     // at the very top/bottom, hairline separators between hours.
                     const frame =
-                      `border-x border-foreground/50 ${firstHour ? "border-t rounded-t-md" : ""} ` +
-                      (lastHour ? "border-b rounded-b-md" : "border-b-2 border-b-foreground/30");
+                      `border-x border-foreground/15 ${firstHour ? "border-t border-t-foreground/15 rounded-t-md" : ""} ` +
+                      (lastHour ? "border-b border-b-foreground/15 rounded-b-md" : "border-b border-b-foreground/10");
 
                     if (outOfRange) {
                       return (

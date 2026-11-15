@@ -12,11 +12,12 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+
 import { ProjectApplicationModalSkeleton } from "@/components/skeletons";
 import { resumeSignedUrl } from "@/lib/resume-upload";
 import { techAreaLabel, techClassLabel } from "@/lib/application-profile";
 import { LateBadge } from "@/components/applicant-indicators";
+import { optimistic } from "@/lib/optimistic";
 
 export type ReviewStatus = "submitted" | "accepted" | "rejected";
 
@@ -106,7 +107,7 @@ export function ApplicationReviewModal({
   const [periodEndsAt, setPeriodEndsAt] = useState<string | null>(null);
   const [resumeOpening, setResumeOpening] = useState(false);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
-  const [working, setWorking] = useState(false);
+  const working = false;
   const [error, setError] = useState<string | null>(null);
   // Default true = hidden, so the "Jump to" pill never flashes when the PM's
   // project is already on screen; the observer reveals it a frame later if the
@@ -250,31 +251,33 @@ export function ApplicationReviewModal({
     return () => clearTimeout(t);
   }, [open, loading, focus, applicationId]);
 
-  const accept = async () => {
-    if (!selectedProjectId) { setError("Pick a project to place them on."); return; }
-    setWorking(true);
+  // Both close the modal at once and decide in the background. The parent's
+  // onReviewed re-reads roster/board/stats, so it runs once the RPC lands; a
+  // refusal toasts (with Retry) instead of trapping the reviewer in the modal.
+  const decide = (outcome: "accepted" | "rejected", projectId: string | null) => {
     setError(null);
     const supabase = createClient();
-    const { error: err } = await supabase.rpc("accept_application", {
-      p_application_id: applicationId,
-      p_project_id: selectedProjectId,
+    void optimistic({
+      label: outcome === "accepted" ? `acceptance of ${applicantName}` : `rejection of ${applicantName}`,
+      key: `review:${applicationId}`,
+      apply: () => onOpenChange(false),
+      rollback: () => {},
+      commit: () =>
+        outcome === "accepted"
+          ? supabase.rpc("accept_application", { p_application_id: applicationId, p_project_id: projectId })
+          : supabase.rpc("reject_application", { p_application_id: applicationId }),
+      onCommitted: () => onReviewed(outcome),
     });
-    setWorking(false);
-    if (err) { setError(err.message); return; }
-    onReviewed("accepted");
-    onOpenChange(false);
   };
 
-  const reject = async () => {
+  const accept = () => {
+    if (!selectedProjectId) { setError("Pick a project to place them on."); return; }
+    decide("accepted", selectedProjectId);
+  };
+
+  const reject = () => {
     if (!window.confirm(`Reject ${applicantName}'s application?`)) return;
-    setWorking(true);
-    setError(null);
-    const supabase = createClient();
-    const { error: err } = await supabase.rpc("reject_application", { p_application_id: applicationId });
-    setWorking(false);
-    if (err) { setError(err.message); return; }
-    onReviewed("rejected");
-    onOpenChange(false);
+    decide("rejected", null);
   };
 
   return (
@@ -283,8 +286,8 @@ export function ApplicationReviewModal({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             {applicantName}
-            {status === "accepted" && <Badge className="bg-green-600 hover:bg-green-600">Accepted</Badge>}
-            {status === "rejected" && <Badge variant="destructive">Rejected</Badge>}
+            {status === "accepted" && <span className="text-sm font-medium text-success">· Accepted</span>}
+            {status === "rejected" && <span className="text-sm font-medium text-destructive">· Rejected</span>}
             <LateBadge submittedAt={submittedAt} endsAt={periodEndsAt} />
           </DialogTitle>
         </DialogHeader>
@@ -333,7 +336,7 @@ export function ApplicationReviewModal({
                       ? a.answer_options.join(", ")
                       : a.answer ?? "";
                     return (
-                      <div key={i} className="flex flex-col gap-0.5 pl-1 border-l-2 border-muted">
+                      <div key={i} className="flex flex-col gap-0.5 pl-2 border-l border-foreground/10">
                         <span className="text-xs font-medium text-muted-foreground pl-2 whitespace-pre-wrap">
                           {a.question?.prompt}
                         </span>
@@ -350,7 +353,7 @@ export function ApplicationReviewModal({
             {error && <p className="text-sm text-red-500">{error}</p>}
 
             {!readOnly && (
-            <div className="flex flex-wrap items-center justify-end gap-2 border-t pt-4">
+            <div className="flex flex-wrap items-center justify-end gap-2 pt-2">
               <span className="mr-auto text-xs text-muted-foreground">Place on</span>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -403,12 +406,12 @@ export function ApplicationReviewModal({
               onClick={() => targetRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
               tabIndex={showJump ? 0 : -1}
               className={cn(
-                "pointer-events-auto inline-flex items-center gap-1.5 rounded-full bg-foreground px-4 py-2 text-sm font-medium text-background shadow-lg transition-all duration-300",
+                "pointer-events-auto inline-flex items-center gap-1.5 rounded-full bg-foreground px-4 py-2 text-sm font-medium text-background shadow-lg transition-[opacity,transform] duration-3 ease-out-quart",
                 showJump ? "translate-y-0 opacity-100" : "translate-y-2 opacity-0",
               )}
             >
               Jump to {targetProjectName}
-              <ChevronDown size={16} className="animate-bounce" />
+              <ChevronDown key={String(showJump)} size={16} className={showJump ? "animate-nudge" : undefined} />
             </button>
           </div>
         </div>
@@ -441,7 +444,7 @@ function ApplicantDetails({
   const hasAny = ratedAreas.length > 0 || classes.length > 0 || !!other || !!note || hasResume || !!portfolioUrl;
 
   return (
-    <div className="flex flex-col gap-3 rounded-xl border bg-muted/30 p-4">
+    <div className="flex flex-col gap-3 rounded-xl surface p-4">
       <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Applicant details</h3>
 
       {!hasAny ? (

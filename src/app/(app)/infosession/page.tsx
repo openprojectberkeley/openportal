@@ -1,9 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { BackLink } from "@/components/back-link";
 // ── Update these two dates for each recruitment cycle ──────────────────────
 const SESSIONS = [
   { date: new Date("2026-08-31T20:00:00-07:00"), label: "Monday, August 31, 2026 · 8:00 – 9:30 PM PT · GPBB 100", location: "GPBB 100" },
@@ -69,8 +69,8 @@ export default function InfosessionPage() {
   return (
     <div className="w-full max-w-2xl mx-auto p-6 flex flex-col gap-8">
       <div className="flex flex-col gap-1">
-        <Link href="/" className="text-sm text-muted-foreground hover:text-foreground">← Back</Link>
-        <h1 className="text-2xl font-bold">Infosession</h1>
+        <BackLink href="/" label="Dashboard" />
+        <h1 className="text-2xl font-bold tracking-tight">Infosession</h1>
         <p className="text-sm text-muted-foreground">
           Attend either session below — both cover the same content.
         </p>
@@ -79,7 +79,7 @@ export default function InfosessionPage() {
       <div className="flex flex-col gap-4">
         {SESSIONS.map((session, i) => {
           return (
-            <div key={i} className="border rounded-xl p-5 flex flex-col gap-4">
+            <div key={i} className="rounded-xl surface p-5 flex flex-col gap-4">
               <p className="font-medium">{session.label}</p>
               <div className="flex gap-2 flex-wrap">
                 <a

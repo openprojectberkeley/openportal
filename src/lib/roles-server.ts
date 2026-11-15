@@ -36,14 +36,19 @@ export async function getEffectiveRoleNames(supabase: SupabaseClient): Promise<s
  * access — only VP Tech/President may simulate, and they're already exec —
  * so it never escalates.
  */
-export async function getEffectiveAccessLevels(supabase: SupabaseClient): Promise<string[]> {
-  const { data: { user } } = await supabase.auth.getUser();
+export async function getEffectiveAccessLevels(
+  supabase: SupabaseClient,
+  /** Pass the already-fetched user to skip a second auth round trip. */
+  knownUser?: { id: string } | null,
+): Promise<string[]> {
+  const user = knownUser ?? (await supabase.auth.getUser()).data.user;
   if (!user) return [];
 
-  const { data: roleRows } = await supabase
-    .from("members_roles")
-    .select("roles(role_name, access_level)")
-    .eq("user_id", user.id);
+  // Roles and PM membership are independent: fetch them together.
+  const [{ data: roleRows }, { data: pmRows }] = await Promise.all([
+    supabase.from("members_roles").select("roles(role_name, access_level)").eq("user_id", user.id),
+    supabase.from("project_members").select("project_id").eq("user_id", user.id).eq("is_pm", true).limit(1),
+  ]);
 
   const roles = ((roleRows ?? []) as unknown as MemberRoleRow[]).flatMap((r) => (r.roles ? [r.roles] : []));
   const realLevels = roles.map((r) => r.access_level).filter(Boolean) as string[];
@@ -51,12 +56,6 @@ export async function getEffectiveAccessLevels(supabase: SupabaseClient): Promis
 
   // board = exec + PMs: a PM of any project has board access even without a
   // board/exec role row.
-  const { data: pmRows } = await supabase
-    .from("project_members")
-    .select("project_id")
-    .eq("user_id", user.id)
-    .eq("is_pm", true)
-    .limit(1);
   if ((pmRows ?? []).length > 0 && !realLevels.includes("board")) realLevels.push("board");
 
   if (!canSimulate) return realLevels;

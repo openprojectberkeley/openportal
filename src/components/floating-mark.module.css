@@ -1,0 +1,91 @@
+/*
+ * FloatingMark: the logo's three shapes, each drifting on its own loop.
+ * Durations are half-periods (the loops alternate), so the full periods are
+ * 13s / 11s / 9s and the shapes never line up again in any reasonable visit.
+ * Transform-origins sit on each shape's own centre within the shared
+ * 1875x2170 box, so each rotation pivots its shape, not the whole mark.
+ */
+
+/* The parallax layer: moved by script (floating-mark.tsx), so the drift on the
+   shape inside it and the push from the cursor add up. */
+.layer {
+  position: absolute;
+  inset: 0;
+  will-change: transform;
+}
+
+.shape {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+  animation-direction: alternate;
+  animation-fill-mode: both;
+  will-change: transform;
+}
+
+.bowl {
+  transform-origin: 36.7% 31.7%;
+  animation-name: drift-bowl;
+  animation-duration: 6.5s;
+  animation-delay: -2.4s;
+}
+
+.stem {
+  transform-origin: 36.7% 74.5%;
+  animation-name: drift-stem;
+  animation-duration: 5.5s;
+  animation-delay: -4.1s;
+}
+
+.hook {
+  transform-origin: 71% 54%;
+  animation-name: drift-hook;
+  animation-duration: 4.5s;
+  animation-delay: -1.3s;
+}
+
+@keyframes drift-bowl {
+  0% { transform: translate3d(-5px, -9px, 0) rotate(-1.4deg); }
+  50% { transform: translate3d(7px, -2px, 0) rotate(0.6deg); }
+  100% { transform: translate3d(2px, 9px, 0) rotate(1.8deg); }
+}
+
+@keyframes drift-stem {
+  0% { transform: translate3d(5px, 8px, 0) rotate(2deg); }
+  50% { transform: translate3d(-6px, 2px, 0) rotate(-0.5deg); }
+  100% { transform: translate3d(-2px, -9px, 0) rotate(-2.2deg); }
+}
+
+@keyframes drift-hook {
+  0% { transform: translate3d(7px, -6px, 0) rotate(-2.6deg); }
+  50% { transform: translate3d(10px, 6px, 0) rotate(0.8deg); }
+  100% { transform: translate3d(-5px, 11px, 0) rotate(2.8deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shape {
+    animation: none;
+  }
+}
+
+/* Gradient stops: the asset's sRGB values, upgraded to its display-p3 values
+   where the browser can show them. CSS wins over the stop-color attribute. */
+.bowlFrom { stop-color: #6e1fc2; }
+.bowlTo { stop-color: #68e2c3; }
+.stemFrom { stop-color: #f9d85d; }
+.stemTo { stop-color: #6ee978; }
+.hookFrom { stop-color: #eb50a1; }
+.hookTo { stop-color: #ff910e; }
+
+@supports (color: color(display-p3 1 1 1)) {
+  .bowlFrom { stop-color: color(display-p3 0.4314 0.1216 0.7608); }
+  .bowlTo { stop-color: color(display-p3 0.4078 0.8863 0.7647); }
+  .stemFrom { stop-color: color(display-p3 0.9765 0.8471 0.3647); }
+  .stemTo { stop-color: color(display-p3 0.4314 0.9137 0.4706); }
+  .hookFrom { stop-color: color(display-p3 0.9216 0.3137 0.6314); }
+  .hookTo { stop-color: color(display-p3 1 0.5686 0.0549); }
+}

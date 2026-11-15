@@ -21,6 +21,8 @@ import {
   type AttendanceStatus,
 } from "@/lib/attendance";
 import { cn } from "@/lib/utils";
+import { staggerStyle } from "@/lib/motion";
+import { InfoHint } from "@/components/ui/info-hint";
 
 type Row = {
   id: string;
@@ -125,7 +127,7 @@ export default function AttendancePage() {
   return (
     <div className="w-full max-w-3xl mx-auto p-5 flex flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-3xl font-bold">Attendance</h1>
+        <h1 className="text-4xl font-bold tracking-tight">Attendance</h1>
         {semesters !== null && semesters.length > 0 && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -139,9 +141,7 @@ export default function AttendancePage() {
                 <DropdownMenuItem key={s.id} onSelect={() => setPicked(s.id)}>
                   {s.name}
                   {s.is_active && (
-                    <span className="ml-2 text-[10px] uppercase tracking-wide text-muted-foreground">
-                      Active
-                    </span>
+                    <span className="ml-2 text-xs text-muted-foreground">Active</span>
                   )}
                 </DropdownMenuItem>
               ))}
@@ -151,7 +151,7 @@ export default function AttendancePage() {
         )}
       </div>
 
-      {error && <p className="text-sm text-red-500">{error}</p>}
+      {error && <p className="text-sm text-destructive">{error}</p>}
 
       {visible === null ? (
         <div className="flex flex-col gap-3">
@@ -162,23 +162,29 @@ export default function AttendancePage() {
       ) : (
         <>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <Stat label="Attendance rate" value={rate === null ? "—" : `${rate}%`} />
+            <Stat
+              label="Attendance rate"
+              hint="Excused absences count as half."
+              value={rate === null ? "—" : `${rate}%`}
+            />
             <Stat label="Present" value={counts.present} />
             <Stat label="Absent" value={counts.absent} />
             <Stat label="Excused" value={counts.excused} />
           </div>
-          <p className="-mt-3 text-xs text-muted-foreground">
-            Excused absences count as half.
-          </p>
 
-          <div className="border rounded-lg overflow-hidden">
+          <div className="flex flex-col gap-0.5">
             {visible.map((r, i) => {
               const cat = isEventCategory(r.event.category) ? CATEGORY_META[r.event.category] : null;
               return (
-                <div key={r.id} className={cn("flex items-center gap-3 px-4 py-3", i > 0 && "border-t")}>
+                <div
+                  key={r.id}
+                  style={staggerStyle(i)}
+                  className="flex items-center gap-3 rounded-lg px-4 py-3 transition-colors hover:bg-foreground/[0.03] animate-fade-in-up"
+                >
+                  {/* The event style everywhere: a rounded colour bar. */}
                   <span
-                    className="h-2.5 w-2.5 shrink-0 rounded-full"
-                    style={{ backgroundColor: cat?.color ?? "#64748b" }}
+                    className="h-8 w-[3px] shrink-0 rounded-full"
+                    style={{ backgroundColor: cat?.color ?? CATEGORY_META.general.color }}
                     title={cat?.label}
                   />
                   <div className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -199,7 +205,7 @@ export default function AttendancePage() {
               );
             })}
             {visible.length === 0 && (
-              <div className="px-4 py-8 text-center text-sm text-muted-foreground">
+              <div className="rounded-xl surface px-4 py-8 text-center text-sm text-muted-foreground">
                 No attendance recorded yet.
               </div>
             )}
@@ -210,11 +216,15 @@ export default function AttendancePage() {
   );
 }
 
-function Stat({ label, value }: { label: string; value: string | number }) {
+function Stat({ label, value, hint }: { label: string; value: string | number; hint?: string }) {
   return (
-    <div className="flex flex-col gap-1 rounded-xl border px-4 py-3">
-      <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</span>
-      <span className="text-2xl font-semibold tabular-nums">{value}</span>
+    // Same tile as ApplicationStats: tint, not outline; number first.
+    <div className="rounded-xl surface rim-card px-4 py-3">
+      <div className="text-2xl font-bold">{value}</div>
+      <div className="flex items-center gap-1 text-xs text-muted-foreground">
+        {label}
+        {hint && <InfoHint label={`About ${label.toLowerCase()}`}>{hint}</InfoHint>}
+      </div>
     </div>
   );
 }

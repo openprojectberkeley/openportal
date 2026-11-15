@@ -1,3 +1,4 @@
+import { AuthShell } from "@/components/auth-shell";
 import { ForgotPasswordForm } from "@/components/forgot-password-form";
 import {
   Card,
@@ -9,8 +10,8 @@ import {
 
 export default function Page() {
   return (
-    <div className="flex min-h-svh w-full items-center justify-center p-6 md:p-10">
-      <div className="w-full max-w-sm">
+    <AuthShell>
+      <div className="w-full">
         <Card>
           <CardHeader>
             <CardTitle className="text-2xl">Reset your password</CardTitle>
@@ -24,6 +25,6 @@ export default function Page() {
           </CardContent>
         </Card>
       </div>
-    </div>
+    </AuthShell>
   );
 }

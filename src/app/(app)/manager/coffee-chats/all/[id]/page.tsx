@@ -2,7 +2,6 @@
 
 import { useParams } from "next/navigation";
 import { Suspense, useState, useEffect, useCallback } from "react";
-import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { useRefreshOnReturn } from "@/lib/use-refresh-on-return";
 import { loadCoffeeChatWindowBounds } from "@/lib/coffee-chat-window";
@@ -10,6 +9,7 @@ import { bucketOpenSlots, groupSlotsByDay, type DayGroup } from "@/lib/coffee-ch
 import { AvailabilitySkeleton } from "@/components/skeletons";
 import { PersonName } from "@/components/person-profile-provider";
 import { MapPin } from "lucide-react";
+import { BackLink } from "@/components/back-link";
 
 type PersonInfo = {
   name: string;
@@ -107,9 +107,7 @@ function ViewAvailabilityInner() {
 
   return (
     <div className="w-full max-w-5xl mx-auto p-6 flex flex-col gap-6">
-      <Link href="/manager/coffee-chats/all" className="text-sm text-muted-foreground hover:text-foreground">
-        ← Back
-      </Link>
+      <BackLink href="/manager/coffee-chats/all" label="Everyone's availability" />
 
       <div className="flex flex-col md:flex-row gap-8 md:items-start">
         {/* Left: host header + times (view-only). */}
@@ -157,7 +155,7 @@ function ViewAvailabilityInner() {
                       return (
                         <div
                           key={slot.meeting_time}
-                          className={`flex flex-col items-center px-4 py-2 rounded-md border text-sm font-medium ${
+                          className={`flex flex-col items-center px-4 py-2 rounded-md bg-foreground/[0.05] text-sm font-medium ${
                             full ? "opacity-50" : ""
                           }`}
                         >
@@ -188,7 +186,7 @@ function ViewAvailabilityInner() {
         </div>
 
         {/* Right: about the host (one-third, sticky). View-only — no booking. */}
-        <div className="flex flex-col gap-6 md:w-1/3 md:sticky md:top-6 self-start rounded-lg border p-4">
+        <div className="flex flex-col gap-6 md:w-1/3 md:sticky md:top-6 self-start rounded-xl surface p-4">
           {person && (
             <div className="flex flex-col gap-3">
               <h3 className="text-sm font-semibold">About {firstName}&apos;s coffee chats</h3>

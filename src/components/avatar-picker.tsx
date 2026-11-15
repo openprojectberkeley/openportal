@@ -1,5 +1,7 @@
 "use client";
 
+import { useState } from "react";
+import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { AVATAR_SIZE } from "@/lib/avatar-image";
@@ -15,20 +17,35 @@ type Props = {
 };
 
 export function AvatarPicker({ userId, value, name, onChange }: Props) {
-  const handleCropped = async (jpeg: Blob) => {
+  // The cropped image shows at once (a local object URL) and the cropper
+  // closes; the upload runs behind it and the real URL replaces the preview.
+  // The parent's value only ever receives the uploaded URL, so a blob: URL can
+  // never be saved to the profile.
+  const [preview, setPreview] = useState<string | null>(null);
+  const handleCropped = (jpeg: Blob) => {
+    const local = URL.createObjectURL(jpeg);
+    setPreview(local);
     const supabase = createClient();
-    const url = await uploadAvatar(supabase, userId, jpeg);
-    onChange(url);
+    uploadAvatar(supabase, userId, jpeg)
+      .then((url) => onChange(url))
+      .catch((err: unknown) =>
+        toast.error("Couldn't upload photo", { description: err instanceof Error ? err.message : undefined }),
+      )
+      .finally(() => {
+        setPreview(null);
+        URL.revokeObjectURL(local);
+      });
   };
+  const shown = preview ?? value;
 
   return (
     <ImageCropField size={AVATAR_SIZE} cropShape="round" title="Crop photo" onCropped={handleCropped}>
       {(open, { error }) => (
         <div className="flex items-center gap-4">
-          {value ? (
+          {shown ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
-              src={value}
+              src={shown}
               alt="Profile picture"
               className="h-16 w-16 rounded-full object-cover flex-shrink-0"
             />
@@ -43,7 +60,7 @@ export function AvatarPicker({ userId, value, name, onChange }: Props) {
               {value ? "Change photo" : "Upload photo"}
             </Button>
             <p className="text-xs text-muted-foreground">JPEG/PNG, cropped to 128×128.</p>
-            {error && <p className="text-xs text-red-500">{error}</p>}
+            {error && <p className="text-xs text-destructive">{error}</p>}
           </div>
         </div>
       )}
