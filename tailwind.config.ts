@@ -44,6 +44,11 @@ export default {
           DEFAULT: "hsl(var(--destructive))",
           foreground: "hsl(var(--destructive-foreground))",
         },
+        // The site accent: ember in dark, periwinkle in light (globals.css).
+        brand: {
+          DEFAULT: "hsl(var(--brand))",
+          foreground: "hsl(var(--brand-foreground))",
+        },
         success: {
           DEFAULT: "hsl(var(--success))",
           foreground: "hsl(var(--success-foreground))",
@@ -80,7 +85,7 @@ export default {
             "--tw-prose-body": "hsl(var(--foreground))",
             "--tw-prose-headings": "hsl(var(--foreground))",
             "--tw-prose-lead": "hsl(var(--muted-foreground))",
-            "--tw-prose-links": "hsl(var(--foreground))",
+            "--tw-prose-links": "hsl(var(--brand))",
             "--tw-prose-bold": "hsl(var(--foreground))",
             "--tw-prose-counters": "hsl(var(--muted-foreground))",
             "--tw-prose-bullets": "hsl(var(--muted-foreground))",
@@ -164,12 +169,6 @@ export default {
           "0%, 100%": { opacity: "1" },
           "50%": { opacity: "0.35" },
         },
-        // One-shot highlight sweep across a card, for the moment a draft pick
-        // is confirmed and takes on its project's accent.
-        shimmer: {
-          from: { transform: "translateX(-100%)" },
-          to: { transform: "translateX(200%)" },
-        },
         // Content replacing its skeleton: a short settle instead of a hard cut.
         "fade-in-up": {
           from: { opacity: "0", transform: "translateY(4px)" },
@@ -205,7 +204,6 @@ export default {
       },
       animation: {
         "slow-flash": "slow-flash 1.8s ease-in-out infinite",
-        shimmer: "shimmer 1.1s var(--ease-out-expo) 1",
         "fade-in-up": "fade-in-up var(--dur-2) var(--ease-out-quart) both",
         pop: "pop var(--dur-2) var(--ease-out-quart) both",
         indeterminate: "indeterminate 1s var(--ease-in-out-cubic) infinite",

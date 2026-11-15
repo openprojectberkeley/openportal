@@ -19,8 +19,6 @@ import { Check, ChevronDown, Plus, Search, Table2, UserPlus, UserSearch } from "
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   DropdownMenu,
@@ -35,9 +33,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ScrollArea } from "@/components/overlay-scrollbar";
 import { ProjectIcon } from "@/components/project-icon";
-import { applicantName, ReturningIndicator, StaticApplicantCard, type AppRow } from "@/components/applicant-meta";
-import { InvalidIndicator, LateBadge } from "@/components/applicant-indicators";
-import { ApplicantPickerDialog } from "@/components/applicant-picker-dialog";
+import { applicantName, StaticApplicantCard, type AppRow } from "@/components/applicant-meta";
+import { InvalidIndicator } from "@/components/applicant-indicators";
+import { ApplicantPickerPopover } from "@/components/applicant-picker-dialog";
 import { ApplicationListSkeleton } from "@/components/skeletons";
 import { createClient } from "@/lib/supabase/client";
 import { DEFAULT_ACCENT, accentFill, readableTextColor } from "@/lib/portal-color";
@@ -53,6 +51,7 @@ import {
 import type { AddableMember } from "@/components/applicant-picker-dialog";
 import { staggerStyle } from "@/lib/motion";
 import { toast } from "sonner";
+import { undraftedIds } from "@/lib/draft-status";
 
 // The three states the per-card menu cycles between, and all three are THEIR
 // decision, not ours: we draft, we email the confirmation, they answer.
@@ -193,7 +192,7 @@ function CardMenu({
     rejected: "Rejected — they turned the offer down",
   };
   return (
-    <div {...stopClick} className="shrink-0">
+    <div {...stopClick} className="flex shrink-0 items-center">
       <DropdownMenu onOpenChange={(o) => { if (!o) setMoveQuery(""); }}>
         <DropdownMenuTrigger asChild disabled={busy}>
           {/* A control, so it stays a chip, but light: coloured text + chevron. */}
@@ -261,19 +260,9 @@ function CardMenu({
   );
 }
 
-// A column's heading, matching the uppercase section headings the
-// single-project view uses for Wishlist / Confirmed / Draft window.
-function SectionHeading({ label, count }: { label: string; count: number }) {
-  return (
-    <h3 className="text-xs font-semibold uppercase tracking-wide tabular-nums text-muted-foreground">
-      {label} ({count})
-    </h3>
-  );
-}
-
 function EmptySection({ children }: { children: React.ReactNode }) {
   return (
-    <div className="rounded-lg surface px-3 py-4 text-center text-xs text-muted-foreground">{children}</div>
+    <div className="px-2 py-3 text-xs text-muted-foreground">{children}</div>
   );
 }
 
@@ -303,25 +292,31 @@ function ProjectColumn({
   column,
   moveTargets,
   periodEndsAt,
-  showRecruitingStatus,
   busyPickId,
   onReview,
   onOutcome,
   onMove,
-  onAdd,
+  addControl,
+  onDraft,
 }: {
   column: BoardColumn;
   // Every other project drafting this period -- the only legal move targets.
   moveTargets: BoardProject[];
   periodEndsAt: string | undefined;
-  showRecruitingStatus: boolean;
   busyPickId: string | null;
   onReview: (app: AppRow, projectId: string) => void;
   onOutcome: (card: BoardCard, projectId: string, outcome: Outcome) => void;
   onMove: (card: BoardCard, toProjectId: string) => void;
-  onAdd: (project: BoardProject) => void;
+  // The "Add member" row: a trigger wrapped in its picker overlay.
+  addControl: React.ReactNode;
+  // Confirm a staged pick for this project (an exec placement).
+  onDraft: (card: BoardCard) => void;
 }) {
-  const { project, picks } = column;
+  const { project } = column;
+  // Confirmed picks first; anyone merely staged (an unsubmitted window) sits
+  // at the very bottom with a Draft button.
+  const picks = column.picks.filter((c) => c.submitted);
+  const staged = column.picks.filter((c) => !c.submitted);
   const accent = project.color || DEFAULT_ACCENT;
   const review = (app: AppRow) => onReview(app, project.id);
 
@@ -341,32 +336,22 @@ function ProjectColumn({
         </div>
       </div>
 
-      <div className="flex flex-col gap-1.5">
-        <SectionHeading label="Drafted" count={picks.length} />
-        {picks.length === 0 ? (
-          <EmptySection>No one drafted yet.</EmptySection>
+      <div className="flex flex-col gap-1">
+        {picks.length === 0 && staged.length === 0 ? (
+          <EmptySection>No one drafted yet</EmptySection>
         ) : (
-          picks.map((card) => {
+          // A plain list: rows split by faint dividers, no cards, no colour.
+          <div className="flex flex-col divide-y divide-foreground/[0.06]">
+          {picks.map((card, i) => {
             // Once someone has answered, the chip stops being a hover action and
-            // becomes the card's resting state: it moves into the row and stays
-            // put, and the card's own Accepted/Rejected badge comes off, since
-            // the chip says the same word in the same colour. Still "drafted"
-            // (including accepted onto some OTHER project, which outcomeOf reads
-            // as drafted here) keeps both the hover-only chip and the badge.
+            // becomes the row's resting state, pinned at its right edge.
             const decided = outcomeOf(card) !== "drafted";
             return (
+              <div key={card.pickId} className="animate-fade-in-up" style={staggerStyle(i)}>
               <StaticApplicantCard
-                key={card.pickId}
                 app={card.app}
                 compact
-                // A confirmed pick wears the project's accent; one still sitting
-                // in an unsubmitted window keeps the draft window's white, so
-                // nothing is hidden but the two still read differently.
-                accent={card.submitted ? accent : null}
-                staged={!card.submitted}
                 periodEndsAt={periodEndsAt}
-                showRank
-                showRecruitingStatus={showRecruitingStatus}
                 onReview={review}
                 pinExtra={decided}
                 hideStatus={decided}
@@ -381,19 +366,47 @@ function ProjectColumn({
                   />
                 }
               />
+              </div>
             );
-          })
+          })}
+          </div>
         )}
 
-        {/* Same geometry as a compact card, dashed: an empty slot to fill. */}
-        <button
-          type="button"
-          onClick={() => onAdd(project)}
-          className="flex items-center justify-center gap-1.5 rounded-lg border border-dashed border-foreground/15 px-2.5 py-1 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-        >
-          <Plus size={14} />
-          Add member
-        </button>
+        {staged.length > 0 && (
+          <div className="mt-2 flex flex-col gap-1">
+            <h3 className="px-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Staged <span className="font-normal tabular-nums">{staged.length}</span>
+            </h3>
+            <div className="flex flex-col divide-y divide-foreground/[0.06]">
+              {staged.map((card, i) => (
+                <div key={card.pickId} className="animate-fade-in-up" style={staggerStyle(picks.length + i)}>
+                  <StaticApplicantCard
+                    app={card.app}
+                    compact
+                    periodEndsAt={periodEndsAt}
+                    onReview={review}
+                    pinExtra
+                    overlayExtra={
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={busyPickId === card.pickId}
+                        className="h-6 px-2 text-xs"
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onClick={(e) => { e.stopPropagation(); onDraft(card); }}
+                      >
+                        Draft
+                      </Button>
+                    }
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* A ghost row at the end of the list; opens a small picker overlay. */}
+        {addControl}
       </div>
     </div>
   );
@@ -407,7 +420,6 @@ function ProjectColumn({
 function UndraftedDialog({
   rows,
   stagedByAppId,
-  periodEndsAt,
   filter,
   onFilterChange,
   open,
@@ -467,8 +479,6 @@ function UndraftedDialog({
                       {applicantName(app)}
                     </button>
                     <InvalidIndicator valid={app.valid} />
-                    <ReturningIndicator returning={app.returning} />
-                    <LateBadge submittedAt={app.submitted_at} endsAt={periodEndsAt} />
                     {staged && (
                       <span className="ml-auto min-w-0 max-w-[50%] shrink-0 truncate text-xs text-muted-foreground">
                         Staged{staged.length > 0 ? ` · ${staged.join(", ")}` : ""}
@@ -490,8 +500,6 @@ export function AllProjectsBoard({
   periodEndsAt,
   counts,
   canDraft,
-  showRecruitingStatus,
-  onShowRecruitingStatusChange,
   onOpenSheet,
   onReview,
   reviewOpen,
@@ -504,8 +512,6 @@ export function AllProjectsBoard({
   counts: { applicants: number; projects: number } | null;
   // Full-access reviewer: the draft manager is theirs to open.
   canDraft: boolean;
-  showRecruitingStatus: boolean;
-  onShowRecruitingStatusChange: (next: boolean) => void;
   onOpenSheet: () => void;
   // Carries the column's project so review opens with the right context project.
   // The "not drafted" list has no column behind it, hence the null.
@@ -543,7 +549,7 @@ export function AllProjectsBoard({
   // The "not drafted" list: everyone the draft hasn't placed yet.
   const [undraftedOpen, setUndraftedOpen] = useState(false);
   const [undraftedFilter, setUndraftedFilter] = useState("");
-  const { roster, eligibleCount, load: loadRoster } = usePeriodRoster(periodId);
+  const { roster, draftStatus, load: loadRoster } = usePeriodRoster(periodId, reloadToken);
 
   useEffect(() => { if (addFor) loadApplicants(); }, [addFor, loadApplicants]);
 
@@ -715,15 +721,11 @@ export function AllProjectsBoard({
   // `placed`, not `acceptedProjectId`: an acceptance whose roster row was later
   // removed has left them unplaced, and the point of this list is who still
   // needs placing (0106).
-  const undrafted = (roster ?? []).filter((r) => !confirmedAppIds.has(r.app.id) && !r.placed);
-  // The roster is lazy, so the button falls back to the head count's own
-  // arithmetic until someone opens the list -- the two agree except for anyone
-  // accepted outside the draft.
-  const undraftedCount = roster
-    ? undrafted.length
-    : eligibleCount === null
-      ? null
-      : Math.max(eligibleCount - confirmedAppIds.size, 0);
+  // One rule for the button, the list, the draft page and analytics
+  // (src/lib/draft-status.ts), applied to the live confirmed picks.
+  const undraftedSet = draftStatus ? undraftedIds(draftStatus.apps, confirmedAppIds, draftStatus.memberKeys) : null;
+  const undrafted = (roster ?? []).filter((r) => undraftedSet?.has(r.app.id));
+  const undraftedCount = undraftedSet ? undraftedSet.size : null;
 
   // Move targets are the other projects actually drafting this period; anything
   // else raises "That project is not drafting in this application period."
@@ -737,19 +739,6 @@ export function AllProjectsBoard({
         <div className="flex min-w-0 flex-col gap-1">
           <div className="flex items-center gap-3">
             <h2 className="text-base font-semibold tracking-tight">Every project</h2>
-            <div className="flex items-center gap-1.5">
-              <Switch
-                id="board-show-recruiting-status"
-                checked={showRecruitingStatus}
-                onCheckedChange={onShowRecruitingStatusChange}
-              />
-              <Label
-                htmlFor="board-show-recruiting-status"
-                className="cursor-pointer text-[11px] font-medium text-muted-foreground"
-              >
-                Coffee & info
-              </Label>
-            </div>
           </div>
           {counts ? (
             <p className="text-sm tabular-nums text-muted-foreground">
@@ -809,33 +798,37 @@ export function AllProjectsBoard({
                 column={column}
                 moveTargets={draftingProjects.filter((p) => p.id !== column.project.id)}
                 periodEndsAt={periodEndsAt}
-                showRecruitingStatus={showRecruitingStatus}
                 busyPickId={busyPickId}
                 onReview={onReview}
                 onOutcome={setOutcome}
                 onMove={movePick}
-                onAdd={setAddFor}
+                addControl={
+                  <ApplicantPickerPopover
+                    open={addFor?.id === column.project.id}
+                    onOpenChange={(o) => setAddFor(o ? column.project : null)}
+                    applicants={applicants}
+                    alreadyPicked={column.picks.map((card) => card.app.id)}
+                    onPick={(applicationId) => addPick(column.project.id, applicationId)}
+                    memberSearch={{
+                      periodId,
+                      onPick: (m: AddableMember) => addMember(column.project.id, m.user_id),
+                    }}
+                  >
+                    <button
+                      type="button"
+                      className="flex items-center gap-1.5 rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground data-[state=open]:bg-foreground/[0.04] data-[state=open]:text-foreground"
+                    >
+                      <Plus size={14} />
+                      Add member
+                    </button>
+                  </ApplicantPickerPopover>
+                }
+                onDraft={(card) => addPick(column.project.id, card.app.id)}
               />
               </div>
             ))}
           </div>
         </ScrollArea>
-      )}
-
-      {addFor && (
-        <ApplicantPickerDialog
-          title={`Add to ${addFor.name}`}
-          applicants={applicants}
-          alreadyPicked={
-            columns?.find((c) => c.project.id === addFor.id)?.picks.map((card) => card.app.id) ?? []
-          }
-          onPick={(applicationId) => addPick(addFor.id, applicationId)}
-          memberSearch={{
-            periodId,
-            onPick: (m: AddableMember) => addMember(addFor.id, m.user_id),
-          }}
-          onClose={() => setAddFor(null)}
-        />
       )}
 
       {undraftedOpen && (

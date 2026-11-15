@@ -18,6 +18,7 @@ import { applicantName, type AppRow } from "@/components/applicant-meta";
 import { enrichAppRows, type BaseAppRow } from "@/lib/applicant-rows";
 import { selectInChunks } from "@/lib/postgrest-chunk";
 import { useDraftRealtime } from "@/lib/use-draft-realtime";
+import { fetchDraftStatus, type DraftApp } from "@/lib/draft-status";
 
 // The statuses the draft can still place. Rejected applications are out of
 // play, so they belong to neither the roster nor its head count.
@@ -201,7 +202,7 @@ export function useAllProjectsBoard(periodId: string | null, enabled: boolean, r
       // and this board already costs two awaited round trips.
       const userIds = [...new Set(apps.map((a) => a.applicant_id).filter((id): id is string => !!id))];
       const [enriched, memberships] = await Promise.all([
-        enrichAppRows(supabase, base),
+        enrichAppRows(supabase, base, { periodId }),
         selectInChunks<{ project_id: string; user_id: string; is_pm: boolean | null }>(userIds, (chunk) =>
           supabase.from("project_members").select("project_id, user_id, is_pm").in("user_id", chunk),
         ),
@@ -352,29 +353,29 @@ export type RosterRow = {
   placed: boolean;
 };
 
-export function usePeriodRoster(periodId: string | null) {
+export function usePeriodRoster(periodId: string | null, reloadToken = 0) {
   const [roster, setRoster] = useState<RosterRow[] | null>(null);
-  // Cheap head count, fetched up front: it stands in for the roster's own
-  // length until someone actually opens the list.
-  const [eligibleCount, setEligibleCount] = useState<number | null>(null);
+  // The light draft status (eligible apps + team memberships), fetched up
+  // front so the "not drafted" count is exact from the start and uses the
+  // same rule as the list (src/lib/draft-status.ts).
+  const [draftStatus, setDraftStatus] = useState<{ apps: DraftApp[]; memberKeys: Set<string> } | null>(null);
   const countGenRef = useRef(0);
   const rosterGenRef = useRef(0);
 
   useEffect(() => {
-    const gen = ++countGenRef.current;
     rosterGenRef.current++;
     setRoster(null);
-    setEligibleCount(null);
+    setDraftStatus(null);
+  }, [periodId]);
+
+  useEffect(() => {
+    const gen = ++countGenRef.current;
     if (!periodId) return;
     (async () => {
-      const { count } = await createClient()
-        .from("applications")
-        .select("id", { count: "exact", head: true })
-        .eq("period_id", periodId)
-        .in("status", DRAFT_ELIGIBLE_STATUSES);
-      if (gen === countGenRef.current) setEligibleCount(count ?? 0);
+      const status = await fetchDraftStatus(createClient(), periodId);
+      if (gen === countGenRef.current) setDraftStatus({ apps: status.apps, memberKeys: status.memberKeys });
     })();
-  }, [periodId]);
+  }, [periodId, reloadToken]);
 
   const load = useCallback(async () => {
     if (!periodId) return;
@@ -429,6 +430,7 @@ export function usePeriodRoster(periodId: string | null) {
         rank: 0,
         exec_added: r.exec_added,
       })),
+      { periodId },
     );
     if (gen !== rosterGenRef.current) return;
 
@@ -443,5 +445,5 @@ export function usePeriodRoster(periodId: string | null) {
     );
   }, [periodId]);
 
-  return { roster, eligibleCount, load };
+  return { roster, draftStatus, load };
 }

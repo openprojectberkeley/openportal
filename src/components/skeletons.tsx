@@ -451,27 +451,65 @@ export function AvailabilitySkeleton({ days = 2, slots = 5 }: { days?: number; s
 
 // Mirrors PointsLedger: a header row plus body rows of the points table.
 export function LedgerSkeleton({ rows = 6 }: { rows?: number }) {
+  return <SheetGridSkeleton rows={rows} columns={[48, 112, 80, 32, 160, 72]} />;
+}
+
+// A sheet (attendance, application sheet, ledger) while it loads: the real
+// grid's shape -- a header row, a sticky-name column, zebra rows, one
+// placeholder per cell -- rather than a stack of text lines. `cells: "pae"`
+// draws the attendance sheet's three-letter control in every cell.
+const NAME_WIDTHS = [62, 48, 70, 55, 66, 44, 58, 72, 50, 64, 46, 60];
+export function SheetGridSkeleton({
+  rows = 12,
+  columns = [96, 96, 96, 96, 96, 96],
+  cells = "text",
+}: {
+  rows?: number;
+  /** Approximate pixel width of each data column's placeholder. */
+  columns?: number[];
+  cells?: "text" | "pae";
+}) {
   return (
-    <div className="overflow-x-auto border rounded-lg">
-      <div className="flex items-center gap-4 border-b px-3 py-2">
-        <Skeleton className="h-2.5 w-10 rounded-full" />
-        <Skeleton className="h-2.5 w-24 rounded-full" />
-        <Skeleton className="h-2.5 w-16 rounded-full" />
-        <Skeleton className="h-2.5 w-12 rounded-full" />
-        <Skeleton className="h-2.5 w-32 rounded-full" />
-      </div>
-      {Array.from({ length: rows }, (_, i) => (
-        <div
-          key={i}
-          className={`flex items-center gap-4 px-3 py-2.5 ${i < rows - 1 ? "border-b" : ""}`}
-        >
-          <Skeleton className="h-3.5 w-12 rounded-full" />
-          <Skeleton className="h-3.5 w-28 rounded-full" />
-          <Skeleton className="h-3.5 w-20 rounded-full" />
-          <Skeleton className="h-3.5 w-8 rounded-full" />
-          <Skeleton className="h-3.5 w-40 rounded-full" />
-        </div>
-      ))}
+    <div className="min-h-0 flex-1 overflow-hidden" aria-hidden>
+      <table className="sheet-zebra w-full border-separate border-spacing-0">
+        <thead>
+          <tr>
+            <th className="w-40 min-w-[10rem] px-3 py-2.5 text-left">
+              <Skeleton className="h-3 w-14 rounded-full" />
+            </th>
+            {columns.map((w, i) => (
+              <th key={i} className="px-2 py-2.5 text-left">
+                <div className="flex flex-col gap-1.5">
+                  {cells === "pae" && <Skeleton className="h-2.5 w-12 rounded-full" />}
+                  <Skeleton className="h-3 rounded-full" style={{ width: Math.min(w, 88) }} />
+                </div>
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {Array.from({ length: rows }, (_, r) => (
+            <tr key={r}>
+              <td className="px-3 py-2">
+                <Skeleton className="h-3.5 rounded-full" style={{ width: `${NAME_WIDTHS[r % NAME_WIDTHS.length]}%` }} />
+              </td>
+              {columns.map((w, c) => (
+                <td key={c} className="px-2 py-2">
+                  {cells === "pae" ? (
+                    <div className="flex w-[4.5rem] items-center gap-1">
+                      <Skeleton className="h-5 flex-1 rounded-sm" />
+                      <Skeleton className="h-5 flex-1 rounded-sm" />
+                      <Skeleton className="h-5 flex-1 rounded-sm" />
+                    </div>
+                  ) : (
+                    <Skeleton className="h-3.5 rounded-full" style={{ width: Math.max(16, w * (0.55 + ((r * 7 + c * 3) % 5) / 10)) }} />
+                  )}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

@@ -4,23 +4,23 @@
 
 @layer base {
   :root {
-    /* Light theme: softened off-white (never solid white) with a barely-there
-       cool blue/purple tint (hue ~255, very low saturation). The tint is meant
-       to be felt, not seen. */
-    --background: 255 20% 97%;
-    --foreground: 255 12% 12%;
-    --card: 255 24% 99%;
-    --card-foreground: 255 12% 12%;
-    --popover: 255 24% 99%;
-    --popover-foreground: 255 12% 12%;
-    --primary: 255 12% 15%;
-    --primary-foreground: 255 20% 98%;
-    --secondary: 255 16% 93.5%;
-    --secondary-foreground: 255 12% 18%;
-    --muted: 255 16% 94%;
-    --muted-foreground: 255 8% 44%;
-    --accent: 255 18% 92%;
-    --accent-foreground: 255 12% 18%;
+    /* Light theme: a barely-cream paper (hue 40) with a desaturated
+       periwinkle accent (--brand, hue 238). Tuned in /lab/tint. The tint is
+       meant to be felt, not seen. */
+    --background: 40 33% 97%;
+    --foreground: 40 19.8% 12%;
+    --card: 40 37.9% 99%;
+    --card-foreground: 40 19.8% 12%;
+    --popover: 40 37.9% 99%;
+    --popover-foreground: 40 19.8% 12%;
+    --primary: 40 19.8% 15%;
+    --primary-foreground: 40 33% 98%;
+    --secondary: 40 26.4% 93.5%;
+    --secondary-foreground: 40 19.8% 12%;
+    --muted: 40 26.4% 94%;
+    --muted-foreground: 40 13.2% 44%;
+    --accent: 40 29.7% 92%;
+    --accent-foreground: 40 19.8% 12%;
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 98%;
     /* Status colours. Use these, not raw green/amber/blue: they're tuned per
@@ -35,9 +35,9 @@
        surface (tinted cards included) instead of a grey rule. Inputs get a
        little more so fields stay findable. --edge-hi is the lit top edge on
        floating surfaces (shadow-overlay / shadow-edge). */
-    --border: 255 30% 20%;
+    --border: 40 30% 20%;
     --border-alpha: 0.09;
-    --input: 255 30% 20%;
+    --input: 40 30% 20%;
     --input-alpha: 0.16;
     --edge-hi: 0 0% 100% / 0.7;
     /* Glass: how much of the surface colour a floating layer keeps; the rest
@@ -48,9 +48,9 @@
        highlight at the lit corner, and the far-corner return. In light mode
        the return is dark ink, since a white line vanishes on light surfaces. */
     --rim-light: 0.6;
-    --rim-ink-color: 255 30% 20%;
+    --rim-ink-color: 40 30% 20%;
     --rim-ink: 0.12;
-    --ring: 255 12% 40%;
+    --ring: 40 19.8% 40%;
 
     --chart-1: 12 76% 61%;
     --chart-2: 173 58% 39%;
@@ -58,6 +58,8 @@
     --chart-4: 43 74% 66%;
     --chart-5: 27 87% 67%;
     --radius: 0.5rem;
+    --brand-foreground: 238 30% 98%;
+    --brand: 238 36% 47%;
 
     /* Motion tokens. Mirrored in lib/motion.ts (JS animations) and exposed to
        Tailwind as `duration-1..5` / `ease-out-quart` etc. (tailwind.config.ts).
@@ -80,24 +82,25 @@
     --ease-in-out-quart: cubic-bezier(.77, 0, .175, 1);
   }
   .dark {
-    /* Same hue-255 tint as light, so the two themes read as one product.
+    /* A barely-navy ink (hue 228) with an ember accent (--brand, hue 9).
+       Tuned in /lab/tint.
        Muted (the card surface) sits closer to the background than stock
        shadcn's 14.9% did: cards lift off the page instead of reading as grey
        slabs. accentTint() mixes toward --muted, so accent tiles follow. */
-    --background: 255 14% 5%;
-    --foreground: 255 20% 97%;
-    --card: 255 12% 7.5%;
-    --card-foreground: 255 20% 97%;
-    --popover: 255 12% 8%;
-    --popover-foreground: 255 20% 97%;
-    --primary: 255 20% 97%;
-    --primary-foreground: 255 14% 8%;
-    --secondary: 255 10% 13%;
-    --secondary-foreground: 255 20% 97%;
-    --muted: 255 10% 10.5%;
-    --muted-foreground: 255 8% 64%;
-    --accent: 255 10% 14%;
-    --accent-foreground: 255 20% 97%;
+    --background: 228 30% 6%;
+    --foreground: 228 20% 96%;
+    --card: 228 25.8% 8.5%;
+    --card-foreground: 228 20% 96%;
+    --popover: 228 25.8% 9%;
+    --popover-foreground: 228 20% 96%;
+    --primary: 228 20% 96%;
+    --primary-foreground: 228 30% 9%;
+    --secondary: 228 21.6% 14%;
+    --secondary-foreground: 228 20% 96%;
+    --muted: 228 21.6% 11.5%;
+    --muted-foreground: 228 16.5% 64%;
+    --accent: 228 21.6% 15%;
+    --accent-foreground: 228 20% 96%;
     --destructive: 0 72% 60%;
     --destructive-foreground: 0 0% 98%;
     --success: 152 55% 52%;
@@ -106,9 +109,9 @@
     --warning-foreground: 38 80% 8%;
     --info: 215 90% 68%;
     --info-foreground: 215 60% 10%;
-    --border: 255 25% 92%;
+    --border: 228 30% 92%;
     --border-alpha: 0.075;
-    --input: 255 25% 92%;
+    --input: 228 30% 92%;
     --input-alpha: 0.12;
     --edge-hi: 0 0% 100% / 0.07;
     --glass-alpha: 0.66;
@@ -116,12 +119,14 @@
     --rim-light: 0.35;
     --rim-ink-color: 0 0% 100%;
     --rim-ink: 0.1225;
-    --ring: 255 10% 72%;
+    --ring: 228 21% 72%;
     --chart-1: 220 70% 50%;
     --chart-2: 160 60% 45%;
     --chart-3: 30 80% 55%;
     --chart-4: 280 65% 60%;
     --chart-5: 340 75% 55%;
+    --brand-foreground: 9 30% 98%;
+    --brand: 9 90% 56%;
   }
 }
 
@@ -157,6 +162,20 @@
 }
 
 @layer components {
+  /* Sheet views (attendance, application sheet, points ledger): no grid lines,
+     every other row a shade lighter. Cells paint the shade themselves (an
+     opaque mix, not a translucent tint) so sticky first-column cells stay
+     solid while the row scrolls under them. */
+  .sheet-zebra tbody tr:nth-child(odd) > * {
+    background-color: color-mix(in srgb, hsl(var(--foreground)) 3.5%, hsl(var(--background)));
+  }
+  .sheet-zebra.sheet-hover tbody tr:hover > * {
+    background-color: color-mix(in srgb, hsl(var(--foreground)) 6%, hsl(var(--background)));
+  }
+  .sheet-zebra thead th {
+    box-shadow: inset 0 -1px 0 hsl(var(--border));
+  }
+
   /* Glass for floating layers only (menus, popovers, toasts, the dock, the
      header, dialogs). Content surfaces stay solid/tinted. The surface keeps
      --glass-alpha of its colour and the page behind is blurred and slightly

@@ -7,7 +7,13 @@ import { Check, ChevronRight, Circle } from "lucide-react";
 import { ScrollArea } from "@/components/overlay-scrollbar";
 import { cn } from "@/lib/utils";
 
-const DropdownMenu = DropdownMenuPrimitive.Root;
+// Non-modal by default. A modal menu locks `body { pointer-events }` while
+// open; when one of its items opens a Dialog (Manage periods, Profile,
+// confirms), the two locks race on teardown and can leave the page
+// unclickable after the dialog closes. Outside clicks still close the menu.
+function DropdownMenu({ modal = false, ...props }: React.ComponentProps<typeof DropdownMenuPrimitive.Root>) {
+  return <DropdownMenuPrimitive.Root modal={modal} {...props} />;
+}
 
 const DropdownMenuTrigger = DropdownMenuPrimitive.Trigger;
 

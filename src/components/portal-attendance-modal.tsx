@@ -2,13 +2,13 @@
 
 import { createClient } from "@/lib/supabase/client";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Download, Pencil, Plus, Trash2, X } from "lucide-react";
+import { Download, Pencil, Plus, Search, Trash2, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/overlay-scrollbar";
 import { PersonName } from "@/components/person-profile-provider";
-import { MemberRosterSkeleton } from "@/components/skeletons";
+import { MemberRosterSkeleton, SheetGridSkeleton } from "@/components/skeletons";
 import {
   EventFormFields,
   deletePortalEventOptimistic,
@@ -131,7 +131,7 @@ function EventHeaderCell({
   }, [ev.title]);
 
   return (
-    <th className="group/evt relative sticky top-0 z-20 bg-background border-b border-r px-2 py-2 text-left font-medium align-bottom min-w-[9rem]">
+    <th className="group/evt relative sticky top-0 z-20 bg-background px-2 py-2 text-left font-medium align-bottom min-w-[9rem]">
       <div className="flex flex-col gap-0.5">
         <span className="text-[10px] font-normal text-muted-foreground uppercase tracking-wide">
           {formatEventDate(ev.start_time)}
@@ -234,6 +234,7 @@ export function PortalAttendanceModal({
     const supabase = createClient();
     setLoading(true);
     setProjectFilter("");
+    setMemberQuery("");
     setImportOpen(false);
 
     (async () => {
@@ -379,10 +380,13 @@ export function PortalAttendanceModal({
     })();
   }, [open, portalId, canManage, fullAccess]);
 
-  const visibleRoster = useMemo(
-    () => (projectFilter ? roster.filter((r) => r.projectIds.includes(projectFilter)) : roster),
-    [roster, projectFilter],
-  );
+  const [memberQuery, setMemberQuery] = useState("");
+  const visibleRoster = useMemo(() => {
+    const q = memberQuery.trim().toLowerCase();
+    return roster.filter(
+      (r) => (!projectFilter || r.projectIds.includes(projectFilter)) && (!q || r.name.toLowerCase().includes(q)),
+    );
+  }, [roster, projectFilter, memberQuery]);
 
   const openImport = async () => {
     setImportSearch("");
@@ -618,7 +622,7 @@ export function PortalAttendanceModal({
               <ScrollArea className="flex-1 min-h-0">
                 <div className="flex flex-col gap-1">
                   {importable.map((ev) => (
-                    <div key={ev.id} className="flex items-center gap-2 text-sm py-1.5 border-b last:border-0">
+                    <div key={ev.id} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm odd:bg-foreground/[0.03]">
                       <div className="flex flex-col min-w-0 flex-1">
                         <span className="truncate">{ev.title}</span>
                         <span className="text-xs text-muted-foreground">{formatEventDate(ev.start_time)}</span>
@@ -638,7 +642,7 @@ export function PortalAttendanceModal({
             )}
           </div>
         ) : loading ? (
-          <MemberRosterSkeleton />
+          canManage ? <SheetGridSkeleton cells="pae" rows={30} columns={[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]} /> : <MemberRosterSkeleton />
         ) : events.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-3 py-8">
             <p className="text-sm text-muted-foreground">
@@ -662,6 +666,16 @@ export function PortalAttendanceModal({
             {/* Legend for the single-letter status buttons, plus the club
                 sheet's project filter and the portal sheet's import button. */}
             <div className="flex-shrink-0 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+              <div className="relative">
+                <Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" aria-hidden />
+                <Input
+                  value={memberQuery}
+                  onChange={(e) => setMemberQuery(e.target.value)}
+                  placeholder="Search members…"
+                  aria-label="Search members"
+                  className="h-8 w-56 pl-8 text-xs"
+                />
+              </div>
               {STATUSES.map((s) => (
                 <span key={s.value} className="flex items-center gap-1">
                   <span
@@ -699,16 +713,19 @@ export function PortalAttendanceModal({
               <p className="text-sm text-muted-foreground py-4 text-center">
                 {!portalId && !fullAccess && projects.length === 0
                   ? "You don't PM any projects."
-                  : "No members yet."}
+                  : memberQuery.trim() || projectFilter
+                    ? "No members match."
+                    : "No members yet."}
               </p>
             ) : (
-              <ScrollArea orientation="both" className="flex-1 min-h-0 border rounded-lg">
-                {/* border-separate + per-cell borders so sticky header/first-column
-                    cells keep their borders while scrolling. */}
-                <table className="border-separate border-spacing-0 text-sm">
+              <ScrollArea orientation="both" className="flex-1 min-h-0">
+                {/* No grid: zebra rows (sheet-zebra in globals.css) whose cells
+                    paint an opaque shade, so the sticky Member column stays
+                    solid while events scroll under it. */}
+                <table className="sheet-zebra border-separate border-spacing-0 text-sm">
                   <thead>
                     <tr>
-                      <th className="sticky left-0 top-0 z-30 bg-background border-b border-r px-3 py-2 text-left font-medium min-w-[10rem]">
+                      <th className="sticky left-0 top-0 z-40 bg-background px-3 py-2 text-left font-medium min-w-[10rem]">
                         Member
                       </th>
                       {events.map((ev) => (
@@ -725,7 +742,7 @@ export function PortalAttendanceModal({
                       ))}
                       {/* Add-event column: a "+" to the right of the most recent event. */}
                       {canEdit && (
-                        <th className="sticky top-0 z-20 bg-background border-b px-1 py-2 align-bottom w-12">
+                        <th className="sticky top-0 z-30 bg-background px-1 py-2 align-bottom w-12">
                           <button
                             onClick={openCreate}
                             aria-label="Add event"
@@ -739,15 +756,18 @@ export function PortalAttendanceModal({
                     </tr>
                   </thead>
                   <tbody>
-                    {visibleRoster.map((r) => (
-                      <tr key={r.user_id}>
-                        <td className="sticky left-0 z-10 bg-background border-b border-r px-3 py-1.5 min-w-[10rem]">
+                    {visibleRoster.map((r, ri) => (
+                      // Every row fades in (opacity only: a transform on a <tr> breaks the
+                      // sticky cells); a tighter step so a full screen of rows
+                      // staggers, then the rest arrive together.
+                      <tr key={r.user_id} className="animate-in fade-in-0 duration-2 fill-mode-both" style={{ animationDelay: `${Math.min(ri, 24) * 18}ms` }}>
+                        <td className="sticky left-0 z-20 bg-background px-3 py-1.5 min-w-[10rem]">
                           <PersonName userId={r.user_id} name={r.name} className="block truncate" />
                         </td>
                         {events.map((ev) => {
                           const current = attendance[key(ev.id, r.user_id)];
                           return (
-                            <td key={ev.id} className="border-b border-r px-2 py-1.5">
+                            <td key={ev.id} className="px-2 py-1.5">
                               {/* One P/A/E control per cell: the pill slides
                                   to the status in its colour; clicking the
                                   selected one clears it. Arrows only move focus
@@ -777,7 +797,7 @@ export function PortalAttendanceModal({
                           );
                         })}
                         {/* Spacer cell under the add-event column. */}
-                        <td className="border-b w-12" />
+                        <td className="w-12" />
                       </tr>
                     ))}
                   </tbody>

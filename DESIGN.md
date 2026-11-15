@@ -106,7 +106,9 @@ The product is a tool that people use several times a week, so the guiding princ
 
 ## Colors
 
-**Neutrals.** Every neutral token has hue 255 and very low saturation, in both themes, so the two themes read as one product. Light mode is an off-white (`--background: 255 20% 97%`), never pure white. Dark mode sits at 5% lightness, with cards and muted surfaces stepped up from there by small amounts.
+**Neutrals.** Each theme carries a barely-there tint, tuned in `/lab/tint`. Light mode is a cream paper (hue 40, `--background: 40 33% 97%`), never pure white. Dark mode is a navy ink (hue 228, `--background: 228 30% 6%`), with cards and muted surfaces stepped up from there by small amounts.
+
+**Brand accent** (`--brand`, Tailwind `brand` / `brand-foreground`): ember in dark mode (`9 90% 56%`), periwinkle in light (`238 36% 47%`). It is the site's own colour, separate from identity and status colours. Use it for exactly three things: the selected segment (`Segmented` default indicator), the active header tab (badge and hover underline), and text links (`text-brand`, prose links, `SocialLink`). Status and identity colours keep their own meanings; never use brand for them.
 
 **Colour only for meaning.** Use colour for exactly two things:
 
@@ -283,6 +285,21 @@ The tokens live in `globals.css` (`--dur-*`, `--ease-*`), are exposed in Tailwin
 - **Draft rounds.** A round is one `surface` panel of rows, with column labels once at the top (pick order, "n/m confirmed", Picks) instead of repeated per row: position number (turns into the drag grip on hover), project, a success check when confirmed, the pick-count input, and a remove × on hover. "Add project" is a ghost row at the bottom. Picks under each project are indented rows, not cards.
 - **Sheet column help** lives at the top of that column's header menu, not in a native `title`. Native `title` attributes are out everywhere: use `Tooltip`, an `InfoHint`, or an `aria-label`.
 - **Long codes stay on one line**: truncate with `min-w-0 truncate`, show the whole value in a tooltip, and copy the full value on click.
+- **Sliding indicators measure in local pixels.** `useSlidingIndicator` divides rects by the row's current scale (a dialog zooming in is at 0.5 for its first frames) and re-places when the enclosing overlay's animation ends. `Segmented` roots are `isolate` so their `z-10` never competes with sticky table columns.
+- **Menus are non-modal.** `DropdownMenu` defaults to `modal={false}`, so an item that opens a Dialog can't leave `body` unclickable; open such dialogs on the next frame.
+- **Application lists are plain rows.** Applicant rows have no outline, fill or project colour: name, the ⚠ requirements flag (reasons on hover), other projects' wishlist stars, "No application", and actions that appear on hover in flow. Long people lists in the manager use faint dividers (`divide-y divide-foreground/[0.06]`), the one sanctioned use of row rules. No rank ordinals, no glare/shimmer. "Rejected" is the only status word on a row; accepted shows by where someone appears.
+- **Recruiting facts live in the application.** Returning, coffee chat (with hosts), info session and late are a line of labelled icons under the name in the review modal (`RecruitingFacts`), not row badges.
+- **Draft states read as places.** A project's lists only show who is still available; staged picks sit in the draft window, confirmed-but-not-accepted picks under **Invited**, and accepted people under **On the team**.
+- **Simple stats are a line**, not tiles: "296 completed · 18 unfinished · 81 empty | 21 pending · 250 accepted · 25 rejected".
+- **Sheets have no grid.** Attendance, the application sheet and the points ledger use `.sheet-zebra` (globals.css): every other row an opaque 3.5% shade (so sticky first-column cells stay solid), one faint line under the sticky header, `.sheet-hover` for clickable rows. Sticky name cells sit at `z-20`, headers `z-30`, the corner `z-40`. Each sheet has a search box at the left of its toolbar; table rows fade in (opacity only, a transform on a `tr` breaks sticky cells).
+- **"Returning" means a member before this period** (`src/lib/returning.ts`): accepted in an earlier period, on a project team before the period started, or a member today with no acceptance this period or later. Rows, the sheet, the draft page, validity and analytics all use it. The database's `is_returning_member()` still reads current status until a migration changes it.
+- **"Not drafted" has one rule** (`src/lib/draft-status.ts`): eligible (submitted/accepted), no confirmed pick, not placed on a team outside the draft. The board button and list, the draft page and analytics all count with it.
+- **Board columns:** confirmed picks first, then a **Staged** group at the bottom whose rows carry a Draft button (an exec placement). No "Drafted" heading; the head card already says how many.
+- **Sheet loading** uses `SheetGridSkeleton`: the grid's own shape (header, name column, zebra rows, a placeholder per cell; P/A/E chips on the attendance sheet).
+- **Row actions:** hover-only buttons hide themselves individually, so a persistent one (the wishlist's filled star) sits in exactly the slot it has on hover. Event cards keep every action (Google Calendar, .ics, Edit, Delete) in one ⋯ menu.
+- **Pickers are overlays, not modals,** when they act on a spot in a list: the board's "Add member" opens `ApplicantPickerPopover` anchored to the row.
+- **Single-project lists** have a search box and a Filter menu (requirements, returning/first-time, late, wishlisted elsewhere, not taken); filters only hide rows, drag order stays on the full list.
+- **Social marks** are the user's GitHub/LinkedIn SVGs in `currentColor` (`social-link.tsx`).
 - **Coffee chats.**
   - **Card:** roles are one muted comma line. The footer is always `h-9` and shows exactly one of: a "Book a chat" `Button`, muted "No open times", `text-success` check + "Booked", or a read-only summary.
   - **Shared pieces:** `CoffeeTeamGrid` (search, equal-height grid, empty state) and `HostHeader` (the host's name is the page `h1`; roles line; interests), each with its own skeleton.

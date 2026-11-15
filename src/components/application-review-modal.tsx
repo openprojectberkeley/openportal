@@ -17,6 +17,58 @@ import { ProjectApplicationModalSkeleton } from "@/components/skeletons";
 import { resumeSignedUrl } from "@/lib/resume-upload";
 import { techAreaLabel, techClassLabel } from "@/lib/application-profile";
 import { LateBadge } from "@/components/applicant-indicators";
+import { coffeeChatLabel, type CoffeeState } from "@/lib/coffee-chat-indicator";
+import { Coffee, Presentation, RotateCcw } from "lucide-react";
+
+// What the applicant rows used to carry as icons; now said once, in words,
+// inside the application.
+export type RecruitingFacts = {
+  coffee?: CoffeeState | null;
+  coffeeWith?: string[] | null;
+  returning?: boolean;
+  infosession?: boolean;
+};
+
+function RecruitingLine({ facts, lateBadge }: { facts?: RecruitingFacts; lateBadge: React.ReactNode }) {
+  const items: React.ReactNode[] = [];
+  if (facts?.returning) {
+    items.push(
+      <span key="ret" className="inline-flex items-center gap-1 text-info">
+        <RotateCcw size={13} aria-hidden /> Returning member
+      </span>,
+    );
+  }
+  if (facts?.coffee && facts.coffee !== "none") {
+    const done = facts.coffee === "done";
+    items.push(
+      <span key="coffee" className={`inline-flex items-center gap-1 ${done ? "text-success" : "text-warning"}`}>
+        <Coffee size={13} aria-hidden /> {coffeeChatLabel(facts.coffee, facts.coffeeWith)}
+      </span>,
+    );
+  } else if (facts && facts.coffee !== undefined && !facts.returning) {
+    items.push(
+      <span key="coffee" className="inline-flex items-center gap-1 text-muted-foreground">
+        <Coffee size={13} aria-hidden /> No coffee chat
+      </span>,
+    );
+  }
+  if (facts?.infosession) {
+    items.push(
+      <span key="info" className="inline-flex items-center gap-1 text-info">
+        <Presentation size={13} aria-hidden /> Attended an info session
+      </span>,
+    );
+  } else if (facts && facts.infosession === false && !facts.returning) {
+    items.push(
+      <span key="info" className="inline-flex items-center gap-1 text-muted-foreground">
+        <Presentation size={13} aria-hidden /> No info session
+      </span>,
+    );
+  }
+  if (lateBadge) items.push(<span key="late">{lateBadge}</span>);
+  if (items.length === 0) return null;
+  return <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-medium">{items}</div>;
+}
 import { optimistic } from "@/lib/optimistic";
 import { useConfirm } from "@/components/ui/use-confirm";
 
@@ -81,6 +133,7 @@ export function ApplicationReviewModal({
   onOpenChange,
   onReviewed,
   readOnly = false,
+  recruiting,
 }: {
   applicationId: string;
   applicantName: string;
@@ -99,6 +152,8 @@ export function ApplicationReviewModal({
   // board, which just surfaces application info -- placement happens via the
   // draft flow, not manual accept/reject).
   readOnly?: boolean;
+  // Returning / coffee / info session, from the row that opened this.
+  recruiting?: RecruitingFacts;
 }) {
   const { ask, dialog: confirmDialog } = useConfirm();
   const [loading, setLoading] = useState(true);
@@ -295,8 +350,11 @@ export function ApplicationReviewModal({
             {applicantName}
             {status === "accepted" && <span className="text-sm font-medium text-success">· Accepted</span>}
             {status === "rejected" && <span className="text-sm font-medium text-destructive">· Rejected</span>}
-            <LateBadge submittedAt={submittedAt} endsAt={periodEndsAt} />
           </DialogTitle>
+          <RecruitingLine
+            facts={recruiting}
+            lateBadge={<LateBadge submittedAt={submittedAt} endsAt={periodEndsAt} className="text-xs" />}
+          />
         </DialogHeader>
 
         {loading ? (
@@ -520,7 +578,7 @@ function ApplicantDetails({
                 href={portfolioUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="self-start text-sm text-primary underline underline-offset-2 break-all"
+                className="self-start text-sm text-brand hover:text-brand/80 underline underline-offset-2 break-all"
               >
                 {portfolioUrl}
               </a>

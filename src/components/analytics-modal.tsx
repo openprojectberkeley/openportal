@@ -9,25 +9,32 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { RecruitingAnalyticsBody } from "@/components/application-analytics-modal";
-import { ProjectAnalyticsBody } from "@/components/project-analytics-modal";
 import { TabStrip } from "@/components/ui/tab-strip";
+import { InfoHint } from "@/components/ui/info-hint";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  ApplicantsTab,
+  BarsSkeleton,
+  OverviewTab,
+  RetentionTab,
+} from "@/components/application-analytics-modal";
+import { ProjectsSkeleton, ProjectsTab } from "@/components/project-analytics-modal";
+import { useRecruitingAnalytics } from "@/lib/use-recruiting-analytics";
 
 export type AnalyticsPeriod = { id: string; name: string };
 
-type Tab = "recruiting" | "projects";
-const TABS: { key: Tab; label: string }[] = [
-  { key: "recruiting", label: "Recruiting" },
-  { key: "projects", label: "Projects" },
+type Tab = "overview" | "applicants" | "retention" | "projects";
+const TABS: { value: Tab; label: string }[] = [
+  { value: "overview", label: "Overview" },
+  { value: "applicants", label: "Applicants" },
+  { value: "retention", label: "Retention" },
+  { value: "projects", label: "Projects" },
 ];
 
-// Exec analytics for one application period, in two tabs: the recruiting funnel
-// (coffee/info validity, demographics, history) and the project × rank demand
-// matrix. The period picker lives here rather than in either body, so switching
-// tabs never switches what you're looking at.
-//
-// Only the active tab's body is mounted, and Radix unmounts DialogContent on
-// close -- so each body fetches on mount instead of guarding on `open`.
+// Exec recruiting analytics for one application period. The period picker and
+// the single fetch (useRecruitingAnalytics) live here, so switching tabs never
+// refetches or changes what you're looking at. Radix unmounts DialogContent on
+// close, so the hook refetches on every open.
 export function AnalyticsModal({
   open,
   onOpenChange,
@@ -39,7 +46,6 @@ export function AnalyticsModal({
   periods: AnalyticsPeriod[];
   initialPeriodId: string | null;
 }) {
-  const [tab, setTab] = useState<Tab>("recruiting");
   const [periodId, setPeriodId] = useState<string | null>(initialPeriodId);
 
   // Re-seed from the page's selected period on each open, so the modal always
@@ -48,46 +54,111 @@ export function AnalyticsModal({
     if (open) setPeriodId(initialPeriodId);
   }, [open, initialPeriodId]);
 
-  const periodName = periods.find((p) => p.id === periodId)?.name ?? "Select period";
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+      <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto overflow-x-hidden">
         <DialogHeader>
           <DialogTitle>Analytics</DialogTitle>
         </DialogHeader>
-
-        <div className="flex flex-col gap-5">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button className="flex items-center justify-between gap-2 self-start rounded-md border bg-background px-3 py-2 text-sm hover:bg-accent transition-colors min-w-[12rem]">
-                <span className="font-medium">{periodName}</span>
-                <ChevronDown size={14} className="text-muted-foreground" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start">
-              {periods.map((p) => (
-                <DropdownMenuItem key={p.id} onSelect={() => setPeriodId(p.id)}>
-                  {p.name}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-
-          <TabStrip
-            aria-label="Analytics view"
-            value={tab}
-            onChange={setTab}
-            tabs={TABS.map((t) => ({ value: t.key, label: t.label }))}
-          />
-
-          {tab === "recruiting" ? (
-            <RecruitingAnalyticsBody periodId={periodId} onPeriodChange={setPeriodId} />
-          ) : (
-            <ProjectAnalyticsBody periodId={periodId} />
-          )}
-        </div>
+        {open && <AnalyticsBody periods={periods} periodId={periodId} onPeriodChange={setPeriodId} />}
       </DialogContent>
     </Dialog>
+  );
+}
+
+function AnalyticsBody({
+  periods,
+  periodId,
+  onPeriodChange,
+}: {
+  periods: AnalyticsPeriod[];
+  periodId: string | null;
+  onPeriodChange: (id: string) => void;
+}) {
+  const [tab, setTab] = useState<Tab>("overview");
+  const { data, loading, error } = useRecruitingAnalytics(periodId);
+  const periodName = periods.find((p) => p.id === periodId)?.name ?? "Select period";
+
+  return (
+    <div className="flex min-w-0 flex-col gap-5">
+      <div className="flex items-center gap-2">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button className="flex min-w-[12rem] items-center justify-between gap-2 rounded-md border border-input px-3 py-2 text-sm transition-colors hover:bg-foreground/[0.04]">
+              <span className="font-medium">{periodName}</span>
+              <ChevronDown size={14} className="text-muted-foreground" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            {periods.map((p) => (
+              <DropdownMenuItem key={p.id} onSelect={() => onPeriodChange(p.id)}>
+                {p.name}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <InfoHint side="right">
+          Requirement checks use each person&apos;s member status today, not when they applied. Returning means
+          accepted in an earlier period, or a member today with no later acceptance. Exec-added draft entries
+          aren&apos;t counted as applicants.
+        </InfoHint>
+      </div>
+
+      <TabStrip
+        aria-label="Analytics view"
+        idPrefix="analytics-tab"
+        panelId={(v) => `analytics-panel-${v}`}
+        value={tab}
+        onChange={setTab}
+        tabs={TABS}
+      />
+
+      <div id={`analytics-panel-${tab}`} role="tabpanel" aria-labelledby={`analytics-tab-${tab}`} className="min-w-0">
+        {!periodId ? (
+          <p className="text-sm text-muted-foreground">No application periods yet.</p>
+        ) : error ? (
+          <p className="text-sm text-destructive">{error}</p>
+        ) : loading || !data ? (
+          <TabSkeleton tab={tab} />
+        ) : tab === "overview" ? (
+          <OverviewTab data={data} />
+        ) : tab === "applicants" ? (
+          <ApplicantsTab data={data} />
+        ) : tab === "retention" ? (
+          <RetentionTab data={data} periodId={periodId} onPeriodChange={onPeriodChange} />
+        ) : (
+          <ProjectsTab data={data} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TabSkeleton({ tab }: { tab: Tab }) {
+  if (tab === "projects") return <ProjectsSkeleton />;
+  if (tab === "applicants") return <BarsSkeleton rows={5} sections={3} />;
+  if (tab === "retention") {
+    return (
+      <div className="flex flex-col gap-6" aria-busy>
+        <Skeleton className="h-7 w-72 rounded-full" />
+        <BarsSkeleton rows={2} />
+        <div className="flex flex-col gap-2">
+          {Array.from({ length: 5 }, (_, i) => (
+            <Skeleton key={i} className="h-3.5 w-full rounded-full" />
+          ))}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-8" aria-busy>
+      <div className="flex flex-wrap gap-6">
+        {Array.from({ length: 5 }, (_, i) => (
+          <Skeleton key={i} className="h-7 w-28 rounded-full" />
+        ))}
+      </div>
+      <BarsSkeleton rows={5} />
+      <BarsSkeleton rows={4} />
+    </div>
   );
 }

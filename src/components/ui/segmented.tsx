@@ -12,7 +12,7 @@ export type SegmentedOption<T extends string> = {
   disabled?: boolean;
   /** Colour of the sliding pill while this option is selected (e.g. a status). */
   indicatorClassName?: string;
-  /** Text colour while selected; defaults to text-background. */
+  /** Text colour while selected; defaults to text-brand-foreground. */
   selectedTextClassName?: string;
 };
 
@@ -90,7 +90,7 @@ export function Segmented<T extends string>({
       role="radiogroup"
       aria-label={ariaLabel}
       className={cn(
-        "relative inline-flex items-center gap-0.5 border p-0.5",
+        "relative isolate inline-flex items-center gap-0.5 border p-0.5",
         shape === "pill" ? "rounded-full" : shape === "soft" ? "rounded-md" : "rounded-lg",
         className,
       )}
@@ -100,7 +100,7 @@ export function Segmented<T extends string>({
         aria-hidden
         className={cn(
           "pointer-events-none absolute inset-0 opacity-0 transition-[clip-path,background-color] duration-2 ease-out-cubic motion-reduce:transition-none",
-          selectedOption?.indicatorClassName ?? "bg-foreground",
+          selectedOption?.indicatorClassName ?? "bg-brand",
         )}
       />
       {options.map((o, i) => {
@@ -126,7 +126,7 @@ export function Segmented<T extends string>({
               "relative z-10 font-medium transition-colors duration-2 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-40",
               shape === "pill" ? "rounded-full" : shape === "soft" ? "rounded-sm" : size === "xs" ? "rounded" : "rounded-md",
               size === "xs" ? "px-2 py-0.5 text-xs" : size === "sm" ? "px-3 py-1 text-xs" : "px-3 py-1.5 text-sm",
-              selected ? (o.selectedTextClassName ?? "text-background") : "text-muted-foreground hover:text-foreground",
+              selected ? (o.selectedTextClassName ?? "text-brand-foreground") : "text-muted-foreground hover:text-foreground",
               itemClassName,
             )}
           >

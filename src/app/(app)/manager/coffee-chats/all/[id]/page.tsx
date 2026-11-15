@@ -166,7 +166,7 @@ function ViewAvailabilityInner() {
                     href={person.defaultLocation}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="underline decoration-dotted underline-offset-2 hover:text-foreground break-all"
+                    className="underline decoration-dotted underline-offset-2 text-brand hover:text-brand/80 break-all"
                   >
                     {person.defaultLocation}
                   </a>

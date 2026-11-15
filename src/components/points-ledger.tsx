@@ -178,29 +178,29 @@ export function PointsLedger({
 
       {error && <p className="text-sm text-destructive">{error}</p>}
 
-      <div className="border rounded-lg overflow-x-auto">
-        <table className="w-full text-sm border-separate border-spacing-0">
+      <div className="overflow-x-auto">
+        <table className="sheet-zebra w-full text-sm border-separate border-spacing-0">
           <thead>
             <tr className="text-left text-xs uppercase tracking-wide text-muted-foreground">
-              <th className="px-3 py-2 font-semibold border-b">Date</th>
-              <th className="px-3 py-2 font-semibold border-b">Project</th>
-              <th className="px-3 py-2 font-semibold border-b">Family</th>
-              <th className="px-3 py-2 font-semibold border-b text-right">Points</th>
-              <th className="px-3 py-2 font-semibold border-b">Reason</th>
-              <th className="px-3 py-2 font-semibold border-b">By</th>
-              {!readOnly && <th className="px-3 py-2 font-semibold border-b" />}
+              <th className="px-3 py-2font-semibold font-semibold">Date</th>
+              <th className="px-3 py-2font-semibold font-semibold">Project</th>
+              <th className="px-3 py-2font-semibold font-semibold">Family</th>
+              <th className="px-3 py-2font-semibold font-semibold text-right">Points</th>
+              <th className="px-3 py-2font-semibold font-semibold">Reason</th>
+              <th className="px-3 py-2font-semibold font-semibold">By</th>
+              {!readOnly && <th className="px-3 py-2font-semibold font-semibold" />}
             </tr>
           </thead>
           <tbody>
             {pageRows.map((e) => {
               const isVoid = e.voided_at !== null;
               return (
-                <tr key={e.id} className={isVoid ? "line-through opacity-50" : undefined}>
-                  <td className="px-3 py-2 border-b whitespace-nowrap text-muted-foreground">
+                <tr key={e.id} className={isVoid ? "line-through opacity-50" : "animate-in fade-in-0 duration-2 fill-mode-both"}>
+                  <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">
                     {formatDay(e.awarded_on)}
                   </td>
-                  <td className="px-3 py-2 border-b">{e.project_name}</td>
-                  <td className="px-3 py-2 border-b whitespace-nowrap">
+                  <td className="px-3 py-2">{e.project_name}</td>
+                  <td className="px-3 py-2 whitespace-nowrap">
                     {e.family_id ? (
                       <span className="flex items-center gap-1.5">
                         <span
@@ -211,18 +211,18 @@ export function PointsLedger({
                         {e.family_name}
                       </span>
                     ) : (
-                      <span className="text-amber-600 dark:text-amber-500 text-xs">No family</span>
+                      <span className="text-warning text-xs">No family</span>
                     )}
                   </td>
                   <td
-                    className={`px-3 py-2 border-b text-right tabular-nums font-semibold ${
-                      e.points < 0 ? "text-red-600 dark:text-red-400" : ""
+                    className={`px-3 py-2 text-right tabular-nums font-semibold ${
+                      e.points < 0 ? "text-destructive" : ""
                     }`}
                   >
                     {formatPoints(e.points)}
                   </td>
-                  <td className="px-3 py-2 border-b max-w-xs">{e.reason}</td>
-                  <td className="px-3 py-2 border-b whitespace-nowrap text-muted-foreground">
+                  <td className="px-3 py-2 max-w-xs">{e.reason}</td>
+                  <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">
                     {e.awarded_by ? (
                       <PersonName userId={e.awarded_by} name={e.awarded_by_name ?? "Unknown"} />
                     ) : (
@@ -230,13 +230,13 @@ export function PointsLedger({
                     )}
                   </td>
                   {!readOnly && (
-                    <td className="px-3 py-2 border-b text-right whitespace-nowrap">
+                    <td className="px-3 py-2 text-right whitespace-nowrap">
                       {isVoid ? (
                         <span className="text-xs text-muted-foreground no-underline">voided</span>
                       ) : (
                         <button
                           onClick={() => setVoiding(e)}
-                          className="text-xs text-muted-foreground hover:text-red-500 transition-colors"
+                          className="text-xs text-muted-foreground hover:text-destructive transition-colors"
                         >
                           Void
                         </button>

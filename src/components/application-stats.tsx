@@ -1,6 +1,7 @@
 // Exec-only application funnel stats for one period, shown on the Applications
 // manager page above the list. Fed by the `application_period_stats` RPC (0053).
-// `stats === null` renders a loading skeleton so it doesn't flash.
+// One compact line, not tiles: the numbers are simple. `stats === null`
+// renders a text-line skeleton so it doesn't flash.
 
 export type Stats = {
   empty_drafts: number;
@@ -10,41 +11,35 @@ export type Stats = {
   rejected: number;
 };
 
-function Tile({ label, value }: { label: string; value: number }) {
+function Stat({ value, label }: { value: number; label: string }) {
   return (
-    <div className="rounded-xl surface rim-card px-4 py-3">
-      <div className="text-2xl font-bold tabular-nums">{value}</div>
-      <div className="text-xs text-muted-foreground">{label}</div>
-    </div>
+    <span>
+      <span className="font-medium tabular-nums text-foreground">{value}</span> {label}
+    </span>
   );
 }
 
 export function ApplicationStats({ stats }: { stats: Stats | null }) {
   if (stats === null) {
-    return (
-      <div className="flex flex-col gap-2">
-        <div className="grid grid-cols-3 gap-3">
-          {[0, 1, 2].map((i) => (
-            <div key={i} className="h-[4.75rem] rounded-xl bg-foreground/[0.09] animate-pulse" />
-          ))}
-        </div>
-        <div className="h-3 w-48 rounded bg-foreground/[0.09] animate-pulse" />
-      </div>
-    );
+    return <span className="block h-3.5 w-96 max-w-full animate-pulse rounded-full bg-foreground/[0.09]" aria-hidden />;
   }
 
   const completed = stats.submitted + stats.accepted + stats.rejected;
+  const dot = <span aria-hidden className="text-muted-foreground/50">·</span>;
 
   return (
-    <div className="flex flex-col gap-2">
-      <div className="grid grid-cols-3 gap-3">
-        <Tile label="Empty" value={stats.empty_drafts} />
-        <Tile label="Unfinished" value={stats.unfinished_drafts} />
-        <Tile label="Completed" value={completed} />
-      </div>
-      <p className="text-xs text-muted-foreground tabular-nums">
-        Pending review {stats.submitted} · Accepted {stats.accepted} · Rejected {stats.rejected}
-      </p>
-    </div>
+    <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground animate-fade-in-up">
+      <Stat value={completed} label="completed" />
+      {dot}
+      <Stat value={stats.unfinished_drafts} label="unfinished" />
+      {dot}
+      <Stat value={stats.empty_drafts} label="empty" />
+      <span aria-hidden className="mx-1 h-3.5 w-px bg-foreground/15" />
+      <Stat value={stats.submitted} label="pending" />
+      {dot}
+      <Stat value={stats.accepted} label="accepted" />
+      {dot}
+      <Stat value={stats.rejected} label="rejected" />
+    </p>
   );
 }

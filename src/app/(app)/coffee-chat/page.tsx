@@ -307,7 +307,7 @@ export default function CoffeeChatPage() {
               <p className="flex items-center gap-1 text-xs text-muted-foreground min-w-0">
                 <MapPin size={12} className="flex-shrink-0" aria-hidden />
                 {/^https?:\/\//.test(b.location) ? (
-                  <a href={b.location} target="_blank" rel="noopener noreferrer" className="underline decoration-dotted underline-offset-2 hover:text-foreground truncate">
+                  <a href={b.location} target="_blank" rel="noopener noreferrer" className="underline decoration-dotted underline-offset-2 text-brand hover:text-brand/80 truncate">
                     {b.location}
                   </a>
                 ) : (

@@ -88,7 +88,7 @@ export function ForgotPasswordForm() {
       </Button>
       <Link
         href="/auth/login"
-        className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
+        className="text-sm text-brand underline underline-offset-4 hover:text-brand/80"
       >
         Back to sign in
       </Link>

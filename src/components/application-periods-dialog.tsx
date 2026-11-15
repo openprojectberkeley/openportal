@@ -425,18 +425,19 @@ function PeriodRow({
   onChanged,
   canManageExtendedAccess,
   allMembers,
+  ask,
 }: {
   period: ApplicationPeriod;
   onChanged: () => void;
   canManageExtendedAccess: boolean;
   allMembers: MemberOption[];
+  ask: ReturnType<typeof useConfirm>["ask"];
 }) {
   const [name, setName] = useState(period.name);
   const [start, setStart] = useState(toDateTimeLocal(period.starts_at));
   const [end, setEnd] = useState(toDateTimeLocal(period.ends_at));
   const [status, setStatus] = useState<PeriodStatus>(period.status);
   const [deleting, setDeleting] = useState(false);
-  const { ask, dialog: confirmDialog } = useConfirm();
   const [error, setError] = useState<string | null>(null);
 
   const dirty =
@@ -496,7 +497,6 @@ function PeriodRow({
 
   return (
     <div className="flex flex-col gap-2.5 rounded-lg surface p-3">
-      {confirmDialog}
       <div className="flex items-center gap-2">
         <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Period name" />
         <Button
@@ -635,6 +635,8 @@ export function ApplicationPeriodsDialog({
   // readable by any authenticated user, so this is just avoiding N duplicate
   // fetches for N periods.
   const [allMembers, setAllMembers] = useState<MemberOption[]>([]);
+  // One confirm dialog for every period row.
+  const { ask, dialog: confirmDialog } = useConfirm();
 
   useEffect(() => {
     if (!open || !canManageExtendedAccess) return;
@@ -655,6 +657,7 @@ export function ApplicationPeriodsDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+        {confirmDialog}
         <DialogHeader>
           <DialogTitle>Application periods</DialogTitle>
         </DialogHeader>
@@ -666,6 +669,7 @@ export function ApplicationPeriodsDialog({
               onChanged={onChanged}
               canManageExtendedAccess={canManageExtendedAccess}
               allMembers={allMembers}
+              ask={ask}
             />
           ))}
           <NewPeriodForm onChanged={onChanged} />

@@ -39,10 +39,14 @@ import {
   techClassLabel,
 } from "@/lib/application-profile";
 import { csvSlug, downloadCsv } from "@/lib/csv";
-import { isReturningMember, type MemberStatus } from "@/lib/member-status";
+import { type MemberStatus } from "@/lib/member-status";
 import { cn, compareReviewPriority, isLate, isRecruitingValid } from "@/lib/utils";
 import { optimistic } from "@/lib/optimistic";
 import { Combobox, splitList } from "@/components/ui/combobox";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { InfoHint } from "@/components/ui/info-hint";
+import { fetchReturningForPeriod } from "@/lib/returning";
+import { SheetGridSkeleton } from "@/components/skeletons";
 
 type PageProject = { id: string; name: string; type: string; essay_prompt: string | null };
 
@@ -692,6 +696,8 @@ export function ApplicationSheetModal({
 
       const { memById, coffeeById, completedWith, coffeeWithById, coffeeHostIdsById, attendedInfo, boardExecIds } =
         await loadApplicantContext(supabase, ids);
+      // Returning = a member before this period (src/lib/returning.ts).
+      const returningIds = await fetchReturningForPeriod(supabase, ids, periodId);
 
       const next: SheetRow[] = raw.map((r) => {
         const aid = r.applicant_id ?? "";
@@ -706,7 +712,7 @@ export function ApplicationSheetModal({
           .map(([k]) => techAreaLabel(k));
 
         const memberStatus = (m?.status as MemberStatus | null | undefined) ?? null;
-        const returning = isReturningMember(memberStatus);
+        const returning = returningIds.has(aid);
         const coffee = coffeeById[aid] ?? "none";
         const infosession = attendedInfo.has(aid);
         // Board/exec members and returning members are auto-valid; everyone
@@ -1094,8 +1100,9 @@ export function ApplicationSheetModal({
     return cols;
   }, [isOverview, isStudio, slots, questions, periodEndsAt]);
 
-  const th = "sticky top-0 z-20 bg-background border-b border-r px-2 py-1.5 text-left text-xs font-medium text-muted-foreground whitespace-nowrap";
-  const td = "border-b border-r px-2 py-1.5 text-xs align-middle";
+  // No grid lines: rows alternate (sheet-zebra in globals.css).
+  const th = "sticky top-0 z-30 bg-background px-2 py-2 text-left text-xs font-medium text-muted-foreground whitespace-nowrap";
+  const td = "px-2 py-1.5 text-xs align-middle";
   // Essay and question prompts are full sentences. Pinning those columns to a
   // definite width is what lets the header and cell text truncate instead of
   // stretching the column, which matters once a project has many questions.
@@ -1179,11 +1186,14 @@ export function ApplicationSheetModal({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex h-[90vh] max-w-[95vw] flex-col gap-3 overflow-hidden p-4 sm:p-5">
         <DialogHeader>
-          <DialogTitle>
+          <DialogTitle className="flex flex-wrap items-center gap-x-2">
             Sheet view{title ? ` · ${title}` : ""}
             {rows ? (
-              <span className="ml-2 text-sm font-normal text-muted-foreground tabular-nums">
-                {filtered.length}/{rows.length} · Valid {validCount} ({pct(validCount, filtered.length)}%)
+              <span className="flex items-center gap-1.5 text-sm font-normal text-muted-foreground tabular-nums">
+                {filtered.length === rows.length ? rows.length : `${filtered.length} of ${rows.length}`} · {pct(validCount, filtered.length)}% valid
+                <InfoHint label="What valid means">
+                  Board/exec or returning, or completed a coffee chat and attended an info session.
+                </InfoHint>
               </span>
             ) : null}
           </DialogTitle>
@@ -1195,67 +1205,78 @@ export function ApplicationSheetModal({
             project) sits outside the table so an empty page doesn't strand the
             reviewer with no way forward. */}
         <div className="flex shrink-0 flex-wrap items-center gap-2">
-          {allProjects && pages && pages.length > 0 && (
-            <>
-              <Button
-                size="icon"
-                variant="outline"
-                className="h-7 w-7"
-                aria-label="Previous page"
-                disabled={safeProjectPage === 0}
-                onClick={() => setProjectPage(safeProjectPage - 1)}
-              >
-                <ChevronLeft size={14} />
-              </Button>
-              <Combobox
-                aria-label="Jump to page"
-                className="h-7 min-h-7 w-auto min-w-40 px-2.5 py-1 text-xs"
-                contentClassName="w-64"
-                value={String(safeProjectPage)}
-                onChange={(v) => setProjectPage(Number(v))}
-                options={pages.map((p, i) => ({
-                  value: String(i),
-                  label: p.kind === "overview" ? "All applicants" : p.project.name,
-                }))}
-                placeholder="Select page"
-                searchPlaceholder="Jump to project…"
-              />
-              <Button
-                size="icon"
-                variant="outline"
-                className="h-7 w-7"
-                aria-label="Next page"
-                disabled={safeProjectPage >= pages.length - 1}
-                onClick={() => setProjectPage(safeProjectPage + 1)}
-              >
-                <ChevronRight size={14} />
-              </Button>
-              <span className="text-xs text-muted-foreground tabular-nums">
-                Page {safeProjectPage + 1} / {pages.length}
-              </span>
-            </>
-          )}
-
-          <div className="relative ml-auto">
-            <Search size={13} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <div className="relative">
+            <Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" aria-hidden />
             <Input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search name, answers…"
-              className="h-7 w-56 pl-7 text-xs"
+              aria-label="Search applicants"
+              className="h-8 w-64 pl-8 text-xs"
             />
           </div>
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-7 px-2 text-xs"
-            disabled={filtered.length === 0}
-            onClick={exportCsv}
-            aria-label="Export CSV: the rows below, with full essay and answer text"
-          >
-            <Download size={13} className="mr-1" />
-            Export CSV
-          </Button>
+          {anyFilterActive && (
+            <Button variant="ghost" size="sm" className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground" onClick={clearAllFilters}>
+              <X size={13} className="mr-1" /> Clear filters
+            </Button>
+          )}
+
+          <div className="ml-auto flex items-center gap-2">
+            {allProjects && pages && pages.length > 0 && (
+              // Which project page you're on (searchable, to jump), between arrows.
+              <nav aria-label="Sheet pages" className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Button
+                  size="icon"
+                  variant="outline"
+                  className="h-7 w-7"
+                  aria-label="Previous page"
+                  disabled={safeProjectPage === 0}
+                  onClick={() => setProjectPage(safeProjectPage - 1)}
+                >
+                  <ChevronLeft size={14} />
+                </Button>
+                <Combobox
+                  aria-label="Jump to page"
+                  className="h-7 min-h-7 w-auto min-w-36 border-transparent bg-transparent px-2 py-1 text-xs shadow-none hover:bg-accent"
+                  contentClassName="w-64"
+                  value={String(safeProjectPage)}
+                  onChange={(v) => setProjectPage(Number(v))}
+                  options={pages.map((p, i) => ({
+                    value: String(i),
+                    label: p.kind === "overview" ? "All applicants" : p.project.name,
+                  }))}
+                  placeholder="Select page"
+                  searchPlaceholder="Jump to project…"
+                />
+                <span className="tabular-nums">{safeProjectPage + 1} / {pages.length}</span>
+                <Button
+                  size="icon"
+                  variant="outline"
+                  className="h-7 w-7"
+                  aria-label="Next page"
+                  disabled={safeProjectPage >= pages.length - 1}
+                  onClick={() => setProjectPage(safeProjectPage + 1)}
+                >
+                  <ChevronRight size={14} />
+                </Button>
+              </nav>
+            )}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                  disabled={filtered.length === 0}
+                  onClick={exportCsv}
+                  aria-label="Export CSV"
+                >
+                  <Download size={15} />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Export CSV: these rows, with full essays and answers</TooltipContent>
+            </Tooltip>
+          </div>
         </div>
 
         {pages?.length === 0 ? (
@@ -1263,7 +1284,7 @@ export function ApplicationSheetModal({
             <p className="text-sm text-muted-foreground">No projects to review.</p>
           </div>
         ) : rows === null ? (
-          <div className="flex-1 min-h-[20rem] rounded-lg border bg-foreground/[0.09] animate-pulse" />
+          <SheetGridSkeleton rows={14} columns={[40, 120, 120, 64, 64, 64, 64, 160, 160, 72]} />
         ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center gap-3 py-10">
             <p className="text-sm text-muted-foreground">
@@ -1280,11 +1301,11 @@ export function ApplicationSheetModal({
             )}
           </div>
         ) : (
-          <ScrollArea orientation="both" className="min-h-0 flex-1 border rounded-lg">
-            <table className="w-full border-separate border-spacing-0 text-sm">
+          <ScrollArea orientation="both" className="min-h-0 flex-1">
+            <table className="sheet-zebra sheet-hover w-full border-separate border-spacing-0 text-sm">
               <thead>
                 <tr>
-                  <th className={cn(th, "left-0 z-30 min-w-[10rem]")}>
+                  <th className={cn(th, "left-0 z-40 min-w-[10rem]")}>
                     <HeaderMenu label="Name" columnKey="name" sort={effectiveSort} onSort={setSort} menu={menu} />
                   </th>
                   {!isOverview && (
@@ -1508,8 +1529,8 @@ export function ApplicationSheetModal({
                       />
                     </HeaderMenu>
                   </th>
-                  <th className={cn(th, !allProjects && "border-r-0")}> </th>
-                  {allProjects && <th className={cn(th, "border-r-0")}> </th>}
+                  <th className={th}> </th>
+                  {allProjects && <th className={th}> </th>}
                 </tr>
               </thead>
               <tbody>
@@ -1519,8 +1540,8 @@ export function ApplicationSheetModal({
                     ...(r.techClassesOther?.trim() ? [r.techClassesOther.trim()] : []),
                   ];
                   return (
-                    <tr key={r.id} className="hover:bg-accent/40">
-                      <td className={cn(td, "sticky left-0 z-10 bg-background min-w-[10rem]")}>
+                    <tr key={r.id}>
+                      <td className={cn(td, "sticky left-0 z-20 bg-background min-w-[10rem]")}>
                         <PersonName userId={r.applicantId || undefined} name={r.name} className="block truncate font-medium" />
                       </td>
                       {!isOverview && (
@@ -1549,7 +1570,7 @@ export function ApplicationSheetModal({
                                 {choice.name}
                               </button>
                             ) : (
-                              <span className="text-muted-foreground">—</span>
+                              null
                             )}
                           </td>
                         );
@@ -1581,7 +1602,7 @@ export function ApplicationSheetModal({
                             onSaved={(next) => onCoffeeSaved(r.applicantId, next)}
                           />
                         ) : r.coffee === "none" ? (
-                          <span className="text-muted-foreground">—</span>
+                          null
                         ) : (
                           <CoffeeChatIndicator state={r.coffee} withNames={r.coffeeWith} />
                         )}
@@ -1590,7 +1611,7 @@ export function ApplicationSheetModal({
                         <td className={td}>
                           {r.projectCoffee === null ? (
                             // Launch project: no PM chat requirement to report.
-                            <span className="text-muted-foreground">—</span>
+                            null
                           ) : r.projectCoffee === "met" ? (
                             <span className="inline-flex items-center gap-0.5 text-success" aria-label="Completed coffee with a project PM">
                               <Check size={14} className="stroke-[3]" /> Met
@@ -1614,7 +1635,7 @@ export function ApplicationSheetModal({
                         ) : r.infosession ? (
                           <InfosessionIndicator attended />
                         ) : (
-                          <span className="text-muted-foreground">—</span>
+                          null
                         )}
                       </td>
                       <td className={td}>
@@ -1623,7 +1644,7 @@ export function ApplicationSheetModal({
                             <Check size={14} className="stroke-[3]" /> Valid
                           </span>
                         ) : (
-                          <span className="text-muted-foreground">—</span>
+                          null
                         )}
                       </td>
                       <td className={cn(td, "max-w-[12rem]")} title={classLabels.join(", ")}>
@@ -1636,7 +1657,7 @@ export function ApplicationSheetModal({
                             {classLabels.join(", ")}
                           </button>
                         ) : (
-                          <span className="text-muted-foreground">—</span>
+                          null
                         )}
                       </td>
                       <td className={cn(td, "max-w-[12rem]")} title={r.topAreas.join(", ")}>
@@ -1649,7 +1670,7 @@ export function ApplicationSheetModal({
                             {r.topAreas.join(", ")}
                           </button>
                         ) : (
-                          <span className="text-muted-foreground">—</span>
+                          null
                         )}
                       </td>
                       <td className={td}>
@@ -1658,12 +1679,12 @@ export function ApplicationSheetModal({
                             href={r.portfolioUrl}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="text-foreground underline underline-offset-2 hover:text-foreground/70"
+                            className="text-brand underline underline-offset-2 hover:text-brand/80"
                           >
                             Link
                           </a>
                         ) : (
-                          <span className="text-muted-foreground">—</span>
+                          null
                         )}
                       </td>
                       {isOverview && (
@@ -1677,7 +1698,7 @@ export function ApplicationSheetModal({
                               {r.aboutNote.trim()}
                             </button>
                           ) : (
-                            <span className="text-muted-foreground">—</span>
+                            null
                           )}
                         </td>
                       )}
@@ -1692,7 +1713,7 @@ export function ApplicationSheetModal({
                               {r.essay.trim()}
                             </button>
                           ) : (
-                            <span className="text-muted-foreground">—</span>
+                            null
                           )}
                         </td>
                       )}
@@ -1709,7 +1730,7 @@ export function ApplicationSheetModal({
                                 {value}
                               </button>
                             ) : (
-                              <span className="text-muted-foreground">—</span>
+                              null
                             )}
                           </td>
                         );
@@ -1732,10 +1753,10 @@ export function ApplicationSheetModal({
                         ) : r.status === "rejected" ? (
                           <span className="font-medium text-destructive">Rejected</span>
                         ) : (
-                          <span className="text-muted-foreground">—</span>
+                          null
                         )}
                       </td>
-                      <td className={cn(td, !allProjects && "border-r-0")}>
+                      <td className={td}>
                         <Button
                           size="sm"
                           variant="outline"
@@ -1746,7 +1767,7 @@ export function ApplicationSheetModal({
                         </Button>
                       </td>
                       {allProjects && (
-                        <td className={cn(td, "border-r-0")}>
+                        <td className={td}>
                           <Button
                             size="sm"
                             variant="destructive"
@@ -1770,7 +1791,7 @@ export function ApplicationSheetModal({
         {rows && filtered.length > PAGE_SIZE && (
           <div className="flex shrink-0 items-center justify-between text-xs text-muted-foreground">
             <span className="tabular-nums">
-              Showing {safePage * PAGE_SIZE + 1}–{safePage * PAGE_SIZE + pageRows.length} of {filtered.length}
+              {safePage * PAGE_SIZE + 1}–{safePage * PAGE_SIZE + pageRows.length} of {filtered.length}
             </span>
             <div className="flex items-center gap-2">
               <Button

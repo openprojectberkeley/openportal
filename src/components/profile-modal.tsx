@@ -233,7 +233,7 @@ function Section({
                   href={row.href}
                   target={row.href.startsWith("http") ? "_blank" : undefined}
                   rel="noreferrer"
-                  className="underline underline-offset-2 hover:text-foreground/70"
+                  className="underline underline-offset-2 text-brand hover:text-brand/80"
                 >
                   {row.value}
                 </a>

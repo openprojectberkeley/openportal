@@ -4,11 +4,11 @@ import { useState } from "react";
 import { useDroppable } from "@dnd-kit/core";
 import { Lock } from "lucide-react";
 
-import { accentFill } from "@/lib/portal-color";
 import { Button } from "@/components/ui/button";
 import { StaticApplicantCard, applicantName, type AppRow } from "@/components/applicant-meta";
 import type { PickRow, DraftPhase, CurrentTurn, MyPosition } from "@/lib/use-draft-picks";
 import { InfoHint } from "@/components/ui/info-hint";
+import { staggerStyle } from "@/lib/motion";
 
 // Drop target id for the draft-window zone -- a peer drop target of the
 // wishlist on applications/page.tsx (same DndContext). An applicant card can
@@ -103,7 +103,7 @@ export function DraftWindowPanel({
   onUnsubmit,
   onRemove,
   showRecruitingStatus,
-  accent,
+  pickInfo = {},
 }: {
   appById: Map<string, AppRow>;
   periodEndsAt: string | undefined;
@@ -135,8 +135,16 @@ export function DraftWindowPanel({
   // cards those same applicants show as over in the Applicants column.
   accent: string;
   showRecruitingStatus?: boolean;
+  // Name/status for picks whose applicant isn't in this project's list.
+  pickInfo?: Record<string, { name: string; status: string }>;
 }) {
   const [submitting, setSubmitting] = useState(false);
+  const statusOf = (id: string) => appById.get(id)?.status ?? pickInfo[id]?.status;
+  const nameOf = (id: string) => {
+    const app = appById.get(id);
+    return app ? applicantName(app) : pickInfo[id]?.name ?? null;
+  };
+  const invitedPicks = confirmedPicks.filter((p) => statusOf(p.application_id) !== "accepted");
   const [unsubmitting, setUnsubmitting] = useState(false);
   const { setNodeRef, isOver } = useDroppable({ id: DRAFT_WINDOW_DROPZONE_ID, disabled: !canStage });
 
@@ -175,19 +183,18 @@ export function DraftWindowPanel({
         canUnsubmitCurrent={canUnsubmitCurrent}
       />
 
-      {/* Confirmed */}
+      {/* Invited: confirmed draft picks who haven't accepted yet. Anyone who
+          has accepted is on the team (the roster above), so they leave here. */}
       <div className="flex flex-col gap-2.5">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-1.5">
             <h2 className="text-base font-semibold tracking-tight">
-              Confirmed
-              {confirmedPicks.length > 0 && <span className="ml-1.5 font-normal text-muted-foreground tabular-nums">{confirmedPicks.length}</span>}
+              Invited
+              {invitedPicks.length > 0 && <span className="ml-1.5 font-normal text-muted-foreground tabular-nums">{invitedPicks.length}</span>}
             </h2>
-            {confirmedPicks.length > 0 && (
-              <InfoHint label="About confirmed picks">
-                Locked in, but not yet team members; that happens once the draft is completed.
-              </InfoHint>
-            )}
+            <InfoHint label="About invited">
+              Picked in the draft; they join the team when they accept.
+            </InfoHint>
           </div>
           {canUnsubmitCurrent && (
             <Button
@@ -201,25 +208,35 @@ export function DraftWindowPanel({
             </Button>
           )}
         </div>
-        {confirmedPicks.length === 0 ? (
-          <div className="px-4 py-6 text-center text-sm text-muted-foreground rounded-xl surface">
-            No picks confirmed yet.
-          </div>
+        {invitedPicks.length === 0 ? (
+          <p className="px-2 py-2 text-sm text-muted-foreground">No one waiting on an invite</p>
         ) : (
-          <div className="flex flex-col gap-2">
-            {confirmedPicks.map((p) => {
+          <div className="flex flex-col divide-y divide-foreground/[0.06]">
+            {invitedPicks.map((p, i) => {
               const app = appById.get(p.application_id);
               return (
-                // Shares its view-transition-name with the staged card above,
-                // so confirming glides the card up into this row (globals.css).
+                // Shares its view-transition-name with the staged row above,
+                // so confirming glides the row up into this list (globals.css).
                 <div
                   key={p.id}
-                  style={{ viewTransitionName: `pick-${p.id}`, ...accentFill(accent) }}
-                  className="flex items-center gap-2 rounded-lg px-3 py-2"
+                  style={{ viewTransitionName: `pick-${p.id}`, ...staggerStyle(i) }}
+                  className="flex items-center gap-2 rounded-md px-2 py-1.5 animate-fade-in-up"
                 >
-                  <span className="flex-1 min-w-0 truncate text-sm font-medium">{app ? applicantName(app) : "Applicant"}</span>
-                  {/* Plain "R2" in the accent's readable foreground, not a pill. */}
-                  <span className="shrink-0 text-xs font-medium tabular-nums opacity-70" title={`Round ${p.round.round_number}`}>
+                  {app ? (
+                    <button
+                      type="button"
+                      onClick={() => onReview(app)}
+                      className="flex-1 min-w-0 truncate text-left text-sm font-medium underline-offset-2 hover:underline"
+                    >
+                      {applicantName(app)}
+                    </button>
+                  ) : (
+                    <span className="flex-1 min-w-0 truncate text-sm font-medium">
+                      {nameOf(p.application_id) ?? <span className="inline-block h-3.5 w-28 animate-pulse rounded-full bg-foreground/[0.09] align-middle" />}
+                    </span>
+                  )}
+                  {statusOf(p.application_id) === "rejected" && <span className="shrink-0 text-[11px] font-medium text-destructive">Rejected</span>}
+                  <span className="shrink-0 text-xs tabular-nums text-muted-foreground" aria-label={`Round ${p.round.round_number}`}>
                     R{p.round.round_number}
                   </span>
                 </div>
@@ -256,10 +273,10 @@ export function DraftWindowPanel({
           // applicant staged here gets the same white on their card over in the
           // Applicants column, so the two read as one section. Cards inside sit
           // on the plain background, a shade below the panel.
-          className={`flex flex-col gap-2 rounded-xl border border-dashed p-3 transition-colors ${
-            !canStage ? "border-foreground/10 bg-muted/20"
-            : isOver ? "border-foreground/30 bg-accent"
-            : "border-foreground/15 bg-card"
+          className={`flex flex-col divide-y divide-foreground/[0.06] rounded-xl border border-dashed p-2 transition-colors ${
+            !canStage ? "border-foreground/10"
+            : isOver ? "border-foreground/30 bg-foreground/[0.04]"
+            : "border-foreground/15"
           }`}
         >
           {!canStage ? (

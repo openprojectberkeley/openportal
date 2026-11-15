@@ -12,6 +12,7 @@ import type { WishlistProject } from "@/components/applicant-indicators";
 import { coffeeWithByApplicant, type CoffeeState } from "@/lib/coffee-chat-indicator";
 import { fetchInfoseshAttendedIds, selectInChunks } from "@/lib/postgrest-chunk";
 import { isRecruitingValid } from "@/lib/utils";
+import { fetchReturningForPeriod } from "@/lib/returning";
 
 type SupabaseBrowserClient = ReturnType<typeof createClient>;
 
@@ -42,7 +43,7 @@ export type BaseAppRow = {
 export async function enrichAppRows(
   supabase: SupabaseBrowserClient,
   rows: BaseAppRow[],
-  opts?: { excludeWishlistProjectId?: string | null },
+  opts?: { excludeWishlistProjectId?: string | null; periodId?: string | null },
 ): Promise<AppRow[]> {
   const excludeProjectId = opts?.excludeWishlistProjectId ?? null;
   const ids = [...new Set(rows.map((r) => r.applicant_id).filter((id): id is string => !!id))];
@@ -60,7 +61,7 @@ export async function enrichAppRows(
 
   if (ids.length) {
     // Chunk large `.in()` lists; infosesh uses dual `.in()` (not doubled OR).
-    const [mem, chats, infoAttended, roleRows, wishRows] = await Promise.all([
+    const [mem, chats, infoAttended, roleRows, wishRows, returningIds] = await Promise.all([
       selectInChunks(ids, (chunk) =>
         supabase.from("members").select("user_id, preferred_firstname, lastname, status").in("user_id", chunk),
       ),
@@ -88,12 +89,13 @@ export async function enrichAppRows(
               .in("application_id", chunk),
           )
         : Promise.resolve([] as never[]),
+      // Returning = a member before this period (src/lib/returning.ts).
+      fetchReturningForPeriod(supabase, ids, opts?.periodId),
     ]);
     for (const uid of infoAttended) attendedInfo.add(uid);
     for (const m of mem as (Applicant & { status: string | null })[]) {
       byId[m.user_id] = m;
-      // A past member (active or rolled-off) is "returning"; mirrors is_returning_member().
-      returningById[m.user_id] = m.status === "active" || m.status === "inactive";
+      returningById[m.user_id] = returningIds.has(m.user_id);
     }
     for (const r of roleRows as { user_id: string | null }[]) {
       if (r.user_id) boardExecIds.add(r.user_id);

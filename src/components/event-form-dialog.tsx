@@ -272,7 +272,7 @@ export function EventFormFields({ event, portalId, portals, allowClubEvent, club
                 href={event.external_link}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="underline underline-offset-2 hover:text-foreground"
+                className="underline underline-offset-2 text-brand hover:text-brand/80"
               >
                 open in Google Calendar
               </a>

@@ -16,8 +16,7 @@ import { CSS } from "@dnd-kit/utilities";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ReturningIndicator } from "@/components/applicant-meta";
-import { LateBadge, InvalidIndicator } from "@/components/applicant-indicators";
+import { InvalidIndicator } from "@/components/applicant-indicators";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -31,11 +30,12 @@ import { ProjectIcon } from "@/components/project-icon";
 import { ApplicantPickerDialog } from "@/components/applicant-picker-dialog";
 import { ApplicationReviewModal, type ReviewStatus } from "@/components/application-review-modal";
 import { useDraftRealtime } from "@/lib/use-draft-realtime";
-import { rankLabel } from "@/lib/application-rank";
 import { isRecruitingValid } from "@/lib/utils";
 import { chunkIds, selectInChunks } from "@/lib/postgrest-chunk";
 import { optimistic } from "@/lib/optimistic";
 import { CommandPicker } from "@/components/ui/combobox";
+import { fetchReturningForPeriod } from "@/lib/returning";
+import { fetchDraftStatus, undraftedIds, type DraftApp } from "@/lib/draft-status";
 
 type Period = { id: string; name: string; status: "draft" | "open" | "closed"; starts_at: string; ends_at: string };
 
@@ -149,7 +149,7 @@ export function DraftRoundsManager() {
   const [rankByAppProject, setRankByAppProject] = useState<Record<string, number>>({});
   // A project tile / applicant name was clicked -> open its info modal.
   const [infoProject, setInfoProject] = useState<RoundProject | null>(null);
-  const [reviewFor, setReviewFor] = useState<{ id: string; name: string; status: ReviewStatus } | null>(null);
+  const [reviewFor, setReviewFor] = useState<{ id: string; name: string; status: ReviewStatus; returning?: boolean } | null>(null);
   // Which round's pick order / picks the two columns are showing -- an index
   // into `rounds`, independent of whose turn it actually is.
   const [roundPage, setRoundPage] = useState(0);
@@ -158,7 +158,8 @@ export function DraftRoundsManager() {
   const [addTarget, setAddTarget] = useState<{ roundProjectId: string; projectId: string; projectName: string } | null>(null);
   const [periodApplicants, setPeriodApplicants] = useState<PeriodApplicant[] | null>(null);
   // Period-wide applicant count for the "confirmed / total applications" counter.
-  const [applicationCount, setApplicationCount] = useState<number | null>(null);
+  // Eligible apps + memberships, for the shared "not drafted" rule.
+  const [draftStatus, setDraftStatus] = useState<{ apps: DraftApp[]; memberKeys: Set<string> } | null>(null);
   // Recruiting flags (infosesh / coffee / returning / board-exec) barely change
   // during a live draft; cache per period so realtime refreshes don't re-hit
   // the fat attendance/coffee queries on every tick.
@@ -258,6 +259,8 @@ export function DraftRoundsManager() {
     const userName: Record<string, string> = {};
 
     const memberChunks = chunkIds(missing);
+    // Returning = a member before this period (src/lib/returning.ts).
+    const returningBefore = fetchReturningForPeriod(supabase, missing, periodId);
     const results = await Promise.all(
       memberChunks.flatMap((chunk) => [
         supabase.from("members").select("user_id, preferred_firstname, lastname, status").in("user_id", chunk),
@@ -290,7 +293,7 @@ export function DraftRoundsManager() {
         status: string | null;
       }[]) {
         userName[m.user_id] = [m.preferred_firstname, m.lastname].filter(Boolean).join(" ") || "Applicant";
-        if (m.status === "active" || m.status === "inactive") returningUsers.add(m.user_id);
+        if ((await returningBefore).has(m.user_id)) returningUsers.add(m.user_id);
       }
       for (const c of (chats ?? []) as { applicant_id: string | null; complete: boolean }[]) {
         if (c.complete && c.applicant_id) coffeeDoneUsers.add(c.applicant_id);
@@ -417,18 +420,13 @@ export function DraftRoundsManager() {
   // Lightweight head count of draft-eligible applications this period — the
   // denominator on the confirmed/total counter in the draft status bar.
   const loadApplicationCount = useCallback(async (periodId: string) => {
-    const supabase = createClient();
-    const { count } = await supabase
-      .from("applications")
-      .select("id", { count: "exact", head: true })
-      .eq("period_id", periodId)
-      .in("status", DRAFT_ELIGIBLE_STATUSES);
-    setApplicationCount(count ?? 0);
+    const status = await fetchDraftStatus(createClient(), periodId);
+    setDraftStatus({ apps: status.apps, memberKeys: status.memberKeys });
   }, []);
 
   useEffect(() => {
     setPeriodApplicants(null);
-    setApplicationCount(null);
+    setDraftStatus(null);
     setRoundPage(0);
     recruitingCacheRef.current = { periodId: null, byUser: new Map() };
     loadBoardGenRef.current += 1;
@@ -483,13 +481,13 @@ export function DraftRoundsManager() {
   // Rejected applicants keep their pick since 0091 (the card stays on the exec
   // board with a red badge), so they have to be filtered out here -- otherwise
   // this counts people the draft can never place.
-  const confirmedCount = Object.values(boardRows).reduce(
-    (sum, row) =>
-      sum + (row.submittedAt ? row.appIds.filter((id) => statusByAppId[id] !== "rejected").length : 0),
-    0,
+  const confirmedAppIds = new Set(
+    Object.values(boardRows).flatMap((row) => (row.submittedAt ? row.appIds : [])),
   );
-  // "274 of 289" -- null until the eligible-applicant count lands.
-  const draftedLabel = applicationCount === null ? null : `${confirmedCount} of ${applicationCount}`;
+  // "8 not drafted" -- the same rule as the applications board and analytics
+  // (src/lib/draft-status.ts). Null until the eligible applications land.
+  const notDrafted = draftStatus ? undraftedIds(draftStatus.apps, confirmedAppIds, draftStatus.memberKeys).size : null;
+  const draftedLabel = notDrafted === null ? null : `${notDrafted} not drafted`;
 
   // Keep the round pager pointed at whichever round is actually on the clock
   // -- but only when the turn moves into a *different* round, so browsing
@@ -805,7 +803,7 @@ export function DraftRoundsManager() {
               <div className="flex items-center gap-2 text-sm">
                 <CheckCheck size={16} className="text-success" />
                 <span>
-                  Draft completed{draftedLabel ? ` — ${draftedLabel} applicants drafted` : ""}
+                  Draft completed{draftedLabel ? ` · ${draftedLabel}` : ""}
                   <span className="text-muted-foreground"> ({new Date(completedAt).toLocaleString()})</span>.
                 </span>
               </div>
@@ -815,7 +813,7 @@ export function DraftRoundsManager() {
               <span className="text-sm text-muted-foreground">
                 {sequence.length === 0
                   ? "No projects with picks to draft yet."
-                  : `${sequence.length} turn${sequence.length === 1 ? "" : "s"} queued up${draftedLabel ? ` · ${draftedLabel} applicants drafted` : ""}`}
+                  : `${sequence.length} turn${sequence.length === 1 ? "" : "s"} queued up${draftedLabel ? ` · ${draftedLabel}` : ""}`}
               </span>
               <Button size="sm" onClick={startDraft} disabled={sequence.length === 0}>
                 <Play size={14} className="mr-1.5" />
@@ -987,7 +985,7 @@ export function DraftRoundsManager() {
                 currentPickId={currentPickId}
                 started={currentPickId !== null || !!completedAt}
                 onOpenApplicant={(appId) =>
-                  setReviewFor({ id: appId, name: nameByAppId[appId] ?? "Applicant", status: statusByAppId[appId] ?? "submitted" })
+                  setReviewFor({ id: appId, name: nameByAppId[appId] ?? "Applicant", status: statusByAppId[appId] ?? "submitted", returning: indByAppId[appId]?.returning })
                 }
                 onRequestUnsubmit={(roundProjectId, label) => setConfirmTarget({ kind: "unsubmit", roundProjectId, label })}
                 onSetSubmitted={setRoundSubmitted}
@@ -1054,6 +1052,7 @@ export function DraftRoundsManager() {
           status={reviewFor.status}
           contextProjectId={null}
           readOnly
+          recruiting={{ returning: reviewFor.returning }}
           open={!!reviewFor}
           onOpenChange={(o) => { if (!o) setReviewFor(null); }}
           onReviewed={() => {}}
@@ -1105,8 +1104,6 @@ function PicksThisRound({
   nameByAppId,
   statusByAppId,
   indByAppId,
-  rankByAppProject,
-  periodEndsAt,
   currentPickId,
   started,
   onOpenApplicant,
@@ -1182,7 +1179,6 @@ function PicksThisRound({
                 ) : (
                   row.appIds.map((appId, i) => {
                     const ind = indByAppId[appId];
-                    const rank = rankByAppProject[`${appId}:${rp.project_id}`] ?? 0;
                     return (
                       <div key={`${appId}-${i}`} className="group flex items-center gap-1.5 rounded-md py-1 pl-7 pr-1 text-sm hover:bg-foreground/[0.04]">
                         <button
@@ -1192,17 +1188,7 @@ function PicksThisRound({
                         >
                           {nameByAppId[appId] ?? "Applicant"}
                         </button>
-                        {rank > 0 && (
-                          <span
-                            className="shrink-0 text-[11px] tabular-nums text-muted-foreground/70"
-                            aria-label={rankLabel(rank)}
-                          >
-                            {rankLabel(rank).split(" ")[0]}
-                          </span>
-                        )}
                         {ind && <InvalidIndicator valid={!ind.invalid} />}
-                        {ind && <ReturningIndicator returning={ind.returning} />}
-                        <LateBadge submittedAt={ind?.submittedAt} endsAt={periodEndsAt} />
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             {/* The row header says Confirmed/Staged once; each pick

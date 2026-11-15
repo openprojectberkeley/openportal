@@ -35,16 +35,21 @@ export function useSlidingIndicator(index: number | null, mode: "bar" | "pill", 
       }
       const r = row.getBoundingClientRect();
       const t = item.getBoundingClientRect();
-      if (!r.width) return;
+      if (!r.width || !row.offsetWidth) return;
+      // Rects include ancestor transforms (a dialog zooming in is at scale
+      // 0.5 for its first frames), but clip-path/translate are in the row's
+      // own pixels: divide the scale back out.
+      const sx = r.width / row.offsetWidth;
+      const sy = row.offsetHeight ? r.height / row.offsetHeight : sx;
       const jump = instant || !parked.current;
       if (jump) ind.style.transitionProperty = "none";
       if (mode === "bar") {
-        ind.style.transform = `translateX(${t.left - r.left}px) scaleX(${t.width / r.width})`;
+        ind.style.transform = `translateX(${(t.left - r.left) / sx}px) scaleX(${t.width / r.width})`;
       } else {
-        const top = t.top - r.top;
-        const left = t.left - r.left;
-        const right = r.right - t.right;
-        const bottom = r.bottom - t.bottom;
+        const top = (t.top - r.top) / sy;
+        const left = (t.left - r.left) / sx;
+        const right = (r.right - t.right) / sx;
+        const bottom = (r.bottom - t.bottom) / sy;
         ind.style.clipPath = `inset(${top}px ${right}px ${bottom}px ${left}px round ${radius}px)`;
       }
       if (jump) {
@@ -69,7 +74,17 @@ export function useSlidingIndicator(index: number | null, mode: "bar" | "pill", 
     const ro = new ResizeObserver(() => place(latest.current, true));
     ro.observe(row);
     for (const el of items.current) if (el) ro.observe(el);
-    return () => ro.disconnect();
+    // A transform settling (a dialog's zoom-in) doesn't resize anything, so
+    // also re-place once the enclosing overlay's animation ends.
+    const overlay = row.closest<HTMLElement>("[role=dialog], [data-radix-popper-content-wrapper]");
+    const settle = () => place(latest.current, true);
+    overlay?.addEventListener("animationend", settle);
+    overlay?.addEventListener("transitionend", settle);
+    return () => {
+      ro.disconnect();
+      overlay?.removeEventListener("animationend", settle);
+      overlay?.removeEventListener("transitionend", settle);
+    };
   }, [place]);
 
   const itemRef = useCallback(

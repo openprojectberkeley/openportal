@@ -121,7 +121,7 @@ export function NavTab({
         style={{ clipPath: active ? BADGE_SHAPE : BAR_SHAPE, opacity: active ? 1 : 0 }}
         className={cn(
           CONTENT,
-          "pointer-events-none absolute inset-0 bg-foreground text-background",
+          "pointer-events-none absolute inset-0 bg-brand text-brand-foreground",
           // The shape takes its time (300ms, ease-out-cubic — quart would spend
           // most of the move in the first 100ms); the fade is quicker so the
           // bar is solid as it leaves the bottom edge, and gone before a
@@ -246,7 +246,7 @@ export function NavTabs({ tabs }: { tabs: NavTabSpec[] }) {
         ref={barRef}
         aria-hidden
         className={cn(
-          "pointer-events-none absolute inset-x-0 bottom-0 h-[2px] origin-left bg-foreground opacity-0",
+          "pointer-events-none absolute inset-x-0 bottom-0 h-[2px] origin-left bg-brand opacity-0",
           "transition-[transform,opacity] duration-2 ease-out-cubic will-change-transform",
           "motion-reduce:transition-none [@media(hover:none)]:hidden",
         )}

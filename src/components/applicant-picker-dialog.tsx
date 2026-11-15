@@ -23,6 +23,7 @@
 import { useState } from "react";
 import { FileQuestion } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useAddableMembers, type AddableMember, type AddableStatus } from "@/lib/use-addable-members";
 import { Command, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 
@@ -64,23 +65,22 @@ const STATUS_NOTE: Record<"none" | "draft" | "rejected", { label: string; title:
 
 const statusKey = (s: AddableStatus) => (s === "draft" ? "draft" : s === "rejected" ? "rejected" : "none");
 
-export function ApplicantPickerDialog({
-  title,
+function ApplicantPickerPanel({
   note,
   applicants,
   alreadyPicked,
   onPick,
-  onClose,
   memberSearch,
+  compact = false,
 }: {
-  title: string;
-  // Optional caveat under the title (e.g. adding after the draft is complete).
+  // Optional caveat (e.g. adding after the draft is complete).
   note?: string;
   applicants: PickableApplicant[] | null;
   alreadyPicked: string[];
   onPick: (applicationId: string) => void;
-  onClose: () => void;
   memberSearch?: MemberSearch;
+  /** Popover use: no outer border, a shorter list. */
+  compact?: boolean;
 }) {
   const [filter, setFilter] = useState("");
   const { members, searching, tooShort, minChars, forget } = useAddableMembers(
@@ -104,24 +104,19 @@ export function ApplicantPickerDialog({
     applicants !== null && options.length === 0 && memberRows.length === 0 && !memberHalfPending;
 
   return (
-    <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-        </DialogHeader>
         <div className="flex flex-col gap-3">
           {note && <p className="text-xs text-muted-foreground">{note}</p>}
           {/* cmdk for keyboard picking (arrows + Enter) during a live draft.
               shouldFilter is off: this component already filters applicants
               locally and searches accounts on the server. */}
-          <Command shouldFilter={false} className="rounded-md border">
+          <Command shouldFilter={false} className={compact ? "" : "rounded-md border"}>
             <CommandInput
               autoFocus
               placeholder={memberSearch ? "Search by name or email…" : "Search applicants…"}
               value={filter}
               onValueChange={setFilter}
             />
-            <CommandList className="max-h-72 border-t">
+            <CommandList className={compact ? "max-h-64 border-t" : "max-h-72 border-t"}>
               {applicants === null ? (
                 <p className="py-4 text-center text-sm text-muted-foreground">Loading applicants…</p>
               ) : showEmpty ? (
@@ -181,7 +176,43 @@ export function ApplicantPickerDialog({
             </CommandList>
           </Command>
         </div>
+  );
+}
+
+type PickerProps = {
+  note?: string;
+  applicants: PickableApplicant[] | null;
+  alreadyPicked: string[];
+  onPick: (applicationId: string) => void;
+  memberSearch?: MemberSearch;
+};
+
+export function ApplicantPickerDialog({ title, onClose, ...props }: PickerProps & { title: string; onClose: () => void }) {
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+        </DialogHeader>
+        <ApplicantPickerPanel {...props} />
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** The same picker as a small overlay anchored to its trigger (no modal). */
+export function ApplicantPickerPopover({
+  open,
+  onOpenChange,
+  children,
+  ...props
+}: PickerProps & { open: boolean; onOpenChange: (open: boolean) => void; children: React.ReactNode }) {
+  return (
+    <Popover open={open} onOpenChange={onOpenChange}>
+      <PopoverTrigger asChild>{children}</PopoverTrigger>
+      <PopoverContent align="start" className="w-72 p-0">
+        <ApplicantPickerPanel {...props} compact />
+      </PopoverContent>
+    </Popover>
   );
 }

@@ -1,3 +1,4 @@
+import { ArrowLeft } from "lucide-react";
 import { FloatingMark } from "@/components/floating-mark";
 import { InvertBlob } from "@/components/invert-blob";
 import { OpenPortalBrandIcon } from "@/components/open-portal-brand-icon";
@@ -15,11 +16,20 @@ import { OpenPortalBrandIcon } from "@/components/open-portal-brand-icon";
  * inversion read the same either way; in dark mode it sits flush beside the
  * form as one surface split by a border.
  */
+const CLUB_SITE = "https://openprojectberkeley.com";
+
 export function AuthShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="grid min-h-svh w-full lg:grid-cols-[1.1fr_1fr]">
-      <aside className="relative isolate hidden overflow-hidden border-r bg-[hsl(255_14%_6%)] text-white lg:flex lg:flex-col lg:justify-between lg:p-12">
-        <span className="text-sm font-semibold tracking-tight">Open Portal</span>
+      <aside className="relative isolate hidden overflow-hidden border-r bg-[hsl(228_30%_6%)] text-white lg:flex lg:flex-col lg:justify-between lg:p-12">
+        {/* Back to the club's public site; the arrow nudges on hover like BackLink. */}
+        <a
+          href={CLUB_SITE}
+          className="group relative z-10 inline-flex items-center gap-1.5 self-start text-sm font-medium text-white/70 transition-colors hover:text-white"
+        >
+          <ArrowLeft size={15} className="transition-transform group-hover:-translate-x-0.5" aria-hidden />
+          Back to openprojectberkeley.com
+        </a>
 
         <FloatingMark className="mx-auto w-[clamp(180px,20vw,300px)]" />
 
@@ -29,7 +39,12 @@ export function AuthShell({ children }: { children: React.ReactNode }) {
           <h1 className="text-4xl leading-[1.05] tracking-tight xl:text-5xl">
             <span className="font-bold">Open Portal</span>
             <br />
-            <span className="font-light tracking-normal">Open Project</span>
+            <a
+              href={CLUB_SITE}
+              className="relative z-10 font-light tracking-normal underline-offset-[6px] decoration-1 hover:underline"
+            >
+              Open Project
+            </a>
           </h1>
           <p className="text-base text-white/60">
             we have a lot of portals i hope you like them :)

@@ -1,222 +1,153 @@
 "use client";
 
-import { createClient } from "@/lib/supabase/client";
-import { useEffect, useMemo, useState } from "react";
+import { Disclosure } from "@/components/ui/disclosure";
+import { Skeleton } from "@/components/ui/skeleton";
+import { ColorDot, MetricBar } from "@/components/metric-bar";
+import { Section } from "@/components/application-analytics-modal";
 import { cn } from "@/lib/utils";
-import { rankLabel } from "@/lib/application-rank";
+import type { RecruitingAnalytics } from "@/lib/use-recruiting-analytics";
 
-// One row per (project, rank) from application_project_rankings() (0061).
-type Row = {
-  project_id: string;
-  project_name: string;
-  project_type: string;
-  rank: number;
-  cnt: number;
+// The Projects tab of the exec analytics modal: 1st-choice demand against each
+// project's estimated team size, what the draft offered and landed, the
+// studio/launch split, and the full project × rank matrix on demand.
+
+const TYPE_LABELS: Record<string, string> = { studio: "Studio", launch: "Launch" };
+const typeLabel = (t: string | null) => (t ? TYPE_LABELS[t] ?? t : "");
+
+const ordinal = (n: number) => {
+  const s = ["th", "st", "nd", "rd"];
+  const v = n % 100;
+  return `${n}${s[(v - 20) % 10] ?? s[v] ?? s[0]}`;
 };
 
-type ProjectRow = {
-  id: string;
-  name: string;
-  type: string;
-  byRank: Record<number, number>;
-  total: number;
-  firsts: number;
-};
+export function ProjectsSkeleton() {
+  return (
+    <div className="flex flex-col gap-4" aria-busy>
+      <Skeleton className="h-4 w-32 rounded-full" />
+      {Array.from({ length: 6 }, (_, i) => (
+        <div key={i} className="flex flex-col gap-1.5">
+          <div className="flex items-center gap-3">
+            <Skeleton className="h-3.5 w-32 shrink-0 rounded-full sm:w-48" />
+            <Skeleton className="h-1.5 flex-1 rounded-full" />
+            <Skeleton className="h-3 w-10 shrink-0 rounded-full" />
+          </div>
+          <Skeleton className="h-3 w-56 rounded-full" />
+        </div>
+      ))}
+    </div>
+  );
+}
 
-const PROJECT_TYPE_LABELS: Record<string, string> = { studio: "OP Studio", launch: "OP Launch" };
+export function ProjectsTab({ data }: { data: RecruitingAnalytics }) {
+  const { rows, maxRank, byType } = data.projects;
+  if (rows.length === 0) return <p className="text-sm text-muted-foreground">No rankings or draft rounds for this period yet.</p>;
 
-// Exec-only global project analytics for one period: a project × rank matrix of
-// how many submitted applicants picked each project 1st, 2nd, … plus
-// demand-vs-capacity visuals. Fetched from the application_project_rankings
-// RPC (+ project capacities). The period comes from the tabbed shell
-// (AnalyticsModal), which mounts this only while its tab is open — so the fetch
-// runs on mount rather than behind an `open` guard.
-export function ProjectAnalyticsBody({ periodId }: { periodId: string | null }) {
-  const [rows, setRows] = useState<Row[] | null>(null);
-  const [capacity, setCapacity] = useState<Map<string, number | null>>(new Map());
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setRows(null);
-    setError(null);
-    setCapacity(new Map());
-    if (!periodId) {
-      setRows([]);
-      return;
-    }
-    const supabase = createClient();
-    (async () => {
-      const [ranks, caps] = await Promise.all([
-        supabase.rpc("application_project_rankings", { p_period_id: periodId }),
-        // projects are world-readable to signed-in members (0005); estimated_members
-        // backs the demand-vs-capacity view.
-        supabase.from("projects").select("id, estimated_members"),
-      ]);
-      if (ranks.error) {
-        setError(ranks.error.message);
-        setRows([]);
-        return;
-      }
-      setCapacity(
-        new Map(
-          ((caps.data ?? []) as { id: string; estimated_members: number | null }[]).map((p) => [
-            p.id,
-            p.estimated_members,
-          ]),
-        ),
-      );
-      setRows((ranks.data as Row[]) ?? []);
-    })();
-  }, [periodId]);
-
-  const { projects, maxRank } = useMemo(() => {
-    const byProject = new Map<string, ProjectRow>();
-    let max = 0;
-    for (const r of rows ?? []) {
-      max = Math.max(max, r.rank);
-      let p = byProject.get(r.project_id);
-      if (!p) {
-        p = { id: r.project_id, name: r.project_name, type: r.project_type, byRank: {}, total: 0, firsts: 0 };
-        byProject.set(r.project_id, p);
-      }
-      p.byRank[r.rank] = (p.byRank[r.rank] ?? 0) + r.cnt;
-      p.total += r.cnt;
-      if (r.rank === 1) p.firsts += r.cnt;
-    }
-    const list = [...byProject.values()].sort((a, b) => b.firsts - a.firsts || a.name.localeCompare(b.name));
-    return { projects: list, maxRank: max };
-  }, [rows]);
-
+  const scale = Math.max(...rows.map((r) => Math.max(r.firsts, r.capacity ?? 0)), 1);
+  const totalFirsts = byType.reduce((s, t) => s + t.firsts, 0);
   const ranks = Array.from({ length: maxRank }, (_, i) => i + 1);
 
-  // Demand (1st-choice count) vs capacity, for projects that have a capacity set.
-  const withCapacity = projects
-    .map((p) => ({ ...p, capacity: capacity.get(p.id) ?? null }))
-    .filter((p): p is (typeof projects)[number] & { capacity: number } => typeof p.capacity === "number" && p.capacity > 0)
-    .sort((a, b) => b.firsts / b.capacity - a.firsts / a.capacity);
-  const noCapacityCount = projects.length - withCapacity.length;
-  const maxDemandCap = withCapacity.reduce((m, p) => Math.max(m, p.firsts, p.capacity), 0);
-
   return (
-    <>
-      {rows === null ? (
-        <div className="h-64 rounded-xl bg-foreground/[0.09] animate-pulse" />
-      ) : (
-        <div className="flex flex-col gap-5">
-          <p className="text-xs text-muted-foreground">
-            {projects.length} projects · how many submitted applicants ranked each 1st, 2nd, … Sorted by 1st-choice count.
-          </p>
-          {error && <p className="text-sm text-red-500">{error}</p>}
+    <div className="flex flex-col gap-8">
+      <Section
+        title="Demand"
+        count={rows.length}
+        index={0}
+        hint="Bar: 1st-choice applicants. Notch: estimated team size. Sorted by demand per seat; projects without a size set sit last."
+      >
+        <ul className="flex flex-col gap-3">
+          {rows.map((r, i) => {
+            const over = r.capacity != null && r.firsts > r.capacity;
+            return (
+              <li key={r.id} className="flex flex-col gap-1">
+                <MetricBar
+                  index={i}
+                  mark={<ColorDot color={r.color} />}
+                  label={r.name}
+                  meta={typeLabel(r.type)}
+                  value={r.firsts}
+                  max={scale}
+                  notch={r.capacity != null ? r.capacity / scale : null}
+                  valueClassName={over ? "text-warning" : undefined}
+                  display={r.capacity != null ? `${r.firsts}/${r.capacity}` : r.firsts}
+                />
+                <p className="pl-4 text-xs text-muted-foreground tabular-nums">
+                  {r.rankings} ranked · {r.offered} picks offered · {r.drafted} drafted · {r.accepted} accepted
+                </p>
+              </li>
+            );
+          })}
+        </ul>
+      </Section>
 
-          {projects.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No ranked applications for this period yet.</p>
-          ) : (
-            <>
-              {/* Demand vs capacity */}
-              <div className="flex flex-col gap-2 rounded-xl surface p-4">
-                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Demand vs capacity
-                </h3>
-                {withCapacity.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">No projects have a capacity set.</p>
-                ) : (
-                  <ul className="flex flex-col gap-1.5">
-                    {withCapacity.map((p) => {
-                      const over = p.firsts > p.capacity;
-                      const demandW = maxDemandCap === 0 ? 0 : Math.round((p.firsts / maxDemandCap) * 100);
-                      const capW = maxDemandCap === 0 ? 0 : Math.round((p.capacity / maxDemandCap) * 100);
-                      return (
-                        <li key={p.id} className="flex items-center gap-2 text-xs">
-                          <span className="w-28 flex-shrink-0 truncate text-foreground/90" title={p.name}>
-                            {p.name}
-                          </span>
-                          {/* Fill = 1st-choice demand (red when oversubscribed); tick marks capacity on top. */}
-                          <div className="relative h-2.5 flex-1 overflow-hidden rounded-full bg-foreground/10">
-                            <div
-                              className={cn("absolute inset-y-0 left-0 rounded-full", over ? "bg-red-500" : "bg-foreground/60")}
-                              style={{ width: `${demandW}%` }}
-                            />
-                            <div
-                              className="absolute inset-y-0 z-10 w-0.5 -translate-x-1/2 bg-background shadow-[0_0_0_1px_hsl(var(--foreground))]"
-                              style={{ left: `${capW}%` }}
-                              aria-hidden
-                            />
-                          </div>
-                          <span
-                            className={cn(
-                              "w-24 flex-shrink-0 text-right tabular-nums",
-                              over ? "text-red-500 font-medium" : "text-muted-foreground",
-                            )}
-                          >
-                            {p.firsts}/{p.capacity} ({(p.firsts / p.capacity).toFixed(1)}×)
-                          </span>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-                <p className="text-[0.7rem] text-muted-foreground">
-                  1st-choice demand vs estimated team size; the notch marks capacity, red bars are oversubscribed.
-                  {noCapacityCount > 0 && ` ${noCapacityCount} project${noCapacityCount === 1 ? "" : "s"} have no capacity set.`}
+      {byType.length > 1 && (
+        <Section title="Studio vs Launch" index={1} hint="Share of all 1st choices, with draft totals per type.">
+          <div className="flex flex-col gap-3">
+            {byType.map((t, i) => (
+              <div key={t.type} className="flex flex-col gap-1">
+                <MetricBar
+                  index={i}
+                  label={typeLabel(t.type) || "Other"}
+                  meta={`${t.projects} projects`}
+                  value={t.firsts}
+                  max={totalFirsts}
+                  display={`${totalFirsts ? Math.round((t.firsts / totalFirsts) * 100) : 0}%`}
+                />
+                <p className="text-xs text-muted-foreground tabular-nums">
+                  {t.firsts} 1st choices · {t.offered} picks offered · {t.drafted} drafted · {t.accepted} accepted
                 </p>
               </div>
-
-              {/* Detailed matrix */}
-              <div className="flex flex-col gap-2">
-                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  By rank
-                </h3>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="text-left text-xs text-muted-foreground">
-                        <th className="py-1.5 pr-3 font-medium">Project</th>
-                        {ranks.map((rank) => (
-                          <th
-                            key={rank}
-                            className={cn(
-                              "py-1.5 px-2 text-right font-medium tabular-nums whitespace-nowrap",
-                              rank === 1 && "text-foreground",
-                            )}
-                          >
-                            {rankLabel(rank)}
-                          </th>
-                        ))}
-                        <th className="py-1.5 pl-2 text-right font-medium tabular-nums">Total</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {projects.map((p) => (
-                        <tr key={p.id} className="border-t">
-                          <td className="py-1.5 pr-3">
-                            <span className="font-medium">{p.name}</span>
-                            <span className="ml-2 text-xs text-muted-foreground">
-                              {PROJECT_TYPE_LABELS[p.type] ?? p.type}
-                            </span>
-                          </td>
-                          {ranks.map((rank) => (
-                            <td
-                              key={rank}
-                              className={cn(
-                                "py-1.5 px-2 text-right tabular-nums",
-                                rank === 1 && "bg-foreground/5 font-semibold",
-                                !p.byRank[rank] && "text-muted-foreground/50",
-                              )}
-                            >
-                              {p.byRank[rank] ?? 0}
-                            </td>
-                          ))}
-                          <td className="py-1.5 pl-2 text-right font-semibold tabular-nums">{p.total}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </>
-          )}
-        </div>
+            ))}
+          </div>
+        </Section>
       )}
-    </>
+
+      {maxRank > 0 && (
+        <Disclosure label="By rank">
+          <div className="-mx-1 overflow-x-auto">
+            <table className="w-full min-w-[32rem] text-sm">
+              <thead>
+                <tr className="text-xs text-muted-foreground">
+                  <th className="px-2 py-1.5 text-left font-medium">Project</th>
+                  {ranks.map((n) => (
+                    <th key={n} className="px-2 py-1.5 text-right font-medium">
+                      {ordinal(n)}
+                    </th>
+                  ))}
+                  <th className="px-2 py-1.5 text-right font-medium">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[...rows]
+                  .filter((r) => r.rankings > 0)
+                  .sort((a, b) => b.firsts - a.firsts || b.rankings - a.rankings)
+                  .map((r) => (
+                    <tr key={r.id} className="even:bg-foreground/[0.025]">
+                      <td className="max-w-[12rem] rounded-l-md px-2 py-1.5">
+                        <span className="flex items-center gap-2">
+                          <ColorDot color={r.color} />
+                          <span className="truncate">{r.name}</span>
+                        </span>
+                      </td>
+                      {ranks.map((n) => (
+                        <td
+                          key={n}
+                          className={cn(
+                            "px-2 py-1.5 text-right font-mono text-xs",
+                            !r.byRank[n] && "text-muted-foreground/50",
+                            n === 1 && "font-semibold",
+                          )}
+                        >
+                          {r.byRank[n] ?? 0}
+                        </td>
+                      ))}
+                      <td className="rounded-r-md px-2 py-1.5 text-right font-mono text-xs font-semibold">{r.rankings}</td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+        </Disclosure>
+      )}
+    </div>
   );
 }

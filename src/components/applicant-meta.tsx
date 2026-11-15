@@ -7,21 +7,7 @@ import { AlertTriangle, GripVertical, RotateCcw, Star, UserPlus, X } from "lucid
 import { PersonName } from "@/components/person-profile-provider";
 
 import type { ReviewStatus } from "@/components/application-review-modal";
-import { CoffeeChatIndicator, InfosessionIndicator, LateBadge, NoApplicationIndicator, WishlistedByIndicator, type CoffeeState, type WishlistProject } from "@/components/applicant-indicators";
-import { rankLabel } from "@/lib/application-rank";
-import { accentTint, visibleMarkColor } from "@/lib/portal-color";
-
-// A confirmed pick shows its project as a bar down the left edge over a faint
-// wash, the same mark events use, rather than a full colour fill: a column of
-// picks stays readable and the board doesn't turn into a rainbow.
-function accentStyle(accent: string | null | undefined): React.CSSProperties | undefined {
-  if (!accent) return undefined;
-  return {
-    backgroundColor: accentTint(accent, 7, "hsl(var(--background))"),
-    boxShadow: `inset 3px 0 0 ${visibleMarkColor(accent)}`,
-  };
-}
-
+import { NoApplicationIndicator, WishlistedByIndicator, type CoffeeState, type WishlistProject } from "@/components/applicant-indicators";
 export type Applicant = { user_id: string; preferred_firstname: string | null; lastname: string | null };
 
 export type AppRow = {
@@ -64,15 +50,11 @@ function invalidReasons(app: AppRow): string[] {
 // Status as a dot + coloured word, not a filled pill (DESIGN.md: badges are
 // for controls and the one fact that matters most; this card already carries
 // its project accent).
+// Only "Rejected" is worth a word on a row: an accepted applicant already
+// shows it by where they appear (on the team, or under their project).
 function StatusBadge({ status }: { status: ReviewStatus }) {
-  if (status !== "accepted" && status !== "rejected") return null;
-  const accepted = status === "accepted";
-  return (
-    <span className={`inline-flex shrink-0 items-center gap-1 text-[11px] font-medium ${accepted ? "text-success" : "text-destructive"}`}>
-      <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${accepted ? "bg-success" : "bg-destructive"}`} />
-      {accepted ? "Accepted" : "Rejected"}
-    </span>
-  );
+  if (status !== "rejected") return null;
+  return <span className="shrink-0 text-[11px] font-medium text-destructive">Rejected</span>;
 }
 
 // Small badge marking an applicant who was a member in a previous semester.
@@ -93,63 +75,28 @@ export function ReturningIndicator({ returning }: { returning: boolean }) {
 // their "1st choice"/"2nd choice" heading and would otherwise lose that signal.
 export function ApplicantMeta({
   app,
-  periodEndsAt,
-  rank,
-  showRecruitingStatus,
-  compact,
   hideStatus,
 }: {
   app: AppRow;
-  periodEndsAt: string | undefined;
+  periodEndsAt?: string | undefined;
+  /** Accepted for compatibility; rows no longer show the rank ordinal. */
   rank?: boolean;
-  // Coffee chat + infosession indicators. Off by default so drafting cards stay dense.
+  /** Accepted for compatibility; recruiting badges live in the application now. */
   showRecruitingStatus?: boolean;
-  // Drop the Accepted/Rejected badge. For a card that already carries the same
-  // word somewhere else -- the draft board's outcome chip -- so the two don't
-  // say it twice.
+  // Drop the Rejected word, for a row that already carries its outcome
+  // elsewhere (the draft board's outcome chip).
   hideStatus?: boolean;
-  // Dense one-line variant (the exec draft board's 300px columns): returning /
-  // late move in behind showRecruitingStatus so the row only ever carries the
-  // name, its status, and whatever the viewer explicitly asked to see.
   compact?: boolean;
 }) {
+  // Rows carry the name and only what changes a decision at a glance: an
+  // exec-added (no application) marker and other projects' wishlist stars.
+  // Returning / late / coffee / info session live inside the application.
   return (
     <div className="flex min-w-0 flex-1 items-center gap-1.5">
       <PersonName userId={app.applicant?.user_id} name={applicantName(app)} className="text-sm font-medium truncate" />
-      {rank && app.rank > 0 && (
-        <span
-          className="shrink-0 text-[11px] tabular-nums text-muted-foreground/70"
-          title={rankLabel(app.rank)}
-        >
-          {rankLabel(app.rank).split(" ")[0]}
-        </span>
-      )}
       {!hideStatus && <StatusBadge status={app.status} />}
-      {/* Always shown, compact included: it is the only thing explaining an
-          otherwise empty application, and these cards live on the dense board. */}
       <NoApplicationIndicator execAdded={app.execAdded} />
-      {!compact && (
-        <>
-          <ReturningIndicator returning={app.returning} />
-          {!app.execAdded && <LateBadge submittedAt={app.submitted_at} endsAt={periodEndsAt} />}
-        </>
-      )}
       <WishlistedByIndicator projects={app.wishlistedBy} />
-      {showRecruitingStatus && (
-        <>
-          {compact && (
-            <>
-              <ReturningIndicator returning={app.returning} />
-              {/* An exec-added row is stamped at the moment it was created, which
-                  is all but guaranteed to be after the deadline. "Late" would be
-                  reading a timestamp that was never a submission. */}
-              {!app.execAdded && <LateBadge submittedAt={app.submitted_at} endsAt={periodEndsAt} />}
-            </>
-          )}
-          <CoffeeChatIndicator state={app.coffee} withNames={app.coffeeWith} />
-          <InfosessionIndicator attended={app.infosession} />
-        </>
-      )}
     </div>
   );
 }
@@ -230,26 +177,32 @@ const stopClick = {
 };
 
 // An overlay action button (revealed on hover inside the gradient panel).
+// Hover-revealed actions; each hides itself, so one (the wishlist star) can
+// stay visible in the exact slot it occupies on hover.
+const HOVER_ONLY = "opacity-0 pointer-events-none transition-opacity group-hover:opacity-100 group-hover:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto group-has-[[data-state=open]]:opacity-100 group-has-[[data-state=open]]:pointer-events-auto";
+
 function OverlayButton({
   onClick,
   disabled,
   label,
   className,
   children,
+  persistent = false,
 }: {
   onClick: () => void;
   disabled?: boolean;
   label: string;
   className?: string;
   children: React.ReactNode;
+  // Visible at rest (the wishlist's filled star), not only on hover.
+  persistent?: boolean;
 }) {
   return (
     <button
       type="button"
       disabled={disabled}
-      title={label}
       aria-label={label}
-      className={`flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent disabled:opacity-40 disabled:hover:bg-transparent ${className ?? ""}`}
+      className={`flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent disabled:opacity-40 disabled:hover:bg-transparent ${persistent ? "" : HOVER_ONLY} ${className ?? ""}`}
       onPointerDown={stopClick.onPointerDown}
       onClick={(e) => { e.stopPropagation(); if (!disabled) onClick(); }}
     >
@@ -273,7 +226,7 @@ function ApplicantCardInner({
   overlayExtra,
   pinExtra,
   hideStatus,
-  shimmer,
+  staged,
   claimedBy,
   onAddToWishlist,
   onWishlistToggle,
@@ -327,6 +280,10 @@ function ApplicantCardInner({
         />
       </div>
 
+      {staged && !claimed && (
+        <span className="shrink-0 text-[11px] text-muted-foreground">Staged</span>
+      )}
+
       {claimed && (
         <span className={`shrink-0 text-[11px] italic text-muted-foreground ${hasOverlay ? "transition-opacity group-hover:opacity-0" : ""}`}>
           Claimed by {claimedBy}
@@ -336,34 +293,18 @@ function ApplicantCardInner({
       {/* Persistent wishlisted indicator; sits in the same 28px box (and card
           padding) as the overlay's star toggle so the two line up exactly, and
           fades out as the overlay fades in. */}
-      {isWishlisted && onWishlistToggle && (
-        <span className="flex h-7 w-7 shrink-0 items-center justify-center text-warning transition-opacity group-hover:opacity-0" aria-hidden>
-          <Star size={14} className="fill-warning" />
-        </span>
-      )}
 
       {/* Always-visible control at the card's right edge, where the overlay
           would have put it -- but in flow, so the name truncates against it
           instead of sliding underneath. */}
-      {pinned && <div className="shrink-0">{overlayExtra}</div>}
-
-      {/* Its own clipping wrapper rather than overflow-hidden on the card root,
-          which would also clip the invalid-applicant tooltip above the card. */}
-      {shimmer && (
-        <span
-          className="pointer-events-none absolute inset-0 overflow-hidden rounded-lg motion-reduce:hidden"
-          aria-hidden
-        >
-          <span className="absolute inset-y-0 -left-1/3 w-1/3 animate-shimmer bg-gradient-to-r from-transparent via-foreground/15 to-transparent" />
-        </span>
-      )}
+      {pinned && <div className="flex shrink-0 items-center self-center">{overlayExtra}</div>}
 
       {hasOverlay && (
-        // has-[[data-state=open]] keeps the veil (and its contents) up while a
-        // menu opened from inside it is still open -- otherwise moving the
-        // pointer to the menu fades the trigger out from under it.
-        <div className={`absolute inset-y-0 right-0 flex items-center gap-0.5 rounded-r-lg ${compact ? "pl-8 pr-2.5" : "pl-10 pr-3"} bg-gradient-to-l from-background via-background/95 to-transparent opacity-0 pointer-events-none transition-opacity group-hover:opacity-100 group-hover:pointer-events-auto has-[[data-state=open]]:opacity-100 has-[[data-state=open]]:pointer-events-auto`}>
-          {overlayExtra}
+        // In flow at the row's right edge (no veil over a plain row): hidden
+        // until hover. has-[[data-state=open]] keeps it up while a menu opened
+        // from it is still open.
+        <div className="flex shrink-0 items-center gap-0.5">
+          {overlayExtra && <span className={`flex items-center ${HOVER_ONLY}`}>{overlayExtra}</span>}
           {!claimed && showAddToDraft && onAddToDraft && (
             <OverlayButton
               onClick={() => onAddToDraft(app.id)}
@@ -388,6 +329,7 @@ function ApplicantCardInner({
               onClick={() => onWishlistToggle(app.id)}
               label="Remove from wishlist"
               className="text-warning hover:text-warning"
+              persistent={isWishlisted}
             >
               <Star size={14} className="fill-warning" />
             </OverlayButton>
@@ -413,30 +355,14 @@ function cardClassName(
     grab?: boolean;
     dragClass?: string;
     tint?: "accent" | "staged" | "claimed";
-    shimmer?: boolean;
     compact?: boolean;
   },
 ): string {
-  const invalid = !app.valid;
+  // A plain list row: no outline, no fill, no project colour. Hover tints it;
+  // "Staged" / "Claimed by …" are said in words inside the row.
   return [
-    "group relative flex items-center border rounded-lg select-none transition-colors cursor-pointer",
-    opts?.compact ? "gap-1.5 px-2.5 py-1" : "gap-2 px-3 py-2",
-    // A tinted card drops both the normal and the invalid-red background rather
-    // than fighting them: "accent" is painted by an inline style, "staged"
-    // by a fill below. Edges are hairline-faint now, so the fill (not the
-    // outline) carries the "staged" signal in both themes.
-    opts?.tint === "accent"
-      ? ""
-      : opts?.tint === "staged"
-      ? "bg-foreground/[0.07] border-foreground/15"
-      : opts?.tint === "claimed"
-      ? "bg-muted/40 border-muted-foreground/20"
-      : invalid
-      ? "border-destructive/20 bg-destructive/[0.06]"
-      : "bg-background",
-    // Only while the sweep plays -- a longer transition-colors on every card
-    // would make ordinary hover feedback sluggish.
-    opts?.shimmer ? "duration-500" : "",
+    "group relative flex items-center rounded-md select-none cursor-pointer hover:bg-foreground/[0.04]",
+    opts?.compact ? "gap-1.5 px-2 py-1" : "gap-2 px-2 py-1.5",
     opts?.grab ? "active:cursor-grabbing touch-none" : "",
     opts?.dragClass ?? "",
   ].join(" ");
@@ -473,7 +399,6 @@ export const SortableApplicantCard = memo(function SortableApplicantCard(actions
     transition,
     opacity: isDragging ? 0 : 1,
     viewTransitionName: actions.viewTransitionName,
-    ...accentStyle(actions.accent),
   } as React.CSSProperties;
   return (
     <div
@@ -486,7 +411,6 @@ export const SortableApplicantCard = memo(function SortableApplicantCard(actions
       className={cardClassName(actions.app, {
         grab: true,
         tint: cardTint(actions),
-        shimmer: actions.shimmer,
         compact: actions.compact,
       })}
     >
@@ -504,11 +428,10 @@ export const StaticApplicantCard = memo(function StaticApplicantCard({
   return (
     <div
       data-app-id={actions.app.id}
-      style={{ viewTransitionName: actions.viewTransitionName, ...accentStyle(actions.accent) }}
+      style={{ viewTransitionName: actions.viewTransitionName }}
       onClick={() => actions.onReview(actions.app)}
       className={cardClassName(actions.app, {
         tint: cardTint(actions),
-        shimmer: actions.shimmer,
         compact: actions.compact,
       })}
     >

@@ -1,6 +1,13 @@
 "use client";
 
-import { MapPin, Pencil, Trash2, CalendarPlus, ExternalLink } from "lucide-react";
+import { MapPin, MoreHorizontal, Pencil, Trash2, CalendarPlus, ExternalLink } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { CATEGORY_META, isRoleGated } from "@/lib/event-category";
 import { eventBarColor, eventTintColor } from "@/lib/event-tint";
 import { readableAccentText } from "@/lib/portal-color";
@@ -89,55 +96,51 @@ export function EventCard({
         </span>
       </div>
 
-      {/* Controls overlay the bottom-right on hover — no layout space taken. A
-          gradient in the card's own colour washes out the content beneath. */}
+    {/* Every action lives in one ⋯ menu at the bottom right, shown on
+        hover/focus; it takes no layout space. */}
       {actions && (
-        <div
-          className="absolute inset-0 flex items-end justify-end p-1.5 opacity-0 group-hover/event:opacity-100 focus-within:opacity-100 transition-opacity pointer-events-none"
-          style={{ background: "linear-gradient(to top left, hsl(var(--background)) 0%, hsl(var(--background)) 22%, transparent 60%)" }}
-        >
-          <div className="flex items-center gap-0.5 pointer-events-auto">
-            {ev.external_link && (
-              <a
-                href={ev.external_link}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={(e) => e.stopPropagation()}
-                className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded"
-                aria-label={`Open ${ev.title} in Google Calendar`}
-                title="Open in Google Calendar"
-              >
-                <ExternalLink size={13} />
-              </a>
-            )}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
             <button
-              onClick={(e) => { e.stopPropagation(); downloadEventIcs(ev); }}
-              className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded"
-              aria-label={`Add ${ev.title} to calendar`}
+              type="button"
+              onClick={(e) => e.stopPropagation()}
+              aria-label={`Options for ${ev.title}`}
+              className="absolute bottom-1 right-1 flex h-6 w-6 items-center justify-center rounded-md bg-background text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/event:opacity-100 data-[state=open]:opacity-100"
             >
-              <CalendarPlus size={13} />
+              <MoreHorizontal size={15} />
             </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="min-w-[11rem]" onClick={(e) => e.stopPropagation()}>
+            {ev.external_link && (
+              <DropdownMenuItem asChild>
+                <a href={ev.external_link} target="_blank" rel="noopener noreferrer">
+                  <ExternalLink size={14} className="mr-2" /> Open in Google Calendar
+                </a>
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem onSelect={() => downloadEventIcs(ev)}>
+              <CalendarPlus size={14} className="mr-2" /> Add to calendar (.ics)
+            </DropdownMenuItem>
             {onEdit && (
-              <button
-                onClick={(e) => { e.stopPropagation(); onEdit(); }}
-                className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded"
-                aria-label={`Edit ${ev.title}`}
-              >
-                <Pencil size={13} />
-              </button>
+              // Next frame: the menu finishes closing before the edit dialog opens.
+              <DropdownMenuItem onSelect={() => requestAnimationFrame(onEdit)}>
+                <Pencil size={14} className="mr-2" /> Edit
+              </DropdownMenuItem>
             )}
             {onDelete && (
-              <button
-                onClick={(e) => { e.stopPropagation(); onDelete(); }}
-                disabled={deleting}
-                className="text-muted-foreground hover:text-destructive transition-colors p-1 rounded disabled:opacity-40"
-                aria-label={`Delete ${ev.title}`}
-              >
-                <Trash2 size={13} />
-              </button>
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  disabled={deleting}
+                  onSelect={() => requestAnimationFrame(onDelete)}
+                  className="text-destructive focus:text-destructive"
+                >
+                  <Trash2 size={14} className="mr-2" /> Delete
+                </DropdownMenuItem>
+              </>
             )}
-          </div>
-        </div>
+          </DropdownMenuContent>
+        </DropdownMenu>
       )}
     </div>
   );

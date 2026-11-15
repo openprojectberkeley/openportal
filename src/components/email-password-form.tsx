@@ -155,7 +155,7 @@ export function EmailPasswordForm({ disabled }: { disabled?: boolean }) {
           {mode === "sign-in" && (
             <Link
               href="/auth/forgot-password"
-              className="text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground"
+              className="text-xs text-brand underline underline-offset-4 hover:text-brand/80"
             >
               Forgot password?
             </Link>
@@ -200,7 +200,7 @@ export function EmailPasswordForm({ disabled }: { disabled?: boolean }) {
           </p>
           <button
             type="button"
-            className="self-start font-medium underline underline-offset-4 hover:text-foreground"
+            className="self-start font-medium underline underline-offset-4 text-brand hover:text-brand/80"
             onClick={() => {
               setMode("sign-in");
               setExistingAccount(null);
@@ -220,7 +220,7 @@ export function EmailPasswordForm({ disabled }: { disabled?: boolean }) {
       </Button>
       <button
         type="button"
-        className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
+        className="text-sm text-brand underline underline-offset-4 hover:text-brand/80"
         disabled={isLoading}
         onClick={() => {
           setMode(mode === "sign-in" ? "sign-up" : "sign-in");

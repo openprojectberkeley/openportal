@@ -39,8 +39,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ApplicationListSkeleton } from "@/components/skeletons";
 import { ApplicationPeriodsDialog, type ApplicationPeriod } from "@/components/application-periods-dialog";
@@ -48,6 +46,7 @@ import { EmailBlastDialog } from "@/components/email-blast-dialog";
 import {
   ApplicationReviewModal,
   type FocusSection,
+  type RecruitingFacts,
   type ReviewStatus,
 } from "@/components/application-review-modal";
 import { ApplicationStats, type Stats } from "@/components/application-stats";
@@ -64,6 +63,10 @@ import { Combobox } from "@/components/ui/combobox";
 import { BackLink } from "@/components/back-link";
 import { AdminCrown } from "@/components/admin-crown";
 import { InfoHint } from "@/components/ui/info-hint";
+import { Search } from "lucide-react";
+import { isLate } from "@/lib/utils";
+import { Input } from "@/components/ui/input";
+import { MultiSelectFilter } from "@/components/multi-select-filter";
 
 // The project currently under review: which project the reviewer is
 // assigned to (or, for a full-access reviewer, has picked from all of them).
@@ -108,6 +111,24 @@ function slugify(name: string): string {
 const WISHLIST_DROPZONE_ID = "wishlist-dropzone";
 const APPLICANTS_ZONE_ID = "applicants-zone";
 
+// Filters for the single-project applicant lists (each selected one must hold).
+const APP_FILTERS = [
+  { key: "meets", label: "Meets requirements" },
+  { key: "missing", label: "Missing requirements" },
+  { key: "returning", label: "Returning" },
+  { key: "first", label: "First-time" },
+  { key: "late", label: "Submitted late" },
+  { key: "wishlisted", label: "Wishlisted by other projects" },
+  { key: "available", label: "Not taken by another project" },
+];
+
+const recruitingOf = (a: AppRow): RecruitingFacts => ({
+  coffee: a.coffee,
+  coffeeWith: a.coffeeWith,
+  returning: a.returning,
+  infosession: a.infosession,
+});
+
 function sameOrder(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((x, i) => x === b[i]);
 }
@@ -127,7 +148,6 @@ function WishlistDropzone({
   onReview,
   onWishlistToggle,
   onAddToDraft,
-  showRecruitingStatus,
 }: {
   apps: AppRow[];
   periodEndsAt: string | undefined;
@@ -135,20 +155,19 @@ function WishlistDropzone({
   addToDraftDisabled: (id: string) => boolean;
   // How this applicant's draft state paints their card -- same per-id-callback
   // shape as addToDraftDisabled above.
-  cardDraftState: (id: string) => { accent?: string; staged?: boolean; shimmer?: boolean; claimedBy?: string };
+  cardDraftState: (id: string) => { staged?: boolean; claimedBy?: string };
   onReview: (app: AppRow) => void;
   onWishlistToggle: (id: string) => void;
   onAddToDraft: (id: string) => void;
-  showRecruitingStatus?: boolean;
 }) {
   // The droppable ref sits on the outer div, so an empty wishlist is still a
   // valid drop target even though the SortableContext below is unmounted.
   const { setNodeRef } = useDroppable({ id: WISHLIST_DROPZONE_ID });
   return (
-    <div ref={setNodeRef} className="min-h-40 flex flex-col gap-2">
+    <div ref={setNodeRef} className="min-h-24 flex flex-col divide-y divide-foreground/[0.06]">
       {apps.length === 0 ? (
-        <div className="flex-1 flex items-center justify-center text-center text-sm text-muted-foreground py-10 rounded-xl bg-accent/20">
-          Drag applicants here to shortlist them.
+        <div className="flex-1 flex items-center justify-center text-center text-sm text-muted-foreground py-8 rounded-lg bg-foreground/[0.03]">
+          Drag applicants here to shortlist them
         </div>
       ) : (
         <SortableContext items={apps.map((a) => a.id)} strategy={verticalListSortingStrategy}>
@@ -159,8 +178,6 @@ function WishlistDropzone({
               {...cardDraftState(a.id)}
               periodEndsAt={periodEndsAt}
               isWishlisted
-              showRank
-              showRecruitingStatus={showRecruitingStatus}
               onReview={onReview}
               onWishlistToggle={onWishlistToggle}
               showAddToDraft={draftActive}
@@ -224,12 +241,13 @@ export default function ManagerApplicationsPage() {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetReloadToken, setSheetReloadToken] = useState(0);
   // Coffee / infosession badges on applicant cards — off by default for denser drafting.
-  const [showRecruitingStatus, setShowRecruitingStatus] = useState(false);
   // Bumped when sheet recruiting edits change coffee/info/returning so the
   // card list reloads the same derived flags.
   const [appsReloadToken, setAppsReloadToken] = useState(0);
+  const [appQuery, setAppQuery] = useState("");
+  const [appFilters, setAppFilters] = useState<Set<string>>(new Set());
   const [reviewFor, setReviewFor] = useState<
-    { id: string; name: string; status: ReviewStatus; projectId?: string | null; focus?: FocusSection } | null
+    { id: string; name: string; status: ReviewStatus; projectId?: string | null; focus?: FocusSection; recruiting?: RecruitingFacts } | null
   >(null);
 
   // Which project(s) the current viewer may review: every project if they hold
@@ -250,8 +268,6 @@ export default function ManagerApplicationsPage() {
   const [wishlist, setWishlist] = useState<string[] | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   // Drives the one-shot accent sweep on a newly confirmed pick (see below).
-  const [justConfirmed, setJustConfirmed] = useState<Set<string>>(new Set());
-  const prevConfirmedRef = useRef<Set<string> | null>(null);
 
   // Live drag state: the id of the card being dragged (namespaced), and a
   // working copy of `wishlist` mutated on hover so the list reflows under the
@@ -524,7 +540,7 @@ export default function ManagerApplicationsPage() {
     draftPicksRef.current.addToDraftWindow(id);
   }, []);
   const onReviewApp = useCallback(
-    (a: AppRow) => setReviewFor({ id: a.id, name: applicantName(a), status: a.status }),
+    (a: AppRow) => setReviewFor({ id: a.id, name: applicantName(a), status: a.status, recruiting: recruitingOf(a) }),
     [],
   );
 
@@ -689,7 +705,7 @@ export default function ManagerApplicationsPage() {
 
       const rows = ((data ?? []) as unknown as { id: string; status: ReviewStatus; submitted_at: string | null; applicant_id: string | null; application_rankings: { rank: number }[] }[])
         .map(({ application_rankings, ...r }) => ({ ...r, rank: application_rankings[0]?.rank ?? 0 }));
-      setApps(await enrichAppRows(supabase, rows, { excludeWishlistProjectId: selectedProjectId }));
+      setApps(await enrichAppRows(supabase, rows, { excludeWishlistProjectId: selectedProjectId, periodId: selectedPeriodId }));
     })();
   }, [selectedPeriodId, selectedProjectId, reviewableProjects, appsReloadToken]);
 
@@ -705,6 +721,40 @@ export default function ManagerApplicationsPage() {
 
   const appById = new Map((apps ?? []).map((a) => [a.id, a]));
 
+  // Picks for applicants who never ranked this project (placed from the
+  // board, moved here) aren't in `apps`; resolve their names and status so
+  // Invited / Draft window never fall back to "Applicant".
+  const [pickInfo, setPickInfo] = useState<Record<string, { name: string; status: ReviewStatus }>>({});
+  const missingPickKey = [...draftPicks.confirmedPicks, ...draftPicks.draftWindowPicks]
+    .map((p) => p.application_id)
+    .filter((id) => !appById.has(id) && !pickInfo[id])
+    .sort()
+    .join(",");
+  useEffect(() => {
+    if (!missingPickKey) return;
+    const ids = missingPickKey.split(",");
+    const supabase = createClient();
+    (async () => {
+      const { data: rows } = await supabase.from("applications").select("id, applicant_id, status").in("id", ids);
+      const list = (rows ?? []) as { id: string; applicant_id: string | null; status: ReviewStatus }[];
+      const uids = [...new Set(list.map((r) => r.applicant_id).filter((u): u is string => !!u))];
+      const { data: mems } = uids.length
+        ? await supabase.from("members").select("user_id, preferred_firstname, lastname").in("user_id", uids)
+        : { data: [] };
+      const nameOf = new Map(
+        ((mems ?? []) as { user_id: string; preferred_firstname: string | null; lastname: string | null }[]).map((m) => [
+          m.user_id,
+          [m.preferred_firstname, m.lastname].filter(Boolean).join(" ") || "Applicant",
+        ]),
+      );
+      setPickInfo((prev) => {
+        const next = { ...prev };
+        for (const r of list) next[r.id] = { name: (r.applicant_id && nameOf.get(r.applicant_id)) || "Applicant", status: r.status };
+        return next;
+      });
+    })();
+  }, [missingPickKey]);
+
   // Applicants currently staged in the draft window or already confirmed this
   // draft -- used to disable their "add to draft window" button (they can't be
   // staged twice), not to hide them: staging is still a copy, so a staged
@@ -719,33 +769,38 @@ export default function ManagerApplicationsPage() {
   // applicant is sitting in -- the project accent once confirmed, the draft
   // window's white while merely staged. Spread onto the card, which resolves
   // the precedence.
-  const confirmedIds = new Set(draftPicks.confirmedPicks.map((p) => p.application_id));
   const stagedIds = new Set(draftPicks.draftWindowPicks.map((p) => p.application_id));
   const projectAccent = selectedProject?.color || DEFAULT_ACCENT;
-  const cardDraftState = (id: string): { accent?: string; staged?: boolean; shimmer?: boolean; claimedBy?: string } => {
+  const cardDraftState = (id: string): { staged?: boolean; claimedBy?: string } => {
     const claimed = draftPicks.claimedByOther[id];
     if (claimed) return { claimedBy: claimed.name };
-    return confirmedIds.has(id) ? { accent: projectAccent, shimmer: justConfirmed.has(id) }
-      : stagedIds.has(id) ? { staged: true }
-      : {};
+    return stagedIds.has(id) ? { staged: true } : {};
   };
 
-  // Applicants whose pick was confirmed a moment ago, so their card can sweep
-  // as the accent lands. Keyed off a sorted string rather than the Set itself,
-  // which is rebuilt every render. The ref is seeded on the first pass so picks
-  // that were already confirmed at page load don't all shimmer on mount.
-  const confirmedKey = [...confirmedIds].sort().join(",");
-  useEffect(() => {
-    const prev = prevConfirmedRef.current;
-    const current = new Set(confirmedKey ? confirmedKey.split(",") : []);
-    prevConfirmedRef.current = current;
-    if (!prev) return;
-    const fresh = [...current].filter((id) => !prev.has(id));
-    if (!fresh.length) return;
-    setJustConfirmed(new Set(fresh));
-    const t = setTimeout(() => setJustConfirmed(new Set()), 1200);
-    return () => clearTimeout(t);
-  }, [confirmedKey]);
+  // The wishlist and choice lists only show who is still available: anyone
+  // staged in the draft window, invited (confirmed) by this project, picked by
+  // another project, or already accepted lives elsewhere now (the draft
+  // window, Invited, On the team).
+  // (Picked by another project stays listed, greyed with that project's name,
+  // so the wishlist still shows who you lost and to whom.)
+  const unavailable = (a: AppRow) => draftedIds.has(a.id) || (a.status === "accepted" && !draftPicks.claimedByOther[a.id]);
+
+  // Search + filters over the wishlist and choice lists. They only hide rows;
+  // drag order is computed on the full lists, so reordering stays correct.
+  const q = appQuery.trim().toLowerCase();
+  const matchesView = (a: AppRow) => {
+    if (q && !applicantName(a).toLowerCase().includes(q)) return false;
+    for (const f of appFilters) {
+      if (f === "meets" && !a.valid) return false;
+      if (f === "missing" && a.valid) return false;
+      if (f === "returning" && !a.returning) return false;
+      if (f === "first" && a.returning) return false;
+      if (f === "late" && !isLate(a.submitted_at, selectedPeriod?.ends_at)) return false;
+      if (f === "wishlisted" && a.wishlistedBy.length === 0) return false;
+      if (f === "available" && draftPicks.claimedByOther[a.id]) return false;
+    }
+    return true;
+  };
 
   // While a drag is live, both lists render from the working copy so they
   // reflow: the wishlist shows the insertion preview, and groupedApps (which
@@ -753,7 +808,7 @@ export default function ManagerApplicationsPage() {
   const wishlistView = dragWishlist ?? wishlist ?? [];
   const wishlistApps = wishlistView
     .map((id) => appById.get(id))
-    .filter((a): a is AppRow => !!a);
+    .filter((a): a is AppRow => !!a && !unavailable(a) && matchesView(a));
   const wishlistSet = new Set(wishlistView);
   // Staging (add-to-draft buttons + the draft-window drop zone) is allowed
   // whenever the draft is running -- started and not yet completed -- even
@@ -774,7 +829,7 @@ export default function ManagerApplicationsPage() {
   const groupedApps = apps
     ? Object.entries(
         apps
-          .filter((a) => !wishlistSet.has(a.id))
+          .filter((a) => !wishlistSet.has(a.id) && !unavailable(a) && matchesView(a))
           .reduce<Record<number, AppRow[]>>((acc, a) => {
             (acc[a.rank] ??= []).push(a);
             return acc;
@@ -804,9 +859,10 @@ export default function ManagerApplicationsPage() {
   };
 
   return (
-    // The cross-project board scrolls sideways, so it gets a wider shell than
-    // the single-project split view.
-    <div className={`w-full ${allSelected ? "max-w-7xl" : "max-w-5xl"} mx-auto p-5 flex flex-col gap-6`}>
+    // The cross-project board scrolls sideways inside the header's width
+    // (max-w-6xl, same 20px gutter): three 300px columns fit and the fourth is
+    // cut a little past halfway, which says "scroll for more".
+    <div className={`w-full ${allSelected ? "max-w-6xl" : "max-w-5xl"} mx-auto p-5 flex flex-col gap-6`}>
       <div className="flex flex-col gap-1">
         <BackLink href="/manager" label="Manager" />
         <div className="flex items-center gap-2">
@@ -849,7 +905,8 @@ export default function ManagerApplicationsPage() {
                 <>
                   {periods.length > 0 && <DropdownMenuSeparator />}
                   <DropdownMenuItem
-                    onSelect={() => setPeriodsDialogOpen(true)}
+                    // Next frame: the menu finishes closing before the dialog takes focus.
+                    onSelect={() => requestAnimationFrame(() => setPeriodsDialogOpen(true))}
                     className="flex items-center gap-2"
                   >
                     <SlidersHorizontal size={14} className="text-muted-foreground" />
@@ -911,7 +968,7 @@ export default function ManagerApplicationsPage() {
             // Searchable: execs switch between ~20 projects all review long.
             <Combobox
               aria-label="Reviewing for"
-              className="w-auto min-w-64 self-start"
+              className="w-auto min-w-56 self-start"
               contentClassName="w-72"
               value={allSelected ? ALL_PROJECTS : selectedProject?.id ?? null}
               onChange={setSelectedProjectId}
@@ -921,12 +978,7 @@ export default function ManagerApplicationsPage() {
               ]}
               placeholder="Select project"
               searchPlaceholder="Search projects…"
-              renderValue={(o) => (
-                <>
-                  <span className="text-muted-foreground">Reviewing for</span>
-                  <span className="truncate font-medium text-foreground">{o.label}</span>
-                </>
-              )}
+              renderValue={(o) => <span className="truncate font-medium text-foreground">{o.label}</span>}
             />
           )}
         </div>
@@ -957,11 +1009,9 @@ export default function ManagerApplicationsPage() {
           periodEndsAt={selectedPeriod?.ends_at}
           counts={allCounts}
           canDraft={fullAccessReview}
-          showRecruitingStatus={showRecruitingStatus}
-          onShowRecruitingStatusChange={setShowRecruitingStatus}
           onOpenSheet={() => setSheetOpen(true)}
           onReview={(app, projectId) =>
-            setReviewFor({ id: app.id, name: applicantName(app), status: app.status, projectId })
+            setReviewFor({ id: app.id, name: applicantName(app), status: app.status, projectId, recruiting: recruitingOf(app) })
           }
           reviewOpen={!!reviewFor}
           reloadToken={boardReloadToken}
@@ -1029,8 +1079,8 @@ export default function ManagerApplicationsPage() {
                 onSubmit={handleSubmitDraftPicks}
                 onUnsubmit={draftPicks.unsubmit}
                 onRemove={draftPicks.removeFromDraftWindow}
-                showRecruitingStatus={showRecruitingStatus}
                 accent={projectAccent}
+                pickInfo={pickInfo}
               />
             </div>
 
@@ -1044,21 +1094,9 @@ export default function ManagerApplicationsPage() {
                 <div className="flex min-w-0 items-center gap-3">
                   <h2 className="text-base font-semibold tracking-tight">
                     Applicants
-                    {apps && <span className="ml-1.5 font-normal text-muted-foreground tabular-nums">{apps.length}</span>}
+                    {/* Still available: excludes anyone staged, invited, picked elsewhere or accepted. */}
+                    {apps && <span className="ml-1.5 font-normal text-muted-foreground tabular-nums">{apps.filter((a) => !unavailable(a)).length}</span>}
                   </h2>
-                  <div className="flex items-center gap-1.5">
-                    <Switch
-                      id="show-recruiting-status"
-                      checked={showRecruitingStatus}
-                      onCheckedChange={setShowRecruitingStatus}
-                    />
-                    <Label
-                      htmlFor="show-recruiting-status"
-                      className="cursor-pointer text-[11px] font-medium text-muted-foreground"
-                    >
-                      Coffee & info
-                    </Label>
-                  </div>
                 </div>
                 {selectedPeriodId && selectedProjectId && (
                   <Button variant="outline" size="sm" className="h-7 px-2.5 text-xs shrink-0" onClick={() => setSheetOpen(true)}>
@@ -1068,9 +1106,39 @@ export default function ManagerApplicationsPage() {
                 )}
               </div>
 
+              {/* Search + filter the lists below. */}
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="relative min-w-0 flex-1">
+                  <Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" aria-hidden />
+                  <Input
+                    value={appQuery}
+                    onChange={(e) => setAppQuery(e.target.value)}
+                    placeholder="Search applicants…"
+                    aria-label="Search applicants"
+                    className="h-8 pl-8 text-xs"
+                  />
+                </div>
+                <MultiSelectFilter
+                  label="Filter"
+                  align="end"
+                  className="h-8 px-3 text-xs"
+                  options={APP_FILTERS}
+                  selected={appFilters}
+                  onToggle={(key) =>
+                    setAppFilters((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(key)) next.delete(key);
+                      else next.add(key);
+                      return next;
+                    })
+                  }
+                  onClear={() => setAppFilters(new Set())}
+                />
+              </div>
+
               <div className="flex flex-col gap-2.5">
                 <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Wishlist{wishlist ? ` (${wishlistView.length})` : ""}
+                  Wishlist {wishlist && <span className="font-normal tabular-nums">{wishlistApps.length}</span>}
                 </h3>
                 <WishlistDropzone
                   apps={wishlistApps}
@@ -1081,7 +1149,6 @@ export default function ManagerApplicationsPage() {
                   onReview={onReviewApp}
                   onWishlistToggle={removeFromWishlist}
                   onAddToDraft={stageInDraft}
-                  showRecruitingStatus={showRecruitingStatus}
                 />
               </div>
 
@@ -1094,21 +1161,21 @@ export default function ManagerApplicationsPage() {
                   </div>
                 ) : groupedApps.length === 0 ? (
                   <div className="px-4 py-10 text-center text-sm text-muted-foreground rounded-xl surface">
-                    Everyone&apos;s on the wishlist.
+                    {q || appFilters.size > 0 ? "No applicants match." : <>Everyone&apos;s on the wishlist.</>}
                   </div>
                 ) : (
-                  groupedApps.map(([rank, list]) => (
-                    <div key={rank} className="flex flex-col gap-1.5">
+                  groupedApps.map(([rank, list], gi) => (
+                    <div key={rank} className="flex flex-col gap-1 animate-fade-in-up" style={staggerStyle(gi + 1)}>
                       <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        {rankLabel(rank)} ({list.length})
+                        {rankLabel(rank)} <span className="font-normal tabular-nums">{list.length}</span>
                       </h3>
+                      <div className="flex flex-col divide-y divide-foreground/[0.06]">
                       {list.map((a) => (
                         <SortableApplicantCard
                           key={a.id}
                           app={a}
                           {...cardDraftState(a.id)}
                           periodEndsAt={selectedPeriod?.ends_at}
-                          showRecruitingStatus={showRecruitingStatus}
                           onAddToWishlist={addToWishlist}
                           showAddToDraft={draftActive}
                           onAddToDraft={stageInDraft}
@@ -1116,6 +1183,7 @@ export default function ManagerApplicationsPage() {
                           onReview={onReviewApp}
                         />
                       ))}
+                      </div>
                     </div>
                   ))
                 )}
@@ -1130,7 +1198,6 @@ export default function ManagerApplicationsPage() {
                 app={activeApp}
                 {...cardDraftState(activeApp.id)}
                 periodEndsAt={selectedPeriod?.ends_at}
-                showRecruitingStatus={showRecruitingStatus}
                 onReview={onReviewApp}
                 draggable
               />
@@ -1182,6 +1249,7 @@ export default function ManagerApplicationsPage() {
           status={reviewFor.status}
           contextProjectId={reviewFor.projectId ?? (allSelected ? null : selectedProjectId)}
           focus={reviewFor.focus}
+          recruiting={reviewFor.recruiting}
           open={!!reviewFor}
           onOpenChange={(o) => { if (!o) setReviewFor(null); }}
           onReviewed={(status) => onReviewed(reviewFor.id, status)}
