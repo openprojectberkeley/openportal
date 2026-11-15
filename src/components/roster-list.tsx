@@ -63,10 +63,14 @@ export function RosterList({
 }) {
   const [query, setQuery] = useState("");
   const q = query.trim().toLowerCase();
-  const shown = useMemo(
-    () => (rows && q ? rows.filter((r) => r.name.toLowerCase().includes(q)) : rows),
-    [rows, q],
-  );
+  // Owner first, then admins/PMs (crowned), then everyone else; a stable
+  // sort, so each group keeps the caller's (alphabetical) order.
+  const shown = useMemo(() => {
+    if (!rows) return rows;
+    const rank = (r: RosterRow) => (r.owner ? 0 : r.crown ? 1 : 2);
+    const sorted = [...rows].sort((a, b) => rank(a) - rank(b));
+    return q ? sorted.filter((r) => r.name.toLowerCase().includes(q)) : sorted;
+  }, [rows, q]);
 
   // Height: fixed to the skeleton while loading, then animated to the real
   // content's height, then released to auto (so search/add/remove reflow).
@@ -114,7 +118,7 @@ export function RosterList({
       >
       <div ref={contentRef}>
       {shown === null ? (
-        <div aria-hidden className="flex flex-col pr-2">
+        <div aria-hidden className="flex flex-col pr-2 pt-1.5">
           {Array.from({ length: skeletonRows }, (_, i) => (
             <div key={i} className="flex h-7 items-center gap-2">
               <Skeleton className="h-3.5 rounded-full" style={{ width: `${[46, 38, 52, 34, 42, 30, 48, 36, 40][i % 9]}%` }} />
@@ -128,7 +132,7 @@ export function RosterList({
         <p className="py-1 text-xs text-muted-foreground">{q ? "No matches." : emptyText}</p>
       ) : (
         <ScrollArea className={maxHeight}>
-          <div className="flex flex-col pr-2">
+          <div className="flex flex-col pr-2 pt-1.5">
             {shown.map((r) => (
               <div key={r.id} className="flex min-w-0 items-center gap-2 py-1 text-sm">
                 <span className="flex min-w-0 flex-1 items-baseline gap-1.5">

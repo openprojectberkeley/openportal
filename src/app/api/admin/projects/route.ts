@@ -16,7 +16,7 @@ export async function GET() {
   const [{ data: projects }, { data: projectMembers }] = await Promise.all([
     supabase
       .from("projects")
-      .select("id, name, client, description, type, difficulty, estimated_members, num_subteams, icon, icon_url, color, family_id")
+      .select("id, name, client, description, type, difficulty, estimated_members, num_subteams, icon, icon_url, color, family_id, semester_id")
       .order("name"),
     // Light: counts only. The roster loads on expand (/api/admin/projects/[id]/members).
     supabase.from("project_members").select("project_id"),

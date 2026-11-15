@@ -155,7 +155,10 @@ export function PortalMembersModal({ portalId, open, onOpenChange, canEdit }: Pr
 
   const available = allMembers.filter((m) => !rows.some((r) => r.user_id === m.user_id));
   const q = query.trim().toLowerCase();
-  const shownRows = q ? rows.filter((r) => r.name.toLowerCase().includes(q)) : rows;
+  // Owner, then admins, then everyone else (each group stays alphabetical).
+  const rank = (r: MemberRow) => (r.owner ? 0 : r.is_admin ? 1 : 2);
+  const ordered = [...rows].sort((a, b) => rank(a) - rank(b));
+  const shownRows = q ? ordered.filter((r) => r.name.toLowerCase().includes(q)) : ordered;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -188,7 +191,7 @@ export function PortalMembersModal({ portalId, open, onOpenChange, canEdit }: Pr
           ) : shownRows.length === 0 ? (
             <p className="text-sm text-muted-foreground py-4 text-center">{rows.length === 0 ? "No members yet." : "No matches."}</p>
           ) : (
-            <div className="flex flex-col gap-1">
+            <div className="flex flex-col gap-1 pt-1.5">
               {shownRows.map((r) => (
                 <div key={r.user_id} className="flex items-center gap-2 text-sm py-1">
                   <PersonName userId={r.user_id} name={r.name} className="flex-1 min-w-0 truncate" />

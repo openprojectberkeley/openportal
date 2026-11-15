@@ -29,6 +29,9 @@ import { staggerStyle } from "@/lib/motion";
 import { optimistic } from "@/lib/optimistic";
 
 import { Disclosure } from "@/components/ui/disclosure";
+import { Combobox } from "@/components/ui/combobox";
+import { InfoHint } from "@/components/ui/info-hint";
+import { useSemesters } from "@/lib/use-semesters";
 
 type ProjectMember = { user_id: string; name: string; is_pm: boolean };
 
@@ -52,6 +55,9 @@ type Project = {
   icon_url: string | null;
   color: string | null;
   family_id: string | null;
+  // The semester it runs in (0108). Only projects in the active semester make
+  // their PMs PMs (the PM role and board access).
+  semester_id: string | null;
   /** Null until the row is expanded; the roster loads lazily. */
   members: ProjectMember[] | null;
   member_count: number;
@@ -76,6 +82,8 @@ type ProjectFields = {
   // "" means no family. Only exec can change this — the 0103 trigger rejects it
   // for anyone else — and this panel is exec-only, so there's no gate here.
   familyId: string;
+  // "" = none; new projects start in the active semester.
+  semesterId: string;
 };
 const EMPTY_FIELDS: ProjectFields = {
   name: "",
@@ -89,6 +97,7 @@ const EMPTY_FIELDS: ProjectFields = {
   iconUrl: null,
   color: "",
   familyId: "",
+  semesterId: "",
 };
 
 const toIntOrNull = (s: string) => {
@@ -104,6 +113,7 @@ export function ProjectsPanel({ members }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const memberFilters = useAddMemberFilters(true);
+  const { semesters, active: activeSemester } = useSemesters();
   const [query, setQuery] = useState("");
   const { ask, dialog: confirmDialog } = useConfirm();
 
@@ -152,7 +162,8 @@ export function ProjectsPanel({ members }: Props) {
 
   const openCreate = () => {
     setEditingId(null);
-    setFields(EMPTY_FIELDS);
+    // New projects start in the active semester.
+    setFields({ ...EMPTY_FIELDS, semesterId: activeSemester?.id ?? "" });
     setIconBlob(null);
     setFormError(null);
     setDialogOpen(true);
@@ -172,6 +183,7 @@ export function ProjectsPanel({ members }: Props) {
       iconUrl: p.icon_url,
       color: p.color ?? "",
       familyId: p.family_id ?? "",
+      semesterId: p.semester_id ?? "",
     });
     setIconBlob(null);
     setFormError(null);
@@ -213,9 +225,10 @@ export function ProjectsPanel({ members }: Props) {
       icon: fields.icon.trim() || null,
       color: fields.color.trim() || null,
       family_id: fields.familyId || null,
+      semester_id: fields.semesterId || null,
     };
     const SELECT =
-      "id, name, client, description, type, difficulty, estimated_members, num_subteams, icon, icon_url, color, family_id";
+      "id, name, client, description, type, difficulty, estimated_members, num_subteams, icon, icon_url, color, family_id, semester_id";
 
     if (editingId) {
       // Edit uses immediate icon upload, so fields.iconUrl is already a real URL.
@@ -343,7 +356,10 @@ export function ProjectsPanel({ members }: Props) {
   const renderRow = (p: Project, i: number) => {
     const isOpen = expanded.has(p.id);
     const available = members.filter((m) => !(p.members ?? []).some((pm) => pm.user_id === m.user_id));
+    const semesterName = semesters?.find((sem) => sem.id === p.semester_id)?.name;
     const meta = [
+      // Past projects say so: their PMs no longer count as PMs.
+      activeSemester && p.semester_id !== activeSemester.id ? (semesterName ? `Past · ${semesterName}` : "No semester") : null,
       p.difficulty ? DIFFICULTY_LABELS[p.difficulty] : null,
       p.estimated_members != null ? `~${p.estimated_members} members` : null,
       p.num_subteams != null ? `${p.num_subteams} subteam${p.num_subteams === 1 ? "" : "s"}` : null,
@@ -514,6 +530,29 @@ export function ProjectsPanel({ members }: Props) {
                   ))}
                 </DropdownMenuContent>
               </DropdownMenu>
+            </div>
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center gap-1.5">
+                <Label>Semester</Label>
+                <InfoHint label="About project semesters">
+                  Only projects in the active semester count: their PMs get the PM role and board access.
+                </InfoHint>
+              </div>
+              <Combobox
+                aria-label="Semester"
+                value={fields.semesterId}
+                onChange={(v) => setFields((f) => ({ ...f, semesterId: v }))}
+                options={[
+                  { value: "", label: "No semester" },
+                  ...(semesters ?? []).map((sem) => ({
+                    value: sem.id,
+                    label: sem.name,
+                    hint: sem.is_active ? "active" : undefined,
+                  })),
+                ]}
+                placeholder="Select semester"
+                searchPlaceholder="Search semesters…"
+              />
             </div>
             <div className="flex flex-col gap-1">
               <Label>Family</Label>

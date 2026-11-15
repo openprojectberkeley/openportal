@@ -482,10 +482,14 @@ export default function AdminPage() {
                       onOpenChange={(o) => setRolePickerFor(o ? m.user_id : null)}
                       options={allRoles.map((role) => {
                         const hasRole = m.roles.some((r) => r.id === role.id);
+                        // PM follows project PMs (0108); it can't be set here.
+                        const automatic = role.role_name.toLowerCase() === "pm";
                         return {
                           value: role.id,
                           label: role.role_name,
                           icon: <Check className={hasRole ? "opacity-100" : "opacity-0"} />,
+                          disabled: automatic,
+                          hint: automatic ? "automatic" : undefined,
                         };
                       })}
                       onSelect={(id) => {

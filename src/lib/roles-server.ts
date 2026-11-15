@@ -44,19 +44,16 @@ export async function getEffectiveAccessLevels(
   const user = knownUser ?? (await supabase.auth.getUser()).data.user;
   if (!user) return [];
 
-  // Roles and PM membership are independent: fetch them together.
-  const [{ data: roleRows }, { data: pmRows }] = await Promise.all([
-    supabase.from("members_roles").select("roles(role_name, access_level)").eq("user_id", user.id),
-    supabase.from("project_members").select("project_id").eq("user_id", user.id).eq("is_pm", true).limit(1),
-  ]);
+  // The PM role (board) is kept equal to "PM of a current project" by the
+  // database (0108), so the role rows alone decide access.
+  const { data: roleRows } = await supabase
+    .from("members_roles")
+    .select("roles(role_name, access_level)")
+    .eq("user_id", user.id);
 
   const roles = ((roleRows ?? []) as unknown as MemberRoleRow[]).flatMap((r) => (r.roles ? [r.roles] : []));
   const realLevels = roles.map((r) => r.access_level).filter(Boolean) as string[];
   const canSimulate = hasElevatedRole(roles);
-
-  // board = exec + PMs: a PM of any project has board access even without a
-  // board/exec role row.
-  if ((pmRows ?? []).length > 0 && !realLevels.includes("board")) realLevels.push("board");
 
   if (!canSimulate) return realLevels;
 

@@ -67,27 +67,17 @@ export function RoleSimulationProvider({ children }: { children: React.ReactNode
     supabase.auth.getUser().then(async ({ data: { user } }) => {
       if (!user) { setReady(true); return; }
 
-      const [{ data: roleRows }, { data: pmRows }] = await Promise.all([
-        supabase
-          .from("members_roles")
-          .select("roles(role_name, access_level)")
-          .eq("user_id", user.id),
-        supabase
-          .from("project_members")
-          .select("project_id")
-          .eq("user_id", user.id)
-          .eq("is_pm", true)
-          .limit(1),
-      ]);
+      const { data: roleRows } = await supabase
+        .from("members_roles")
+        .select("roles(role_name, access_level)")
+        .eq("user_id", user.id);
 
       const roles = ((roleRows ?? []) as unknown as MemberRoleRow[]).flatMap((r) => (r.roles ? [r.roles] : []));
       const levels = roles.map((r) => r.access_level).filter(Boolean) as string[];
       const canSim = hasElevatedRole(roles);
-      const pm = (pmRows ?? []).length > 0;
-
-      // board = exec + PMs: a PM of any project has board access even without a
-      // board/exec role row.
-      if (pm && !levels.includes("board")) levels.push("board");
+      // The PM role is kept in sync with "PM of a current project" by the
+      // database (0108), so roles alone decide board access.
+      const pm = roles.some((r) => r.role_name?.toLowerCase() === "pm");
 
       setRealLevels(levels);
       setCanSimulate(canSim);
