@@ -2,13 +2,14 @@
 
 import { createClient } from "@/lib/supabase/client";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useProgressiveList } from "@/lib/use-progressive-list";
 import { Download, Pencil, Plus, Search, Trash2, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/overlay-scrollbar";
 import { PersonName } from "@/components/person-profile-provider";
-import { MemberRosterSkeleton, SheetGridSkeleton } from "@/components/skeletons";
+import { MemberRosterSkeleton, SheetGridSkeleton, SheetRowsSkeleton } from "@/components/skeletons";
 import {
   EventFormFields,
   deletePortalEventOptimistic,
@@ -50,6 +51,11 @@ type Props = {
    * it to one project.
    */
   fullAccess?: boolean;
+  /**
+   * Manager grid only: scroll this event's column into view and highlight it,
+   * so "Take attendance" on an event (calendar panel) lands on its column.
+   */
+  focusEventId?: string;
 };
 
 
@@ -103,6 +109,7 @@ function formatEventDate(iso: string): string {
 function EventHeaderCell({
   ev,
   imported,
+  focused,
   onEdit,
   onDelete,
   onRemove,
@@ -110,6 +117,8 @@ function EventHeaderCell({
   ev: EventFormValue;
   /** A club event pinned into this portal's sheet (migration 0102). */
   imported?: boolean;
+  /** The column the sheet was opened for (focusEventId): accent-marked. */
+  focused?: boolean;
   /** Omitted when the viewer may mark attendance but not change the event. */
   onEdit?: () => void;
   onDelete?: () => void;
@@ -131,9 +140,14 @@ function EventHeaderCell({
   }, [ev.title]);
 
   return (
-    <th className="group/evt relative sticky top-0 z-20 bg-background px-2 py-2 text-left font-medium align-bottom min-w-[9rem]">
+    <th
+      data-event-id={ev.id}
+      className={`group/evt relative sticky top-0 z-20 bg-background px-2 py-2 text-left font-medium align-bottom min-w-[9rem] ${
+        focused ? "shadow-[inset_0_-2px_0_hsl(var(--brand))]" : ""
+      }`}
+    >
       <div className="flex flex-col gap-0.5">
-        <span className="text-[10px] font-normal text-muted-foreground uppercase tracking-wide">
+        <span className={`text-[10px] font-normal uppercase tracking-wide ${focused ? "text-brand" : "text-muted-foreground"}`}>
           {formatEventDate(ev.start_time)}
           {imported && <span className="ml-1 rounded bg-foreground/10 px-1 normal-case tracking-normal">Club</span>}
         </span>
@@ -204,6 +218,7 @@ export function PortalAttendanceModal({
   canManage,
   canEditEvents,
   fullAccess = false,
+  focusEventId,
 }: Props) {
   const canEdit = canEditEvents ?? canManage;
   const [events, setEvents] = useState<EventFormValue[]>([]);
@@ -387,6 +402,32 @@ export function PortalAttendanceModal({
       (r) => (!projectFilter || r.projectIds.includes(projectFilter)) && (!q || r.name.toLowerCase().includes(q)),
     );
   }, [roster, projectFilter, memberQuery]);
+
+  // Big sheets (the club roster is ~300 people × every event) mount a block of
+  // rows at a time as you scroll down, never all at once: the first screen
+  // fades in staggered, later blocks just appear. Starts over on reopen,
+  // search and project filter.
+  const {
+    visible: mountedRoster,
+    pendingRows,
+    sentinelRef: rowSentinelRef,
+    initialCount: animatedRows,
+  } = useProgressiveList(visibleRoster, { resetKey: `${open}|${loading}|${memberQuery}|${projectFilter}` });
+
+  // Once the grid is up, bring the focused event's column to the middle. Once
+  // per open, so later edits to the sheet don't yank the scroll back.
+  const gridRef = useRef<HTMLTableElement>(null);
+  const focusedOnce = useRef(false);
+  useEffect(() => {
+    if (!open) focusedOnce.current = false;
+  }, [open]);
+  useEffect(() => {
+    if (!open || loading || !focusEventId || focusedOnce.current) return;
+    const cell = gridRef.current?.querySelector<HTMLElement>(`[data-event-id="${CSS.escape(focusEventId)}"]`);
+    if (!cell) return;
+    focusedOnce.current = true;
+    requestAnimationFrame(() => cell.scrollIntoView({ inline: "center", block: "nearest" }));
+  }, [open, loading, focusEventId, visibleRoster.length]);
 
   const openImport = async () => {
     setImportSearch("");
@@ -722,7 +763,7 @@ export function PortalAttendanceModal({
                 {/* No grid: zebra rows (sheet-zebra in globals.css) whose cells
                     paint an opaque shade, so the sticky Member column stays
                     solid while events scroll under it. */}
-                <table className="sheet-zebra border-separate border-spacing-0 text-sm">
+                <table ref={gridRef} className="sheet-zebra border-separate border-spacing-0 text-sm">
                   <thead>
                     <tr>
                       <th className="sticky left-0 top-0 z-40 bg-background px-3 py-2 text-left font-medium min-w-[10rem]">
@@ -733,6 +774,7 @@ export function PortalAttendanceModal({
                           key={ev.id}
                           ev={ev}
                           imported={importedIds.has(ev.id)}
+                          focused={ev.id === focusEventId}
                           // An imported club event belongs to the club sheet:
                           // here it can only be un-imported, not edited.
                           onEdit={canEdit && !importedIds.has(ev.id) ? () => openEdit(ev) : undefined}
@@ -756,18 +798,27 @@ export function PortalAttendanceModal({
                     </tr>
                   </thead>
                   <tbody>
-                    {visibleRoster.map((r, ri) => (
-                      // Every row fades in (opacity only: a transform on a <tr> breaks the
-                      // sticky cells); a tighter step so a full screen of rows
-                      // staggers, then the rest arrive together.
-                      <tr key={r.user_id} className="animate-in fade-in-0 duration-2 fill-mode-both" style={{ animationDelay: `${Math.min(ri, 24) * 18}ms` }}>
+                    {mountedRoster.map((r, ri) => (
+                      // The first screen of rows fades in, staggered (opacity
+                      // only: a transform on a <tr> breaks the sticky cells);
+                      // rows added later, off screen, just appear.
+                      <tr
+                        key={r.user_id}
+                        className={ri < animatedRows ? "animate-in fade-in-0 duration-2 fill-mode-both" : undefined}
+                        style={ri < animatedRows ? { animationDelay: `${ri * 18}ms` } : undefined}
+                      >
                         <td className="sticky left-0 z-20 bg-background px-3 py-1.5 min-w-[10rem]">
                           <PersonName userId={r.user_id} name={r.name} className="block truncate" />
                         </td>
                         {events.map((ev) => {
                           const current = attendance[key(ev.id, r.user_id)];
                           return (
-                            <td key={ev.id} className="px-2 py-1.5">
+                            <td
+                              key={ev.id}
+                              // A faint accent wash down the focused column; a
+                              // shadow, so it layers over the zebra fill.
+                              className={`px-2 py-1.5 ${ev.id === focusEventId ? "shadow-[inset_0_0_0_9999px_hsl(var(--brand)/0.07)]" : ""}`}
+                            >
                               {/* One P/A/E control per cell: the pill slides
                                   to the status in its colour; clicking the
                                   selected one clears it. Arrows only move focus
@@ -779,6 +830,8 @@ export function PortalAttendanceModal({
                                 shape="soft"
                                 allowDeselect
                                 selectOnFocus={false}
+                                // Thousands of these: slide by arithmetic, never measure.
+                                itemWidth={22}
                                 value={(current ?? "") as Status}
                                 onChange={(v) => {
                                   // setStatus clears when given the current status.
@@ -800,6 +853,13 @@ export function PortalAttendanceModal({
                         <td className="w-12" />
                       </tr>
                     ))}
+                    {/* Rows still to come: scrolling into them loads them. */}
+                    <SheetRowsSkeleton
+                      rows={pendingRows}
+                      columns={events.length}
+                      trailing={canEdit}
+                      rowRef={rowSentinelRef}
+                    />
                   </tbody>
                 </table>
               </ScrollArea>

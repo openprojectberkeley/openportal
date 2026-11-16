@@ -3,6 +3,7 @@
 import { getAuthCallbackUrl } from "@/lib/auth-callback-url";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
+import { GoogleIcon } from "@/components/google-icon";
 import { useState } from "react";
 
 export function GoogleSignInButton({ disabled }: { disabled?: boolean }) {
@@ -40,7 +41,14 @@ export function GoogleSignInButton({ disabled }: { disabled?: boolean }) {
         disabled={disabled || isLoading}
         onClick={handleGoogleSignIn}
       >
-        {isLoading ? "Redirecting..." : "Continue with Google"}
+        {isLoading ? (
+          "Redirecting..."
+        ) : (
+          <>
+            <GoogleIcon className="size-4" />
+            Continue with Google
+          </>
+        )}
       </Button>
       {error && <p className="text-sm text-red-500">{error}</p>}
     </div>

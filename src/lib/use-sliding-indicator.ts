@@ -77,7 +77,13 @@ export function useSlidingIndicator(index: number | null, mode: "bar" | "pill", 
     // A transform settling (a dialog's zoom-in) doesn't resize anything, so
     // also re-place once the enclosing overlay's animation ends.
     const overlay = row.closest<HTMLElement>("[role=dialog], [data-radix-popper-content-wrapper]");
-    const settle = () => place(latest.current, true);
+    // Only the overlay's OWN animation: animation/transition events bubble, so
+    // without the target check every animated descendant (e.g. each fading-in
+    // row of a 300-row attendance sheet) re-measured every control in the
+    // dialog — thousands of forced layouts per row, freezing the page.
+    const settle = (e: Event) => {
+      if (e.target === overlay) place(latest.current, true);
+    };
     overlay?.addEventListener("animationend", settle);
     overlay?.addEventListener("transitionend", settle);
     return () => {

@@ -66,7 +66,9 @@ export async function GET(req: NextRequest) {
   const filtered = rows.filter((m) => {
     if (q && !nameOf(m).toLowerCase().includes(q)) return false;
     if (statuses.size > 0 && !statuses.has(m.status ?? "")) return false;
-    if (roleIds.size > 0 && !(rolesMap.get(m.user_id) ?? []).some((r) => roleIds.has(r.id))) return false;
+    // roles.id is an integer column; the query string is text. Compare as text,
+    // or no role ever matches and the filter empties the list.
+    if (roleIds.size > 0 && !(rolesMap.get(m.user_id) ?? []).some((r) => roleIds.has(String(r.id)))) return false;
     return true;
   });
 

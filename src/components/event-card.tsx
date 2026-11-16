@@ -1,6 +1,6 @@
 "use client";
 
-import { MapPin, MoreHorizontal, Pencil, Trash2, CalendarPlus, ExternalLink } from "lucide-react";
+import { MapPin, MoreHorizontal, Pencil, Trash2, CalendarPlus, ExternalLink, ClipboardCheck, ChevronDown } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -15,6 +15,9 @@ import { formatEventDate, formatEventTime } from "@/lib/dates";
 import { downloadEventIcs } from "@/lib/ics";
 import { cn } from "@/lib/utils";
 import type { PortalEvent } from "@/lib/use-calendar-events";
+
+const TAKE_ATTENDANCE_CLASS =
+  "mt-1 inline-flex items-center gap-1.5 self-start rounded-lg bg-brand/10 px-2.5 py-1 text-xs font-medium text-brand transition-colors hover:bg-brand/20";
 
 /**
  * One event: no card, no outline, just the information beside a rounded
@@ -33,6 +36,7 @@ export function EventCard({
   onDelete,
   deleting = false,
   onClick,
+  attendanceTargets,
   actions = true,
 }: {
   ev: PortalEvent;
@@ -43,6 +47,12 @@ export function EventCard({
   onDelete?: () => void;
   deleting?: boolean;
   onClick?: () => void;
+  /**
+   * "Take attendance", shown only to someone who may take it. One target is a
+   * button; several (a PM of two projects importing a club event) a menu of
+   * their labels.
+   */
+  attendanceTargets?: { label: string; onSelect: () => void }[];
   actions?: boolean;
 }) {
   const bar = eventBarColor(ev.category, color);
@@ -72,6 +82,37 @@ export function EventCard({
             </span>
           )}
           {ev.description && <span className="text-xs text-muted-foreground">{ev.description}</span>}
+          {attendanceTargets && attendanceTargets.length === 1 && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                attendanceTargets[0].onSelect();
+              }}
+              className={TAKE_ATTENDANCE_CLASS}
+            >
+              <ClipboardCheck size={13} />
+              Take attendance
+            </button>
+          )}
+          {attendanceTargets && attendanceTargets.length > 1 && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button type="button" onClick={(e) => e.stopPropagation()} className={TAKE_ATTENDANCE_CLASS}>
+                  <ClipboardCheck size={13} />
+                  Take attendance
+                  <ChevronDown size={13} />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="min-w-[11rem]" onClick={(e) => e.stopPropagation()}>
+                {attendanceTargets.map((t) => (
+                  <DropdownMenuItem key={t.label} onSelect={() => requestAnimationFrame(t.onSelect)}>
+                    {t.label}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
         <span className="flex flex-col items-end gap-0.5 flex-shrink-0">
           {ev.category !== "general" && (

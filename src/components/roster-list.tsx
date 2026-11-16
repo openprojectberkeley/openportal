@@ -5,6 +5,8 @@ import { Search, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/overlay-scrollbar";
+import { useProgressiveList } from "@/lib/use-progressive-list";
+import { RosterRowsSkeleton } from "@/components/skeletons";
 import { PersonName } from "@/components/person-profile-provider";
 import { AdminCrown } from "@/components/admin-crown";
 
@@ -71,6 +73,10 @@ export function RosterList({
     const sorted = [...rows].sort((a, b) => rank(a) - rank(b));
     return q ? sorted.filter((r) => r.name.toLowerCase().includes(q)) : sorted;
   }, [rows, q]);
+  // A block of rows at a time as the list scrolls (see useProgressiveList).
+  const { visible: mounted, pendingRows, sentinelRef } = useProgressiveList(shown ?? [], {
+    resetKey: `${rows === null}|${q}`,
+  });
 
   // Height: fixed to the skeleton while loading, then animated to the real
   // content's height, then released to auto (so search/add/remove reflow).
@@ -133,7 +139,7 @@ export function RosterList({
       ) : (
         <ScrollArea className={maxHeight}>
           <div className="flex flex-col pr-2 pt-1.5">
-            {shown.map((r) => (
+            {mounted.map((r) => (
               <div key={r.id} className="flex min-w-0 items-center gap-2 py-1 text-sm">
                 <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
                   {person ? (
@@ -167,6 +173,8 @@ export function RosterList({
                 )}
               </div>
             ))}
+            {/* Rows still to come: scrolling into them loads them. */}
+            <RosterRowsSkeleton rows={pendingRows} rowRef={sentinelRef} />
           </div>
         </ScrollArea>
       )}

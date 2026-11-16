@@ -565,3 +565,74 @@ export function ScoreboardCompactSkeleton({ rows = 4 }: { rows?: number }) {
     </div>
   );
 }
+
+const ROSTER_ROW_NAME_WIDTHS = [46, 38, 52, 34, 42, 30, 48, 36, 40];
+
+/**
+ * Rows still on their way at the foot of a progressively loaded member list
+ * (useProgressiveList): a name, the crown column, the remove column. Each row
+ * carries the hook's sentinel ref, so scrolling into the skeletons is what
+ * loads the real rows behind them.
+ */
+export function RosterRowsSkeleton({
+  rows,
+  rowRef,
+}: {
+  rows: number;
+  rowRef?: React.Ref<HTMLDivElement>;
+}) {
+  return (
+    <div aria-hidden className="flex flex-col">
+      {Array.from({ length: rows }, (_, i) => (
+        <div key={i} ref={rowRef} className="flex h-7 items-center gap-2">
+          <Skeleton
+            className="h-3.5 rounded-full"
+            style={{ width: `${ROSTER_ROW_NAME_WIDTHS[i % ROSTER_ROW_NAME_WIDTHS.length]}%` }}
+          />
+          <span className="flex-1" />
+          <Skeleton className="h-3.5 w-3.5 rounded-sm" />
+          <span className="w-4" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * The same for the attendance grid: <tr>s to append to its <tbody>, a name
+ * under the sticky Member column and a P/A/E-shaped block per event column.
+ * `trailing` adds the empty cell under the grid's add-event column.
+ */
+export function SheetRowsSkeleton({
+  rows,
+  columns,
+  trailing = false,
+  rowRef,
+}: {
+  rows: number;
+  columns: number;
+  trailing?: boolean;
+  rowRef?: React.Ref<HTMLTableRowElement>;
+}) {
+  return (
+    <>
+      {Array.from({ length: rows }, (_, r) => (
+        <tr key={`skeleton-${r}`} ref={rowRef} aria-hidden>
+          <td className="sticky left-0 z-20 bg-background px-3 py-1.5 min-w-[10rem]">
+            <Skeleton className="h-3.5 rounded-full" style={{ width: `${NAME_WIDTHS[r % NAME_WIDTHS.length]}%` }} />
+          </td>
+          {Array.from({ length: columns }, (_, c) => (
+            <td key={c} className="px-2 py-1.5">
+              <div className="flex h-[26px] w-[74px] items-center gap-0.5 p-0.5">
+                <Skeleton className="h-full flex-1 rounded-sm" />
+                <Skeleton className="h-full flex-1 rounded-sm" />
+                <Skeleton className="h-full flex-1 rounded-sm" />
+              </div>
+            </td>
+          ))}
+          {trailing && <td className="w-12" />}
+        </tr>
+      ))}
+    </>
+  );
+}

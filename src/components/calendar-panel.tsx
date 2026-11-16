@@ -1,6 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { createClient } from "@/lib/supabase/client";
+import { toast } from "sonner";
 import { ChevronLeft, ChevronRight, Plus, RefreshCw, ClipboardCheck } from "lucide-react";
 import { EventListSkeleton } from "@/components/skeletons";
 import { hoverForeground, DEFAULT_ACCENT } from "@/lib/portal-color";
@@ -27,6 +29,9 @@ type Props = {
   portalName?: string;
   portalColor?: string | null;
 };
+
+/** Which attendance sheet an event's "Take attendance" opens. */
+type AttendanceSheet = { portalId?: string; canEditEvents: boolean; fullAccess: boolean };
 
 // On a portal page, a second card tinted with the portal's accent sits BEHIND
 // the calendar and pokes out above it, so the portal's name reads as a tab on
@@ -83,7 +88,7 @@ function PortalBackingCard({
 }
 
 export function CalendarPanel({ portalId, portalName, portalColor }: Props) {
-  const { isExec, isBoardOrExec } = useRoleSim();
+  const { isExec } = useRoleSim();
   const { overrides } = usePortalMeta();
 
   const {
@@ -120,11 +125,94 @@ export function CalendarPanel({ portalId, portalName, portalColor }: Props) {
   // attendance sheet and its Google sync have no portal settings page to live
   // on — they belong here, next to the events they act on.
   const [attendanceOpen, setAttendanceOpen] = useState(false);
-  // The club attendance sheet opens for everyone: board/exec get the marking
-  // grid, an ordinary member the read-only list of their own status (the same
+  // The club attendance sheet opens for everyone: exec get the marking grid,
+  // everyone else (PMs included, 0111) the read-only list of their own status (the same
   // split the portal sheet already makes, and the one RLS enforces — a member
   // can only select rows where user_id = auth.uid()).
   const showClubAttendance = !portalId;
+
+  // "Take attendance" on the selected day's events, for whoever may take it
+  // (mirrors can_mark_event_attendance, 0111): a portal event's admins, from
+  // its portal's sheet; exec, from the club sheet; anyone else (a PM) only
+  // through their own portal, which only lists their project's people. A PM
+  // taking a club event's attendance imports it into their portal first.
+  // Imports are looked up for just the club events on the day in view.
+  const manageableIds = useMemo(() => new Set(manageablePortals.map((p) => p.id)), [manageablePortals]);
+  const dayClubIds = (eventsByDay.get(selectedKey) ?? [])
+    .filter((e) => e.portal_id === null)
+    .map((e) => e.id)
+    .join(",");
+  const [importedInto, setImportedInto] = useState<Map<string, string>>(new Map());
+  useEffect(() => {
+    if (!dayClubIds || manageableIds.size === 0) {
+      setImportedInto(new Map());
+      return;
+    }
+    let cancelled = false;
+    createClient()
+      .from("portal_imported_events")
+      .select("event_id, portal_id")
+      .in("event_id", dayClubIds.split(","))
+      .in("portal_id", [...manageableIds])
+      .then(({ data }) => {
+        if (cancelled) return;
+        const map = new Map<string, string>();
+        // Prefer this calendar's own portal when the event is imported there.
+        for (const r of data ?? []) if (!map.has(r.event_id) || r.portal_id === portalId) map.set(r.event_id, r.portal_id);
+        setImportedInto(map);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [dayClubIds, manageableIds, portalId]);
+
+  const portalSheet = (id: string): AttendanceSheet => ({ portalId: id, canEditEvents: true, fullAccess: false });
+
+  // Pin a club event into a portal's sheet (0102), then open that sheet on it.
+  const importAndOpen = async (ev: PortalEvent, targetPortalId: string) => {
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const { error } = await supabase
+      .from("portal_imported_events")
+      .insert({ portal_id: targetPortalId, event_id: ev.id, imported_by: user.id });
+    // 23505: already imported (another tab, a teammate) — just open it.
+    if (error && error.code !== "23505") {
+      toast.error(`Couldn't add ${ev.title} to your attendance sheet.`);
+      return;
+    }
+    setImportedInto((prev) => new Map(prev).set(ev.id, targetPortalId));
+    setEventSheet({ eventId: ev.id, sheet: portalSheet(targetPortalId) });
+  };
+
+  const attendanceTargetsFor = (ev: PortalEvent): { label: string; onSelect: () => void }[] | undefined => {
+    const open = (sheet: AttendanceSheet) => [{ label: "", onSelect: () => setEventSheet({ eventId: ev.id, sheet }) }];
+    if (ev.portal_id !== null) {
+      // A portal sheet lists only its attendance-enabled events.
+      return ev.attendance_enabled && manageableIds.has(ev.portal_id) ? open(portalSheet(ev.portal_id)) : undefined;
+    }
+    // Exec: the club sheet, every active member.
+    if (isExec) return ev.attendance_enabled ? open({ canEditEvents: true, fullAccess: true }) : undefined;
+    // Already in one of the user's portals (shown there whether or not enabled).
+    const via = importedInto.get(ev.id);
+    if (via) return open(portalSheet(via));
+    // Otherwise import it into their portal: this calendar's, if they run it,
+    // else each one they run (a menu when there are several). Board-only
+    // events can't be imported (0102).
+    if (!ev.attendance_enabled || ev.category === "board" || manageablePortals.length === 0) return undefined;
+    const targets = portalId && manageableIds.has(portalId)
+      ? manageablePortals.filter((p) => p.id === portalId)
+      : manageablePortals;
+    return targets.map((p) => ({ label: p.name, onSelect: () => void importAndOpen(ev, p.id) }));
+  };
+
+  // The sheet "Take attendance" opened, scrolled to its event. `lastSheet`
+  // keeps it mounted while the dialog animates closed.
+  const [eventSheet, setEventSheet] = useState<{ eventId: string; sheet: AttendanceSheet } | null>(null);
+  const [lastSheet, setLastSheet] = useState<typeof eventSheet>(null);
+  useEffect(() => {
+    if (eventSheet) setLastSheet(eventSheet);
+  }, [eventSheet]);
 
   const [formOpen, setFormOpen] = useState(false);
   const [editingEvent, setEditingEvent] = useState<PortalEvent | null>(null);
@@ -208,8 +296,52 @@ export function CalendarPanel({ portalId, portalName, portalColor }: Props) {
     <div className="rounded-xl border p-4 bg-background rim-card">
       {!portalId && <SubscribeMenu className="mb-3 w-full" />}
 
-      <div className="flex flex-col sm:flex-row lg:flex-col gap-4 lg:gap-3">
-        {/* Month section (shrinks when the events sections sit beside it). */}
+      {/* The selected day (today by default) leads, above the month, so
+          what's on right now is the first thing in the panel. */}
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+            {dateFromKey(selectedKey).toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" })}
+          </span>
+          {canAdd && (
+            <button onClick={openCreate} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
+              <Plus size={13} /> Add event
+            </button>
+          )}
+        </div>
+
+        {error && <p className="text-sm text-red-500">{error}</p>}
+
+        {loading ? (
+          <EventListSkeleton count={2} />
+        ) : selectedEvents.length === 0 ? (
+          <p className="text-xs text-muted-foreground">No events.</p>
+        ) : (
+          <div className="flex flex-col gap-2 animate-fade-in-up">
+            {selectedEvents.map((ev) => {
+              const { name, color } = resolve(ev);
+              const manage = canManageEvent(ev);
+              return (
+                <EventCard
+                  key={ev.id}
+                  ev={ev}
+                  name={name}
+                  color={color}
+                  onEdit={manage ? () => openEdit(ev) : undefined}
+                  // Deleting a synced row just resurrects it on the next
+                  // sync, minus its attendance — remove it in Google instead.
+                  onDelete={manage && !ev.external_source ? () => deleteEvent(ev) : undefined}
+                  deleting={deletingId === ev.id}
+                  attendanceTargets={attendanceTargetsFor(ev)}
+                />
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <div className="mt-4 flex flex-col sm:flex-row lg:flex-col gap-4 lg:gap-3">
+        {/* Month section (shrinks when Upcoming sits beside it). */}
         <div className="w-full sm:w-1/2 lg:w-full flex flex-col gap-3">
           <div className="flex items-center justify-between">
             <h2 className="font-semibold text-sm">
@@ -299,70 +431,27 @@ export function CalendarPanel({ portalId, portalName, portalColor }: Props) {
           )}
         </div>
 
-        {/* Events sections: divider swaps between top (stacked) and left (split). */}
-        <div className="w-full sm:flex-1 lg:w-full min-w-0 flex flex-col gap-4 pt-3 sm:pt-0 sm:pl-5 lg:pl-0 lg:pt-4">
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                {dateFromKey(selectedKey).toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" })}
-              </span>
-              {canAdd && (
-                <button onClick={openCreate} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
-                  <Plus size={13} /> Add event
-                </button>
-              )}
-            </div>
-
-            {error && <p className="text-sm text-red-500">{error}</p>}
-
-            {loading ? (
-              <EventListSkeleton count={2} />
-            ) : selectedEvents.length === 0 ? (
-              <p className="text-xs text-muted-foreground">No events.</p>
-            ) : (
-              <div className="flex flex-col gap-2 animate-fade-in-up">
-                {selectedEvents.map((ev) => {
-                  const { name, color } = resolve(ev);
-                  const manage = canManageEvent(ev);
-                  return (
-                    <EventCard
-                      key={ev.id}
-                      ev={ev}
-                      name={name}
-                      color={color}
-                      onEdit={manage ? () => openEdit(ev) : undefined}
-                      // Deleting a synced row just resurrects it on the next
-                      // sync, minus its attendance — remove it in Google instead.
-                      onDelete={manage && !ev.external_source ? () => deleteEvent(ev) : undefined}
-                      deleting={deletingId === ev.id}
-                    />
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          {!loading && upcoming.length > 0 && (
+        {/* Upcoming: below the month when stacked, beside it when split. */}
+        {!loading && upcoming.length > 0 && (
+          <div className="w-full sm:flex-1 lg:w-full min-w-0 flex flex-col gap-2 pt-3 sm:pt-0 sm:pl-5 lg:pl-0 lg:pt-4">
+            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Upcoming</span>
             <div className="flex flex-col gap-2">
-              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Upcoming</span>
-              <div className="flex flex-col gap-2">
-                {upcoming.map((ev) => {
-                  const { name, color } = resolve(ev);
-                  return (
-                    <EventCard
-                      key={ev.id}
-                      ev={ev}
-                      name={name}
-                      color={color}
-                      showDate
-                      onClick={() => jumpTo(ev.start_time)}
-                    />
-                  );
-                })}
-              </div>
+              {upcoming.map((ev) => {
+                const { name, color } = resolve(ev);
+                return (
+                  <EventCard
+                    key={ev.id}
+                    ev={ev}
+                    name={name}
+                    color={color}
+                    showDate
+                    onClick={() => jumpTo(ev.start_time)}
+                  />
+                );
+              })}
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       {showClubAttendance && (
@@ -372,7 +461,7 @@ export function CalendarPanel({ portalId, portalName, portalColor }: Props) {
               onClick={() => setAttendanceOpen(true)}
               className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
             >
-              <ClipboardCheck size={13} /> {isBoardOrExec ? "Club attendance" : "My attendance"}
+              <ClipboardCheck size={13} /> {isExec ? "Club attendance" : "My attendance"}
             </button>
             {isExec && (
               <button
@@ -393,10 +482,26 @@ export function CalendarPanel({ portalId, portalName, portalColor }: Props) {
         <PortalAttendanceModal
           open={attendanceOpen}
           onOpenChange={setAttendanceOpen}
-          canManage={isBoardOrExec}
+          // Exec only: PMs mark their project's people from its own sheet.
+          canManage={isExec}
           canEditEvents={isExec}
           // Exec see every member; PMs only the members of projects they PM.
           fullAccess={isExec}
+        />
+      )}
+
+      {lastSheet && (
+        <PortalAttendanceModal
+          // A fresh sheet per target, so club and portal sheets never share
+          // loaded state.
+          key={`${lastSheet.sheet.portalId ?? "club"}:${lastSheet.eventId}`}
+          portalId={lastSheet.sheet.portalId}
+          open={eventSheet !== null}
+          onOpenChange={(o) => !o && setEventSheet(null)}
+          canManage
+          canEditEvents={lastSheet.sheet.canEditEvents}
+          fullAccess={lastSheet.sheet.fullAccess}
+          focusEventId={lastSheet.eventId}
         />
       )}
 

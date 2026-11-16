@@ -33,6 +33,7 @@ export function Segmented<T extends string>({
   itemClassName,
   allowDeselect = false,
   selectOnFocus = true,
+  itemWidth,
   "aria-label": ariaLabel,
 }: {
   value: T;
@@ -50,6 +51,13 @@ export function Segmented<T extends string>({
    * writes data: arrows only move focus, Space/Enter selects.
    */
   selectOnFocus?: boolean;
+  /**
+   * Fixed width per option, in px. The pill then slides by arithmetic instead
+   * of measuring the DOM: no layout reads, no ResizeObserver. For dense grids
+   * (the attendance sheet has thousands of these), where measuring each one
+   * on mount costs a forced layout of the whole table.
+   */
+  itemWidth?: number;
   "aria-label"?: string;
 }) {
   // Optimistic: the pill moves on click even when the parent's value only
@@ -70,7 +78,12 @@ export function Segmented<T extends string>({
   const index = options.findIndex((o) => o.value === shown);
   const radius = shape === "pill" ? 9999 : shape === "soft" ? 3 : size === "xs" ? 4 : 6;
   const selectedOption = index >= 0 ? options[index] : null;
-  const { rowRef, indicatorRef, itemRef } = useSlidingIndicator(index >= 0 ? index : null, "pill", radius);
+  const fixed = itemWidth !== undefined;
+  // Measured mode only; fixed mode leaves these refs unattached, so the hook
+  // never observes or measures anything.
+  const { rowRef, indicatorRef, itemRef } = useSlidingIndicator(!fixed && index >= 0 ? index : null, "pill", radius);
+  const ownRowRef = React.useRef<HTMLDivElement>(null);
+  const groupRef = fixed ? ownRowRef : rowRef;
 
   const move = (from: number, delta: number) => {
     const n = options.length;
@@ -78,7 +91,7 @@ export function Segmented<T extends string>({
       const i = (from + delta * step + n * n) % n;
       if (!options[i].disabled) {
         if (selectOnFocus) select(options[i].value);
-        (rowRef.current?.querySelectorAll<HTMLButtonElement>("[role=radio]")[i])?.focus();
+        (groupRef.current?.querySelectorAll<HTMLButtonElement>("[role=radio]")[i])?.focus();
         return;
       }
     }
@@ -86,7 +99,7 @@ export function Segmented<T extends string>({
 
   return (
     <div
-      ref={rowRef}
+      ref={groupRef}
       role="radiogroup"
       aria-label={ariaLabel}
       className={cn(
@@ -95,20 +108,37 @@ export function Segmented<T extends string>({
         className,
       )}
     >
-      <span
-        ref={indicatorRef}
-        aria-hidden
-        className={cn(
-          "pointer-events-none absolute inset-0 opacity-0 transition-[clip-path,background-color] duration-2 ease-out-cubic motion-reduce:transition-none",
-          selectedOption?.indicatorClassName ?? "bg-brand",
-        )}
-      />
+      {fixed ? (
+        // p-0.5 + gap-0.5: option i starts at 2px + i * (itemWidth + 2px).
+        <span
+          aria-hidden
+          className={cn(
+            "pointer-events-none absolute bottom-0.5 left-0.5 top-0.5 transition-[transform,background-color,opacity] duration-2 ease-out-cubic motion-reduce:transition-none",
+            selectedOption?.indicatorClassName ?? "bg-brand",
+          )}
+          style={{
+            width: itemWidth,
+            borderRadius: radius,
+            opacity: index >= 0 ? 1 : 0,
+            transform: `translateX(${Math.max(index, 0) * (itemWidth + 2)}px)`,
+          }}
+        />
+      ) : (
+        <span
+          ref={indicatorRef}
+          aria-hidden
+          className={cn(
+            "pointer-events-none absolute inset-0 opacity-0 transition-[clip-path,background-color] duration-2 ease-out-cubic motion-reduce:transition-none",
+            selectedOption?.indicatorClassName ?? "bg-brand",
+          )}
+        />
+      )}
       {options.map((o, i) => {
         const selected = i === index;
         return (
           <button
             key={o.value}
-            ref={itemRef(i)}
+            ref={fixed ? undefined : itemRef(i)}
             type="button"
             role="radio"
             aria-checked={selected}
@@ -125,10 +155,13 @@ export function Segmented<T extends string>({
             className={cn(
               "relative z-10 font-medium transition-colors duration-2 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-40",
               shape === "pill" ? "rounded-full" : shape === "soft" ? "rounded-sm" : size === "xs" ? "rounded" : "rounded-md",
-              size === "xs" ? "px-2 py-0.5 text-xs" : size === "sm" ? "px-3 py-1 text-xs" : "px-3 py-1.5 text-sm",
+              fixed
+                ? cn("px-0 text-center", size === "xs" ? "py-0.5 text-xs" : size === "sm" ? "py-1 text-xs" : "py-1.5 text-sm")
+                : size === "xs" ? "px-2 py-0.5 text-xs" : size === "sm" ? "px-3 py-1 text-xs" : "px-3 py-1.5 text-sm",
               selected ? (o.selectedTextClassName ?? "text-brand-foreground") : "text-muted-foreground hover:text-foreground",
               itemClassName,
             )}
+            style={fixed ? { width: itemWidth } : undefined}
           >
             {o.label}
           </button>

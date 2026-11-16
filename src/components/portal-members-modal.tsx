@@ -2,12 +2,13 @@
 
 import { createClient } from "@/lib/supabase/client";
 import { useEffect, useState } from "react";
+import { useProgressiveList } from "@/lib/use-progressive-list";
 import { X } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/overlay-scrollbar";
 import { PersonName } from "@/components/person-profile-provider";
 import { AddMemberPicker, useAddMemberFilters } from "@/components/add-member-picker";
-import { MemberRosterSkeleton } from "@/components/skeletons";
+import { MemberRosterSkeleton, RosterRowsSkeleton } from "@/components/skeletons";
 import { AdminCrown } from "@/components/admin-crown";
 import { optimistic } from "@/lib/optimistic";
 import { useConfirm } from "@/components/ui/use-confirm";
@@ -159,6 +160,10 @@ export function PortalMembersModal({ portalId, open, onOpenChange, canEdit }: Pr
   const rank = (r: MemberRow) => (r.owner ? 0 : r.is_admin ? 1 : 2);
   const ordered = [...rows].sort((a, b) => rank(a) - rank(b));
   const shownRows = q ? ordered.filter((r) => r.name.toLowerCase().includes(q)) : ordered;
+  // A block of rows at a time as the roster scrolls (see useProgressiveList).
+  const { visible: mountedRows, pendingRows, sentinelRef } = useProgressiveList(shownRows, {
+    resetKey: `${open}|${loading}|${q}`,
+  });
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -192,7 +197,7 @@ export function PortalMembersModal({ portalId, open, onOpenChange, canEdit }: Pr
             <p className="text-sm text-muted-foreground py-4 text-center">{rows.length === 0 ? "No members yet." : "No matches."}</p>
           ) : (
             <div className="flex flex-col gap-1 pt-1.5">
-              {shownRows.map((r) => (
+              {mountedRows.map((r) => (
                 <div key={r.user_id} className="flex items-center gap-2 text-sm py-1">
                   <PersonName userId={r.user_id} name={r.name} className="flex-1 min-w-0 truncate" />
                   <AdminCrown
@@ -212,6 +217,8 @@ export function PortalMembersModal({ portalId, open, onOpenChange, canEdit }: Pr
                   )}
                 </div>
               ))}
+              {/* Rows still to come: scrolling into them loads them. */}
+              <RosterRowsSkeleton rows={pendingRows} rowRef={sentinelRef} />
             </div>
           )}
         </ScrollArea>
