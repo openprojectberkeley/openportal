@@ -365,18 +365,24 @@ export default function CoffeeChatPage() {
       </div>
 
       {loading ? (
-        <section className="flex flex-col gap-3" aria-hidden>
-          <Skeleton className="h-4 w-24 rounded-full" />
-          <div className="-mx-4 flex flex-col gap-0.5">
-            {Array.from({ length: 2 }, (_, i) => (
-              <div key={i} className="flex items-center gap-3 px-4 py-3">
+        // Same section and row box as an upcoming booking (avatar, name over
+        // time, the calendar + Cancel actions); the heading is real.
+        <section className="flex flex-col gap-3">
+          <h2 className="text-base font-semibold tracking-tight">Upcoming</h2>
+          <div aria-hidden className="-mx-4 flex flex-col gap-0.5">
+            <div className="flex items-start justify-between gap-4 rounded-lg px-4 py-3">
+              <div className="flex items-start gap-3 min-w-0">
                 <Skeleton className="h-9 w-9 rounded-full flex-shrink-0" />
-                <div className="flex flex-col gap-1.5 flex-1">
-                  <Skeleton className="h-3.5 w-32 rounded-full" />
-                  <Skeleton className="h-3 w-44 rounded-full" />
+                <div className="flex flex-col gap-0.5">
+                  <span className="flex h-5 items-center"><Skeleton className="h-3.5 w-32 rounded-full" /></span>
+                  <span className="flex h-4 items-center"><Skeleton className="h-3 w-44 rounded-full" /></span>
                 </div>
               </div>
-            ))}
+              <div className="flex items-center gap-1 flex-shrink-0">
+                <span className="flex h-8 w-8 items-center justify-center text-muted-foreground/40"><CalendarPlus size={16} /></span>
+                <span className="flex h-8 items-center px-3 text-sm font-medium text-destructive/40">Cancel</span>
+              </div>
+            </div>
           </div>
         </section>
       ) : (

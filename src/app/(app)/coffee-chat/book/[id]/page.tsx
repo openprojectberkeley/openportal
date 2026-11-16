@@ -10,7 +10,7 @@ import { AvailabilitySkeleton } from "@/components/skeletons";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { MapPin } from "lucide-react";
 import { BackLink } from "@/components/back-link";
-import { HostHeader } from "@/components/coffee-host-header";
+import { HostHeader, HostHeaderSkeleton } from "@/components/coffee-host-header";
 import { InfoHint } from "@/components/ui/info-hint";
 import { Disclosure } from "@/components/ui/disclosure";
 import { Textarea } from "@/components/ui/textarea";
@@ -29,7 +29,7 @@ type PersonInfo = {
 // inside a Suspense boundary so the page shell can still prerender.
 export default function BookingPage() {
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={<BookingPageSkeleton />}>
       <BookingPageInner />
     </Suspense>
   );
@@ -335,15 +335,11 @@ function BookingPageInner() {
               )}
             </div>
           ) : (
-            <Skeleton className="h-3.5 w-3/4 rounded-full" />
+            <LocationSkeleton />
           )}
 
           {loading ? (
-            <div className="flex flex-col gap-3" aria-hidden>
-              <Skeleton className="h-3.5 w-40 rounded-full" />
-              <Skeleton className="h-3 w-16 rounded-full" />
-              <Skeleton className="h-9 w-full" />
-            </div>
+            <BookingAsideSkeleton />
           ) : days.length > 0 ? (
             <div className="flex flex-col gap-4">
               {selected ? (
@@ -383,6 +379,54 @@ function BookingPageInner() {
               </Button>
             </div>
           ) : null}
+        </aside>
+      </div>
+    </div>
+  );
+}
+
+// ---- loading shapes ---------------------------------------------------------
+
+function LocationSkeleton() {
+  return (
+    <div aria-hidden className="flex items-start gap-1.5 text-sm text-muted-foreground">
+      <MapPin size={14} className="mt-0.5 flex-shrink-0" />
+      <span className="flex h-5 flex-1 items-center">
+        <Skeleton className="h-3.5 w-3/4 rounded-full" />
+      </span>
+    </div>
+  );
+}
+
+// Nothing is selected when the times arrive, so this is the aside's real
+// first state: the prompt and a disabled Book button.
+function BookingAsideSkeleton() {
+  return (
+    <div className="flex flex-col gap-4">
+      <p className="text-sm text-muted-foreground">Pick a time to book.</p>
+      <Button disabled className="w-full">Book a chat</Button>
+    </div>
+  );
+}
+
+// Before the route params resolve: the page with nothing fetched yet.
+function BookingPageSkeleton() {
+  return (
+    <div className="w-full max-w-6xl mx-auto p-5 flex flex-col gap-6">
+      <BackLink href="/coffee-chat" label="Coffee chat" />
+      <div className="flex flex-col md:flex-row gap-8 md:items-start">
+        <div className="flex flex-col gap-8 md:w-2/3 min-w-0">
+          <HostHeaderSkeleton />
+          <section className="flex flex-col gap-5">
+            <div className="flex items-center gap-1.5">
+              <h2 className="text-base font-semibold tracking-tight">Select a time</h2>
+            </div>
+            <AvailabilitySkeleton />
+          </section>
+        </div>
+        <aside className="flex flex-col gap-5 md:w-1/3 md:sticky md:top-6 self-start w-full rounded-xl surface p-4">
+          <LocationSkeleton />
+          <BookingAsideSkeleton />
         </aside>
       </div>
     </div>

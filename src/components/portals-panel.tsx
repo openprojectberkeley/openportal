@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { IconPicker } from "@/components/icon-picker";
 import { ColorPicker } from "@/components/color-picker";
-import { PanelListSkeleton } from "@/components/skeletons";
+import { PanelRowsSkeleton } from "@/components/skeletons";
 
 import { PortalCreateDialog, type PortalType } from "@/components/portal-create-dialog";
 import { ProjectEditDialog } from "@/components/project-edit-dialog";
@@ -281,7 +281,6 @@ export function PortalsPanel({ members, allRoles }: Props) {
     );
   };
 
-  if (loading) return <PanelListSkeleton />;
   if (error) return <div className="py-8 text-sm text-destructive">{error}</div>;
 
   const q = query.trim().toLowerCase();
@@ -315,6 +314,9 @@ export function PortalsPanel({ members, allRoles }: Props) {
         />
       </div>
 
+      {loading ? (
+        <PanelRowsSkeleton rows={4} icon={24} trailing />
+      ) : (
       <div className="flex flex-col gap-0.5">
         {shownPortals.map((p, i) => {
           const isOpen = expanded.has(p.id);
@@ -472,6 +474,7 @@ export function PortalsPanel({ members, allRoles }: Props) {
           </div>
         )}
       </div>
+      )}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>

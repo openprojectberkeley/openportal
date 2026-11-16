@@ -163,10 +163,12 @@ export function ProfileModal({ target, cached, onLoaded, onClose }: Props) {
             <>
               <SkeletonSection title="Academic" widths={[40, 16]} labels={["Major", "Year"]} />
               <SkeletonSection title="Contact" widths={[52, 28, 44, 36]} labels={["Email", "Phone", "LinkedIn", "GitHub"]} />
-              <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-1.5">
                 <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Interests</h3>
-                <Skeleton className="h-3.5 w-full rounded-full" />
-                <Skeleton className="h-3.5 w-3/4 rounded-full" />
+                <div aria-hidden className="flex flex-col leading-relaxed">
+                  <span className="flex h-[1.625em] items-center"><Skeleton className="h-3.5 w-full rounded-full" /></span>
+                  <span className="flex h-[1.625em] items-center"><Skeleton className="h-3.5 w-3/4 rounded-full" /></span>
+                </div>
               </div>
             </>
           ) : (

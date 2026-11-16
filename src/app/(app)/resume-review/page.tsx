@@ -223,12 +223,10 @@ export default function ResumeReviewPage() {
         </p>
       )}
 
-      {reviews === null ? (
-        <div className="flex flex-col gap-3">
-          <Skeleton className="h-24 w-full rounded-xl" />
-          <Skeleton className="h-24 w-full rounded-xl" />
-        </div>
-      ) : pending ? (
+      {/* While requests load, the request form shows for real (disabled):
+          it's what most people see, and it holds nothing that needs data
+          except the resume on file. */}
+      {reviews !== null && pending ? (
         <div className="flex flex-col gap-3 rounded-xl surface p-4">
           <div className="flex items-center gap-2">
             <Clock size={16} className="shrink-0 text-muted-foreground" />
@@ -279,7 +277,7 @@ export default function ResumeReviewPage() {
           </div>
         </div>
       ) : (
-        <div className="flex flex-col gap-4 rounded-xl surface p-4">
+        <fieldset disabled={reviews === null} className="min-w-0 flex flex-col gap-4 rounded-xl surface p-4">
           <div className="flex flex-col gap-0.5">
             <h2 className="text-sm font-semibold">Request a review</h2>
             <p className="text-xs text-muted-foreground">
@@ -288,7 +286,9 @@ export default function ResumeReviewPage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            {resume ? (
+            {reviews === null ? (
+              <Skeleton aria-hidden className="h-7 w-36 rounded-lg" />
+            ) : resume ? (
               <button
                 type="button"
                 onClick={() => openResume(resume.path)}
@@ -367,7 +367,7 @@ export default function ResumeReviewPage() {
           >
             Request review
           </button>
-        </div>
+        </fieldset>
       )}
 
       {history.length > 0 && (

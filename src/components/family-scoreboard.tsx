@@ -640,7 +640,7 @@ export function FamilyScoreboard({
   // No strip on these four: there's nothing to switch between until there are
   // standings to show, and showing it over an error would just offer the reader
   // a second empty view.
-  if (standings === null) return <ScoreboardSkeleton />;
+  if (standings === null) return <ScoreboardSkeleton semesterName={semesterName} />;
   if (error) return <EmptyCard>{error}</EmptyCard>;
   if (!semesterId) return <EmptyCard>No semester is active yet.</EmptyCard>;
   if (standings.length === 0) return <EmptyCard>No families have been set up yet.</EmptyCard>;
@@ -690,11 +690,16 @@ export function FamilyScoreboard({
  * migration 0103 has been applied.
  */
 export function FamilyScoreboardCard() {
-  const { active } = useSemesters();
+  const { semesters, active } = useSemesters();
   const { standings, leader } = useScoreboard(active?.id ?? null);
 
-  if (standings === null) return <ScoreboardCompactSkeleton />;
-  if (!active || standings.length === 0) return null;
+  // Semesters not known yet, or this semester's standings still loading: hold
+  // the card's shape. Once semesters resolve with none active, render nothing
+  // (rather than a skeleton that then vanishes).
+  if (semesters === null) return <ScoreboardCompactSkeleton />;
+  if (!active) return null;
+  if (standings === null) return <ScoreboardCompactSkeleton semesterName={active.name} />;
+  if (standings.length === 0) return null;
 
   return (
     <div className="animate-fade-in-up">

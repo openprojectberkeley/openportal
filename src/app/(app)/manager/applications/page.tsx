@@ -40,7 +40,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { ApplicationListSkeleton } from "@/components/skeletons";
+import { ApplicantGroupsSkeleton, PickerSkeleton, TeamRosterSkeleton } from "@/components/manager-skeletons";
 import { ApplicationPeriodsDialog, type ApplicationPeriod } from "@/components/application-periods-dialog";
 import { EmailBlastDialog } from "@/components/email-blast-dialog";
 import {
@@ -877,7 +877,7 @@ export default function ManagerApplicationsPage() {
           the left, the exec-only tools as icons on the right. */}
       <div className="flex flex-wrap items-center gap-3">
         {periods === null ? (
-          <div className="h-9 w-48 rounded-md bg-foreground/[0.09] animate-pulse" />
+          <PickerSkeleton />
         ) : (
           // Rendered even with no periods yet, since "Manage periods" -- the only
           // way to create the first one -- lives inside it.
@@ -983,7 +983,7 @@ export default function ManagerApplicationsPage() {
           )}
         </div>
       )}
-      {reviewableProjects === null && <div className="h-9 w-48 rounded-md bg-foreground/[0.09] animate-pulse" />}
+      {reviewableProjects === null && <PickerSkeleton width="w-56" />}
 
       {isExec && (
         <AnalyticsModal
@@ -1039,7 +1039,7 @@ export default function ManagerApplicationsPage() {
                   {roster && <span className="ml-1.5 font-normal text-muted-foreground tabular-nums">{roster.length}</span>}
                 </h2>
                 {roster === null ? (
-                  <ApplicationListSkeleton rows={3} />
+                  <TeamRosterSkeleton />
                 ) : roster.length === 0 ? (
                   <div className="px-4 py-10 text-center text-sm text-muted-foreground rounded-xl surface">
                     No one on this project yet.
@@ -1154,7 +1154,7 @@ export default function ManagerApplicationsPage() {
 
               <ApplicantsZone items={groupedApps.flatMap(([, list]) => list.map((a) => a.id))}>
                 {apps === null ? (
-                  <ApplicationListSkeleton rows={4} />
+                  <ApplicantGroupsSkeleton />
                 ) : apps.length === 0 ? (
                   <div className="px-4 py-10 text-center text-sm text-muted-foreground rounded-xl surface">
                     No submitted applications for this project yet.

@@ -1,5 +1,6 @@
 "use client";
 
+import { Skeleton } from "@/components/ui/skeleton";
 import { createClient } from "@/lib/supabase/client";
 import { useEffect, useState } from "react";
 import { PlusCircle, X, Pencil } from "lucide-react";
@@ -337,7 +338,19 @@ export function PortalSettingsModal({ portalId, open, onOpenChange, initial, onM
               </CommandPicker>
             </div>
             {loading ? (
-              <p className="text-xs text-muted-foreground">Loading...</p>
+              <div aria-hidden className="flex flex-col gap-1">
+                {["w-28", "w-36"].map((w) => (
+                  <div key={w} className="flex items-center gap-2 text-sm">
+                    <span className="flex h-5 flex-1 items-center">
+                      <Skeleton className={`h-3.5 rounded-full ${w}`} />
+                    </span>
+                    <span className="inline-flex p-1">
+                      <Skeleton className="h-3.5 w-3.5 rounded-sm" />
+                    </span>
+                    <span className="w-[13px]" />
+                  </div>
+                ))}
+              </div>
             ) : roles.length === 0 ? (
               <p className="text-xs text-muted-foreground">
                 No roles. Anyone with a mapped role is auto-added to this portal at the chosen tier.

@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ColorPicker, TEXT_BG_PRESETS } from "@/components/color-picker";
-import { PanelListSkeleton } from "@/components/skeletons";
+import { PanelRowsSkeleton } from "@/components/skeletons";
 import { AnnouncementBanner } from "@/components/announcement-banners";
 import { cn } from "@/lib/utils";
 import { staggerStyle } from "@/lib/motion";
@@ -165,10 +165,9 @@ export function AnnouncementsPanel({ onCountChange }: { onCountChange?: (n: numb
     return true;
   };
 
-  if (items === null) return <PanelListSkeleton rows={3} />;
 
   const q = query.trim().toLowerCase();
-  const shownItems = q ? items.filter((a) => a.message.toLowerCase().includes(q)) : items;
+  const shownItems = !items ? [] : q ? items.filter((a) => a.message.toLowerCase().includes(q)) : items;
 
   return (
     <div className="flex flex-col gap-4">
@@ -192,6 +191,9 @@ export function AnnouncementsPanel({ onCountChange }: { onCountChange?: (n: numb
 
       {error && <p className="text-sm text-destructive">{error}</p>}
 
+      {items === null ? (
+        <PanelRowsSkeleton rows={3} chevron={false} icon={16} iconRound twoLine status />
+      ) : (
       <div className="flex flex-col gap-0.5">
         {shownItems.map((a, i) => {
           const status = announcementStatus(a);
@@ -245,6 +247,7 @@ export function AnnouncementsPanel({ onCountChange }: { onCountChange?: (n: numb
           </div>
         )}
       </div>
+      )}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>

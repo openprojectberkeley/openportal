@@ -114,23 +114,21 @@ function PortalDetail() {
 
   return (
     <div className="w-full max-w-6xl mx-auto p-5 flex flex-col gap-6">
-      <BackLink href="/" label="Dashboard" />
+      {/* Edit shares the back link's row, so it adds no height when it
+          appears for admins (and the skeleton needs no slot for it). */}
+      <div className="flex h-5 items-center justify-between gap-3">
+        <BackLink href="/" label="Dashboard" />
+        {isAdmin && !editing && (
+          <button
+            onClick={() => setEditing(true)}
+            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <Pencil size={13} /> Edit
+          </button>
+        )}
+      </div>
 
       <div className="flex flex-col gap-2">
-        {/* Edit sits on its own row above the actions, right-aligned. The row
-            keeps its height while editing so the header doesn't jump. */}
-        {isAdmin && (
-          <div className="flex h-5 justify-end">
-            {!editing && (
-              <button
-                onClick={() => setEditing(true)}
-                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-              >
-                <Pencil size={13} /> Edit
-              </button>
-            )}
-          </div>
-        )}
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
             {portal.icon_url ? (

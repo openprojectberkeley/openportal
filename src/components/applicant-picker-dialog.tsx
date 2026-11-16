@@ -20,6 +20,7 @@
 // question is just "who am I adding?" -- which list someone happens to be in is
 // the answer, not the question.
 
+import { Skeleton } from "@/components/ui/skeleton";
 import { useState } from "react";
 import { FileQuestion } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -118,7 +119,15 @@ function ApplicantPickerPanel({
             />
             <CommandList className={compact ? "max-h-64 border-t" : "max-h-72 border-t"}>
               {applicants === null ? (
-                <p className="py-4 text-center text-sm text-muted-foreground">Loading applicants…</p>
+                <div aria-hidden className="overflow-hidden p-1">
+                  {Array.from({ length: 6 }, (_, i) => (
+                    <div key={i} className="flex items-center px-2 py-1.5">
+                      <span className="flex h-5 items-center">
+                        <Skeleton className={`h-3.5 rounded-full ${["w-32", "w-24", "w-40", "w-28", "w-36", "w-24"][i]}`} />
+                      </span>
+                    </div>
+                  ))}
+                </div>
               ) : showEmpty ? (
                 <p className="py-4 text-center text-sm text-muted-foreground">
                   {memberSearch ? "Nobody matches that." : "No matching applicants."}

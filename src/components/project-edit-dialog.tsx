@@ -13,6 +13,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { IconPicker } from "@/components/icon-picker";
 import { ColorPicker } from "@/components/color-picker";
@@ -156,7 +157,47 @@ export function ProjectEditDialog({
           <DialogTitle>Edit project</DialogTitle>
         </DialogHeader>
         {loading || !fields ? (
-          <p className="text-sm text-muted-foreground">Loading…</p>
+          // The form itself, empty and disabled: labels, the options toggle,
+          // the questions row and the footer are fixed; only values wait.
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-1">
+              <Label>Name</Label>
+              <Input disabled aria-hidden tabIndex={-1} />
+            </div>
+            {["Type", "Family"].map((l) => (
+              <div key={l} className="flex flex-col gap-1">
+                <Label>{l}</Label>
+                <div aria-hidden className="flex items-center justify-between gap-2 border rounded-md px-3 py-2 text-sm">
+                  <span className="flex h-5 items-center">
+                    <Skeleton className="h-3.5 w-24 rounded-full" />
+                  </span>
+                  <ChevronDown size={14} className="text-muted-foreground/50" />
+                </div>
+              </div>
+            ))}
+            <div className="flex flex-col gap-1">
+              <Label>Client</Label>
+              <Input disabled aria-hidden tabIndex={-1} />
+            </div>
+            <span aria-hidden className="inline-flex w-fit items-center gap-1.5 text-sm font-medium text-muted-foreground">
+              <ChevronDown size={14} className="-rotate-90" />
+              More options
+              <span className="font-normal text-muted-foreground/70">· icon, colour, size, description</span>
+            </span>
+            <div className="flex items-center justify-between gap-2 pt-2">
+              <div className="flex flex-col">
+                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Application questions</span>
+                <span className="text-xs text-muted-foreground">Custom questions applicants answer for this project.</span>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => setQuestionsOpen(true)}>
+                Manage
+              </Button>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+              <Button disabled>Save project</Button>
+            </div>
+          </div>
         ) : (
           <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-1">

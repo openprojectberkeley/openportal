@@ -11,10 +11,11 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { TabStrip } from "@/components/ui/tab-strip";
 import { InfoHint } from "@/components/ui/info-hint";
-import { Skeleton } from "@/components/ui/skeleton";
 import {
   ApplicantsTab,
-  BarsSkeleton,
+  ApplicantsSkeleton,
+  OverviewSkeleton,
+  RetentionSkeleton,
   OverviewTab,
   RetentionTab,
 } from "@/components/application-analytics-modal";
@@ -136,29 +137,7 @@ function AnalyticsBody({
 
 function TabSkeleton({ tab }: { tab: Tab }) {
   if (tab === "projects") return <ProjectsSkeleton />;
-  if (tab === "applicants") return <BarsSkeleton rows={5} sections={3} />;
-  if (tab === "retention") {
-    return (
-      <div className="flex flex-col gap-6" aria-busy>
-        <Skeleton className="h-7 w-72 rounded-full" />
-        <BarsSkeleton rows={2} />
-        <div className="flex flex-col gap-2">
-          {Array.from({ length: 5 }, (_, i) => (
-            <Skeleton key={i} className="h-3.5 w-full rounded-full" />
-          ))}
-        </div>
-      </div>
-    );
-  }
-  return (
-    <div className="flex flex-col gap-8" aria-busy>
-      <div className="flex flex-wrap gap-6">
-        {Array.from({ length: 5 }, (_, i) => (
-          <Skeleton key={i} className="h-7 w-28 rounded-full" />
-        ))}
-      </div>
-      <BarsSkeleton rows={5} />
-      <BarsSkeleton rows={4} />
-    </div>
-  );
+  if (tab === "applicants") return <ApplicantsSkeleton />;
+  if (tab === "retention") return <RetentionSkeleton />;
+  return <OverviewSkeleton />;
 }

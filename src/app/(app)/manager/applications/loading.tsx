@@ -1,8 +1,7 @@
-import { ApplicationManagerSkeleton } from "@/components/skeletons";
+import { ApplicationManagerSkeleton } from "@/components/manager-skeletons";
 
-// Route-transition placeholder: mirrors the applications page shell (header +
-// period bar + list) so navigating in shows the same layout instead of a blank
-// screen or a mismatched generic skeleton.
+// Route-transition placeholder: the page with its data taken out (real title,
+// headings and fixed controls; placeholders only where the page fetches).
 export default function Loading() {
   return <ApplicationManagerSkeleton />;
 }

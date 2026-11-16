@@ -1,5 +1,6 @@
 "use client";
 
+import { Skeleton } from "@/components/ui/skeleton";
 import { createClient } from "@/lib/supabase/client";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -175,9 +176,11 @@ export function SheetCoffeeCell({
             <ScrollArea className="h-36 rounded-md bg-foreground/[0.03]">
               <div className="p-1">
                 {!hosts ? (
-                  <div aria-hidden className="flex flex-col gap-2.5 px-2 py-2">
-                    {[60, 45, 70, 50].map((w) => (
-                      <span key={w} className="h-3.5 animate-pulse rounded-full bg-foreground/[0.09]" style={{ width: `${w}%` }} />
+                  <div aria-hidden className="flex flex-col">
+                    {[60, 45, 70, 50, 55].map((w) => (
+                      <div key={w} className="flex h-8 items-center px-2">
+                        <Skeleton className="h-3.5 rounded-full" style={{ width: `${w}%` }} />
+                      </div>
                     ))}
                   </div>
                 ) : filteredHosts.length === 0 ? (

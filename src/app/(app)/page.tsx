@@ -11,7 +11,7 @@ import { PortalCard, type PortalSummary } from "@/components/portal-card";
 import { CalendarPanel } from "@/components/calendar-panel";
 import { ResumeReviewPanel } from "@/components/resume-review-panel";
 import { Skeleton } from "@/components/ui/skeleton";
-import { PortalGridSkeleton, CalendarSkeleton, ScoreboardCompactSkeleton } from "@/components/skeletons";
+import { PortalGridSkeleton, CalendarSkeleton, ResumeReviewPanelSkeleton, ScoreboardCompactSkeleton } from "@/components/skeletons";
 import { FamilyScoreboardCard } from "@/components/family-scoreboard";
 import { getHomeView, shouldShowReapplyBanner } from "@/lib/member-status";
 import { staggerStyle } from "@/lib/motion";
@@ -494,17 +494,33 @@ export default function HomePage() {
     );
   }
 
+  // Role not resolved yet: the dashboard's shell, with its static headings
+  // real and only the data-bound parts as shapes.
   return (
     <div className="w-full max-w-6xl mx-auto p-5 flex flex-col gap-6">
-      <Skeleton className="h-9 w-48" />
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <Skeleton className="h-10 w-56" />
+        <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row">
+          <ResumeReviewPanelSkeleton compact className="w-full sm:w-72" />
+        </div>
+      </div>
       <div className="flex flex-col lg:flex-row gap-6">
-        <div className="flex-1 min-w-0 flex flex-col gap-3">
-          <Skeleton className="h-3 w-20 rounded-full" />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-baseline justify-between mb-3">
+            <h2 className="text-base font-semibold tracking-tight">Portals</h2>
+          </div>
           <PortalGridSkeleton />
         </div>
-        <div className="w-full lg:w-80 lg:flex-shrink-0 flex flex-col gap-6">
-          <div className="flex flex-col gap-3">
-            <Skeleton className="h-3 w-20 rounded-full" />
+        <div className="w-full lg:w-80 lg:flex-shrink-0 order-first lg:order-none flex flex-col gap-6">
+          <div className="flex flex-col">
+            <div className="flex items-baseline justify-between mb-3">
+              <h2 className="text-base font-semibold tracking-tight">
+                <Link href="/calendar" className="group flex items-center gap-1 transition-colors hover:text-muted-foreground">
+                  Calendar
+                  <ArrowRight size={14} className="transition-transform duration-instant ease-out-quart group-hover:translate-x-0.5" aria-hidden />
+                </Link>
+              </h2>
+            </div>
             <CalendarSkeleton />
           </div>
           <ScoreboardCompactSkeleton />

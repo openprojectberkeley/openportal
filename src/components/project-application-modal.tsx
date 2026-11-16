@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { ProjectApplicationModalSkeleton } from "@/components/skeletons";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   type ProjectQuestion,
   type AnswerValue,
@@ -203,7 +203,32 @@ export function ProjectApplicationModal({ projectId, projectName, rankingId, ope
         </DialogHeader>
 
         {loading ? (
-          <ProjectApplicationModalSkeleton />
+          // The form's own controls, empty and disabled, so the essay box and
+          // footer sit exactly where they will; only the per-project prompt,
+          // the word count and the custom questions are placeholders.
+          <div className="flex flex-col gap-5">
+            <div className="flex flex-col gap-1">
+              <div aria-hidden className="mb-1.5 flex h-3.5 items-center">
+                <Skeleton className="h-3.5 w-64 max-w-full rounded-full" />
+              </div>
+              <Textarea rows={6} disabled aria-hidden tabIndex={-1} className="resize-none" />
+              <div aria-hidden className="flex h-4 items-center">
+                <Skeleton className="h-3 w-40 rounded-full" />
+              </div>
+            </div>
+            {Array.from({ length: 2 }, (_, i) => (
+              <div key={i} aria-hidden className="flex flex-col gap-2.5">
+                <div className="flex h-3.5 items-center">
+                  <Skeleton className={`h-3.5 max-w-full rounded-full ${i === 0 ? "w-48" : "w-56"}`} />
+                </div>
+                <Skeleton className="h-9 w-full rounded-md" />
+              </div>
+            ))}
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" onClick={() => handleOpenChange(false)}>Cancel</Button>
+              <Button disabled>Save</Button>
+            </div>
+          </div>
         ) : (
           <div className="flex flex-col gap-5">
             {/* Essay: prompt/required are per-project, editable via ProjectQuestionsDialog */}

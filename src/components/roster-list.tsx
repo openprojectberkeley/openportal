@@ -3,7 +3,6 @@
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Search, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/overlay-scrollbar";
 import { useProgressiveList } from "@/lib/use-progressive-list";
 import { RosterRowsSkeleton } from "@/components/skeletons";
@@ -124,16 +123,7 @@ export function RosterList({
       >
       <div ref={contentRef}>
       {shown === null ? (
-        <div aria-hidden className="flex flex-col pr-2 pt-1.5">
-          {Array.from({ length: skeletonRows }, (_, i) => (
-            <div key={i} className="flex h-7 items-center gap-2">
-              <Skeleton className="h-3.5 rounded-full" style={{ width: `${[46, 38, 52, 34, 42, 30, 48, 36, 40][i % 9]}%` }} />
-              <span className="flex-1" />
-              <Skeleton className="h-3.5 w-3.5 rounded-sm" />
-              <span className="w-4" />
-            </div>
-          ))}
-        </div>
+        <RosterRowsSkeleton rows={skeletonRows} className="flex flex-col pr-2 pt-1.5" />
       ) : shown.length === 0 ? (
         <p className="py-1 text-xs text-muted-foreground">{q ? "No matches." : emptyText}</p>
       ) : (

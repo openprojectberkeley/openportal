@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { ScrollArea } from "@/components/overlay-scrollbar";
 import { PersonName } from "@/components/person-profile-provider";
 import { AddMemberPicker, useAddMemberFilters } from "@/components/add-member-picker";
-import { MemberRosterSkeleton, RosterRowsSkeleton } from "@/components/skeletons";
+import { RosterRowsSkeleton } from "@/components/skeletons";
 import { AdminCrown } from "@/components/admin-crown";
 import { optimistic } from "@/lib/optimistic";
 import { useConfirm } from "@/components/ui/use-confirm";
@@ -180,10 +180,13 @@ export function PortalMembersModal({ portalId, open, onOpenChange, canEdit }: Pr
         </DialogHeader>
 
         {confirmDialog}
-        {!loading && rows.length > 5 && (
+        {/* Shown (disabled) while loading too, so the roster doesn't shift
+            down when it arrives; hidden after for short rosters. */}
+        {(loading || rows.length > 5) && (
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
+            disabled={loading}
             placeholder="Search members…"
             aria-label="Search members"
             className="h-8 flex-shrink-0 text-sm"
@@ -192,7 +195,7 @@ export function PortalMembersModal({ portalId, open, onOpenChange, canEdit }: Pr
         {/* Scrollable roster fills the remaining height; overflow scrolls here. */}
         <ScrollArea className="flex-1 min-h-0">
           {loading ? (
-            <MemberRosterSkeleton />
+            <RosterRowsSkeleton rows={9} crownSize={16} className="flex flex-col gap-1 pt-1.5" />
           ) : shownRows.length === 0 ? (
             <p className="text-sm text-muted-foreground py-4 text-center">{rows.length === 0 ? "No members yet." : "No matches."}</p>
           ) : (
@@ -218,7 +221,7 @@ export function PortalMembersModal({ portalId, open, onOpenChange, canEdit }: Pr
                 </div>
               ))}
               {/* Rows still to come: scrolling into them loads them. */}
-              <RosterRowsSkeleton rows={pendingRows} rowRef={sentinelRef} />
+              <RosterRowsSkeleton rows={pendingRows} rowRef={sentinelRef} crownSize={16} className="contents" />
             </div>
           )}
         </ScrollArea>

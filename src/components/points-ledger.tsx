@@ -7,7 +7,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { LedgerSkeleton } from "@/components/skeletons";
+import { LedgerRowsSkeleton } from "@/components/skeletons";
 import { PersonName } from "@/components/person-profile-provider";
 import { DEFAULT_ACCENT } from "@/lib/portal-color";
 import { formatPoints, ledgerMatches, type LedgerEntry } from "@/lib/scoring";
@@ -73,7 +73,8 @@ export function PointsLedger({
   // toggle keeps meaning "voided in this log".
   const voidedCount = entries?.filter((e) => e.voided_at !== null).length ?? 0;
   const showToggle = !readOnly && voidedCount > 0;
-  const showSearch = (entries?.length ?? 0) > 0;
+  // Shown (disabled) while loading too, so the header doesn't grow on arrival.
+  const showSearch = entries === null || entries.length > 0;
 
   // Back to the first page when the reader changes what they're looking at.
   // Deliberately NOT on `entries`: markVoided hands back a new array on every
@@ -104,6 +105,7 @@ export function PointsLedger({
               placeholder="Search project, family, reason…"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
+              disabled={entries === null}
               className="h-8 w-72 max-w-full text-xs md:text-xs"
             />
           </>
@@ -120,11 +122,33 @@ export function PointsLedger({
     </div>
   );
 
+  const thead = (
+    <thead>
+      <tr className="text-left text-xs uppercase tracking-wide text-muted-foreground">
+        <th className="px-3 py-2 font-semibold">Date</th>
+        <th className="px-3 py-2 font-semibold">Project</th>
+        <th className="px-3 py-2 font-semibold">Family</th>
+        <th className="px-3 py-2 font-semibold text-right">Points</th>
+        <th className="px-3 py-2 font-semibold">Reason</th>
+        <th className="px-3 py-2 font-semibold">By</th>
+        {!readOnly && <th className="px-3 py-2 font-semibold" />}
+      </tr>
+    </thead>
+  );
+
+  // Loading: the real table and headers, with placeholder body rows.
   if (entries === null) {
     return (
       <div className="flex flex-col gap-2">
         {header}
-        <LedgerSkeleton />
+        <div className="overflow-x-auto">
+          <table aria-hidden className="sheet-zebra w-full text-sm border-separate border-spacing-0">
+            {thead}
+            <tbody>
+              <LedgerRowsSkeleton rows={6} voidColumn={!readOnly} />
+            </tbody>
+          </table>
+        </div>
       </div>
     );
   }
@@ -180,17 +204,7 @@ export function PointsLedger({
 
       <div className="overflow-x-auto">
         <table className="sheet-zebra w-full text-sm border-separate border-spacing-0">
-          <thead>
-            <tr className="text-left text-xs uppercase tracking-wide text-muted-foreground">
-              <th className="px-3 py-2font-semibold font-semibold">Date</th>
-              <th className="px-3 py-2font-semibold font-semibold">Project</th>
-              <th className="px-3 py-2font-semibold font-semibold">Family</th>
-              <th className="px-3 py-2font-semibold font-semibold text-right">Points</th>
-              <th className="px-3 py-2font-semibold font-semibold">Reason</th>
-              <th className="px-3 py-2font-semibold font-semibold">By</th>
-              {!readOnly && <th className="px-3 py-2font-semibold font-semibold" />}
-            </tr>
-          </thead>
+          {thead}
           <tbody>
             {pageRows.map((e) => {
               const isVoid = e.voided_at !== null;

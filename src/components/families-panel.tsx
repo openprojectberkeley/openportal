@@ -17,7 +17,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { IconPicker } from "@/components/icon-picker";
 import { ColorPicker } from "@/components/color-picker";
 import { uploadFamilyIcon } from "@/lib/family-icon-upload";
-import { PanelListSkeleton } from "@/components/skeletons";
+import { PanelRowsSkeleton } from "@/components/skeletons";
 import { FamilyMark } from "@/components/family-mark";
 import { Chip, ChipList } from "@/components/ui/chip";
 import { useFamilies, type FamilyProject } from "@/lib/use-families";
@@ -244,7 +244,6 @@ export function FamiliesPanel() {
     });
   };
 
-  if (families === null) return <PanelListSkeleton rows={4} />;
 
   const renderProjectChip = (p: FamilyProject, familyName: string) => (
     <Chip
@@ -352,6 +351,9 @@ export function FamiliesPanel() {
 
       {(error || rowError) && <p className="text-sm text-red-500">{error ?? rowError}</p>}
 
+      {families === null ? (
+        <PanelRowsSkeleton rows={4} icon={24} />
+      ) : (
       <div className="flex flex-col gap-0.5">
         {families.map((f, i) => renderRow(f, i))}
         {families.length === 0 && (
@@ -360,8 +362,9 @@ export function FamiliesPanel() {
           </div>
         )}
       </div>
+      )}
 
-      {unassigned.length > 0 && (
+      {families !== null && unassigned.length > 0 && (
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center gap-2">
             <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">

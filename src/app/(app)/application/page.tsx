@@ -20,7 +20,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
-import { ApplicationPageSkeleton } from "@/components/skeletons";
+import { Skeleton } from "@/components/ui/skeleton";
 import { ProjectApplicationModal } from "@/components/project-application-modal";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { type Difficulty, DIFFICULTY_LABELS } from "@/lib/projects";
@@ -640,9 +640,10 @@ export default function ApplicationPage() {
     return true;
   };
 
-  if (loading) return <ApplicationPageSkeleton />;
-
-  if (closed) {
+  // While loading, fall through to the page itself: its fixed copy and
+  // controls render for real (disabled), with placeholders only where it reads
+  // data (the targets, the project lists, the saved resume).
+  if (!loading && closed) {
     return (
       <div className="flex flex-1 w-full items-center justify-center p-6">
         <div className="flex flex-col items-center gap-4 text-center max-w-sm">
@@ -659,7 +660,7 @@ export default function ApplicationPage() {
     );
   }
 
-  if (submitted) {
+  if (!loading && submitted) {
     return (
       <div className="flex flex-1 w-full items-center justify-center p-6">
         <div className="flex flex-col items-center gap-4 text-center max-w-sm">
@@ -678,7 +679,7 @@ export default function ApplicationPage() {
 
   // The applicant is already on every current project (projects excludes their
   // own memberships), so there's nothing left to apply to.
-  if (projects.length === 0) {
+  if (!loading && projects.length === 0) {
     return (
       <div className="flex flex-1 w-full items-center justify-center p-6">
         <div className="flex flex-col items-center gap-4 text-center max-w-sm">
@@ -710,10 +711,20 @@ export default function ApplicationPage() {
       <div className="flex flex-col gap-1">
         <BackLink href="/" label="Dashboard" />
         <h1 className="text-2xl font-bold tracking-tight">Application</h1>
-        <p className="text-sm text-muted-foreground">
-          Rank your top {rankTarget}, then answer the questions for your top {requiredTarget}. Progress saves automatically.
-        </p>
+        {loading ? (
+          <div className="flex h-5 items-center">
+            <Skeleton className="h-3.5 w-96 max-w-full rounded-full" />
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Rank your top {rankTarget}, then answer the questions for your top {requiredTarget}. Progress saves automatically.
+          </p>
+        )}
       </div>
+
+      {/* Disabled (natively, via the fieldset) until the saved answers arrive,
+          so nothing typed now is overwritten by the load. */}
+      <fieldset disabled={loading} className="contents">
 
       {/* About you — optional background, above the project rankings. */}
       <section className="flex flex-col gap-6 rounded-xl surface p-5">
@@ -770,6 +781,9 @@ export default function ApplicationPage() {
       {/* Resume — optional, one per person, stored privately. */}
       <section className="flex flex-col gap-2 rounded-xl surface p-5">
         <FieldLabel tag="Highly recommended" hint="PDF or Word (.pdf, .doc, .docx), up to 500 KB.">Resume</FieldLabel>
+        {loading ? (
+          <Skeleton className="h-8 w-36 rounded-md" />
+        ) : (
         <ResumeField
           resume={resume}
           uploading={resumeUploading}
@@ -777,6 +791,7 @@ export default function ApplicationPage() {
           onSelect={onResumeSelected}
           onRemove={onResumeRemove}
         />
+        )}
         <div className="pt-1">
           <FieldLabel htmlFor="portfolio-url" tag="Optional" hint="Designers: share your portfolio (Behance, Dribbble, a personal site…).">
             Portfolio link
@@ -791,6 +806,7 @@ export default function ApplicationPage() {
           placeholder="https://your-portfolio.com"
         />
       </section>
+      </fieldset>
 
       <DndContext
         sensors={sensors}
@@ -802,6 +818,9 @@ export default function ApplicationPage() {
       >
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Available projects */}
+          {loading ? (
+            <AvailableZoneSkeleton />
+          ) : (
           <AvailableZone
             studioAvailable={studioAvailable}
             launchAvailable={launchAvailable}
@@ -811,13 +830,21 @@ export default function ApplicationPage() {
             full={full}
             onAdd={addProject}
           />
+          )}
 
           {/* Ranking */}
           <div className="flex flex-col gap-3">
             <div className="flex items-center gap-2">
               <h2 className="text-base font-semibold tracking-tight">Your ranking</h2>
-              <span className="text-sm text-muted-foreground tabular-nums">{rankedView.length}/{rankTarget}</span>
+              {loading ? (
+                <Skeleton className="h-3.5 w-8 rounded-full" />
+              ) : (
+                <span className="text-sm text-muted-foreground tabular-nums">{rankedView.length}/{rankTarget}</span>
+              )}
             </div>
+            {loading ? (
+              <RankZoneSkeleton />
+            ) : (
             <RankZone
               ranked={rankedView}
               projectById={projectById}
@@ -827,6 +854,7 @@ export default function ApplicationPage() {
               onOpen={(pid) => setModalProject(pid)}
               onRemove={removeProject}
             />
+            )}
           </div>
         </div>
 
@@ -838,7 +866,7 @@ export default function ApplicationPage() {
       </DndContext>
 
       {/* Free-text — after the project rankings. */}
-      <div className="flex flex-col gap-2">
+      <fieldset disabled={loading} className="min-w-0 flex flex-col gap-2">
         <FieldLabel tag="Optional" htmlFor="about-note">Anything else you&apos;d like us to know?</FieldLabel>
         <Textarea
           id="about-note"
@@ -847,11 +875,11 @@ export default function ApplicationPage() {
           rows={4}
           className="resize-y"
         />
-      </div>
+      </fieldset>
 
       <div className="flex flex-col gap-2 pt-4">
         {error && <p className="text-sm text-destructive">{error}</p>}
-        {!canSubmit && (
+        {!canSubmit && !loading && (
           <p className="text-xs text-muted-foreground">
             {ranked.length !== rankTarget
               ? `Rank ${rankTarget === RANK_COUNT ? "exactly" : "all"} ${rankTarget} project${rankTarget === 1 ? "" : "s"} (${ranked.length} selected).`
@@ -859,7 +887,7 @@ export default function ApplicationPage() {
           </p>
         )}
         <div className="flex justify-end">
-          <Button onClick={() => setShowDuesConfirm(true)} disabled={!canSubmit || submitting}>
+          <Button onClick={() => setShowDuesConfirm(true)} disabled={loading || !canSubmit || submitting}>
             {submitting ? "Submitting…" : "Submit application"}
           </Button>
         </div>
@@ -1401,6 +1429,71 @@ function DragPreview({ project }: { project: Project }) {
           {TYPE_LABELS[project.type]}
         </span>
       </div>
+    </div>
+  );
+}
+
+// ---- loading shapes ---------------------------------------------------------
+
+/** A collapsed project card: chevron, icon, name, and its trailing button(s). */
+function ProjectCardSkeleton({ i, ranked = false }: { i: number; ranked?: boolean }) {
+  return (
+    <div className="rounded-xl bg-foreground/[0.04] p-3">
+      <div className="flex items-center gap-2">
+        <ChevronDown size={14} className="-rotate-90 flex-shrink-0 text-muted-foreground/30" />
+        <Skeleton className="h-8 w-8 flex-shrink-0 rounded-lg" />
+        <span className="flex-1 min-w-0">
+          <Skeleton className={`h-3.5 rounded-full ${["w-32", "w-40", "w-28", "w-36"][i % 4]}`} />
+        </span>
+        {ranked ? (
+          <>
+            <Skeleton className="h-3 w-10 rounded-full" />
+            <span className="h-7 w-7 flex-shrink-0 rounded-md border border-border bg-background" />
+            <span className="h-7 w-7 flex-shrink-0 rounded-md bg-background shadow-edge" />
+          </>
+        ) : (
+          <span className="h-7 w-7 flex-shrink-0 rounded-md bg-background shadow-edge" />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AvailableZoneSkeleton() {
+  return (
+    <div className="flex flex-col gap-4 rounded-xl">
+      <h2 className="text-base font-semibold tracking-tight">Projects</h2>
+      {[
+        { title: TYPE_LABELS.studio, hint: "Returning members are prioritized for OP Studio projects.", rows: 3 },
+        { title: TYPE_LABELS.launch, hint: undefined, rows: 3 },
+      ].map((g) => (
+        <div key={g.title} className="flex flex-col gap-2">
+          <div className="flex items-center gap-2">
+            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{g.title}</h3>
+            {g.hint && <InfoHint label={`About ${g.title}`}>{g.hint}</InfoHint>}
+          </div>
+          <div aria-hidden className="flex flex-col gap-2">
+            {Array.from({ length: g.rows }, (_, i) => (
+              <ProjectCardSkeleton key={i} i={i} />
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function RankZoneSkeleton({ rows = 3 }: { rows?: number }) {
+  return (
+    <div aria-hidden className="min-h-40 flex flex-col gap-2">
+      {Array.from({ length: rows }, (_, i) => (
+        <div key={i} className="flex items-center gap-2.5">
+          <Skeleton className="h-6 w-6 flex-shrink-0 rounded-full" />
+          <div className="flex-1 min-w-0">
+            <ProjectCardSkeleton i={i + 1} ranked />
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

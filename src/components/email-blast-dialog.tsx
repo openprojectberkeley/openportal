@@ -12,6 +12,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { selectInChunks } from "@/lib/postgrest-chunk";
 import { TabStrip } from "@/components/ui/tab-strip";
 
@@ -182,10 +183,29 @@ function TabBody({
       {error && <p className="text-sm text-destructive">{error}</p>}
 
       {rows === null ? (
-        <div className="flex flex-col gap-2">
-          <div className="h-20 rounded-xl bg-foreground/[0.09] animate-pulse" />
-          <div className="h-40 rounded-xl bg-foreground/[0.09] animate-pulse" />
-        </div>
+        // The script doesn't depend on who's in the list, so it's real (and
+        // copyable) already; only the intro's counts and the addresses wait.
+        <>
+          <p className="flex h-5 items-center gap-1 text-sm text-muted-foreground">
+            {intro}
+            <Skeleton className="h-3.5 w-40 rounded-full" />
+          </p>
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Recipients</span>
+              <Button variant="outline" size="sm" disabled className="gap-1.5">
+                <Copy size={14} />
+                Copy emails
+              </Button>
+            </div>
+            <div aria-hidden className="flex h-20 flex-col gap-1 rounded-md bg-foreground/[0.04] px-3 py-2.5">
+              <Skeleton className="h-3 w-full rounded-full" />
+              <Skeleton className="h-3 w-11/12 rounded-full" />
+              <Skeleton className="h-3 w-2/3 rounded-full" />
+            </div>
+          </div>
+          <ScriptBlock script={script} />
+        </>
       ) : rows.length === 0 ? (
         <div className="px-4 py-8 text-center text-sm text-muted-foreground rounded-xl surface">
           {emptyLabel}

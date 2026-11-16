@@ -55,10 +55,13 @@ export function HostHeaderSkeleton() {
   return (
     <div className="flex items-start gap-4" aria-hidden>
       <Skeleton className="h-14 w-14 rounded-full flex-shrink-0" />
-      <div className="flex flex-col gap-2 min-w-0 flex-1 pt-1.5">
-        <Skeleton className="h-6 w-44 rounded-full" />
-        <Skeleton className="h-3.5 w-32 rounded-full" />
-        <Skeleton className="mt-1 h-3.5 w-full max-w-md rounded-full" />
+      <div className="flex flex-col gap-1 min-w-0 flex-1 pt-1">
+        <span className="flex h-8 items-center"><Skeleton className="h-6 w-44" /></span>
+        <span className="flex h-5 items-center"><Skeleton className="h-3.5 w-32 rounded-full" /></span>
+        <span className="mt-1 flex h-[1.625rem] max-w-prose items-center gap-1 text-sm">
+          <span className="font-medium">Interests:</span>
+          <Skeleton className="h-3.5 w-full max-w-md rounded-full" />
+        </span>
       </div>
     </div>
   );

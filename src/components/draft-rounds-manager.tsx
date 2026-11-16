@@ -1,5 +1,7 @@
 "use client";
 
+import { ApplicantRowsSkeleton } from "@/components/skeletons";
+import { Skeleton } from "@/components/ui/skeleton";
 import { createClient } from "@/lib/supabase/client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, GripVertical, MoreHorizontal, Play, Plus, RotateCcw, Trash2, Undo2, X } from "lucide-react";
@@ -774,7 +776,11 @@ export function DraftRoundsManager() {
 
       {/* Period picker */}
       {periods === null ? (
-        <div className="h-9 w-48 rounded-md bg-foreground/[0.09] animate-pulse" />
+        <div aria-hidden className="flex h-9 items-center gap-2 self-start rounded-md border border-input px-3 text-sm shadow-sm">
+          <span className="text-muted-foreground">Draft for</span>
+          <Skeleton className="h-3.5 w-24 rounded-full" />
+          <ChevronDown size={14} className="text-muted-foreground" />
+        </div>
       ) : periods.length === 0 ? (
         <span className="text-sm text-muted-foreground">No application periods yet.</span>
       ) : (
@@ -873,8 +879,9 @@ export function DraftRoundsManager() {
         </div>
       )}
 
-      {selectedPeriodId && (
+      {(selectedPeriodId || periods === null) && (
         <div className="flex flex-col gap-4">
+          {(rounds === null || periods === null) && <RoundNavSkeleton />}
           {rounds !== null && rounds.length > 0 && (
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2">
@@ -939,8 +946,11 @@ export function DraftRoundsManager() {
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
             {/* LEFT: the single, editable pick-order box for the active round */}
-            {rounds === null ? (
-              <div className="h-24 rounded-xl bg-foreground/[0.09] animate-pulse" />
+            {rounds === null || periods === null ? (
+              <>
+                <RoundCardSkeleton />
+                <PicksThisRoundSkeleton />
+              </>
             ) : rounds.length === 0 ? (
               <div className="px-4 py-10 text-center text-sm text-muted-foreground rounded-xl surface flex flex-col gap-3 items-center">
                 No rounds yet. Add one to start setting up the draft.
@@ -1434,6 +1444,111 @@ function ProjectTile({
       >
         <X size={15} />
       </button>
+    </div>
+  );
+}
+
+// ---- loading shapes -------------------------------------------------------
+
+/** The whole manager while periods load (the /manager/draft route skeleton). */
+export function DraftRoundsManagerSkeleton() {
+  return (
+    <div className="flex flex-col gap-6">
+      <div aria-hidden className="flex h-9 items-center gap-2 self-start rounded-md border border-input px-3 text-sm shadow-sm">
+        <span className="text-muted-foreground">Draft for</span>
+        <Skeleton className="h-3.5 w-24 rounded-full" />
+        <ChevronDown size={14} className="text-muted-foreground" />
+      </div>
+      <div className="flex flex-col gap-4">
+        <RoundNavSkeleton />
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+          <RoundCardSkeleton />
+          <PicksThisRoundSkeleton />
+        </div>
+      </div>
+    </div>
+  );
+}
+// The round's chrome is fixed (nav buttons, column labels, Add project); only
+// the round number, the projects and the picks wait for data.
+
+function RoundNavSkeleton() {
+  return (
+    <div aria-hidden className="flex items-center justify-between gap-3">
+      <div className="flex items-center gap-2">
+        <Button variant="outline" size="icon" className="h-7 w-7" disabled tabIndex={-1}>
+          <ChevronLeft size={14} />
+        </Button>
+        <span className="flex h-6 items-center">
+          <Skeleton className="h-4 w-28 rounded-full" />
+        </span>
+        <Button variant="outline" size="icon" className="h-7 w-7" disabled tabIndex={-1}>
+          <ChevronRight size={14} />
+        </Button>
+        <span className="flex h-7 w-7 items-center justify-center text-muted-foreground/40">
+          <Trash2 size={14} />
+        </span>
+      </div>
+      <Button variant="outline" size="sm" disabled tabIndex={-1}>
+        <Plus size={14} className="mr-1.5" />
+        Add round
+      </Button>
+    </div>
+  );
+}
+
+function RoundCardSkeleton({ rows = 4 }: { rows?: number }) {
+  return (
+    <div aria-hidden className="rounded-xl surface p-2 flex flex-col gap-1">
+      <div className="flex items-center gap-2 px-2.5 pb-1 pt-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        <span className="w-4 shrink-0" />
+        <span className="flex-1">Pick order</span>
+        <span className="flex w-24 shrink-0 justify-end">
+          <Skeleton className="h-3 w-16 rounded-full" />
+        </span>
+        <span className="w-14 shrink-0 text-center">Picks</span>
+        <span className="w-4 shrink-0" />
+      </div>
+      <div className="flex flex-col gap-0.5">
+        {Array.from({ length: rows }, (_, i) => (
+          <div key={i} className="flex items-center gap-2 rounded-lg px-2.5 py-1.5">
+            <span className="flex w-4 shrink-0 justify-center text-xs font-medium tabular-nums text-muted-foreground">{i + 1}</span>
+            <span className="flex min-w-0 flex-1 items-center gap-2">
+              <Skeleton className="h-6 w-6 shrink-0 rounded-md" />
+              <Skeleton className={`h-3.5 rounded-full ${["w-28", "w-36", "w-24", "w-32"][i % 4]}`} />
+            </span>
+            <span className="flex w-24 shrink-0 justify-end">
+              <Skeleton className="h-3 w-12 rounded-full" />
+            </span>
+            <Skeleton className="h-7 w-14 shrink-0 rounded-md" />
+            <span className="w-4 shrink-0" />
+          </div>
+        ))}
+      </div>
+      <div className="px-1 pt-1">
+        <span className="inline-flex h-8 items-center px-2.5 text-sm font-medium text-muted-foreground/60">
+          <Plus size={14} className="mr-1.5" />
+          Add project
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function PicksThisRoundSkeleton({ projects = 3 }: { projects?: number }) {
+  return (
+    <div aria-hidden className="rounded-xl surface p-4 flex flex-col gap-3">
+      <div className="flex flex-col gap-3">
+        {Array.from({ length: projects }, (_, i) => (
+          <div key={i} className="flex flex-col gap-1.5 rounded-lg p-2">
+            <div className="flex items-center gap-2">
+              <Skeleton className="h-5 w-5 rounded-md" />
+              <Skeleton className={`h-3 rounded-full ${["w-24", "w-32", "w-20"][i % 3]}`} />
+            </div>
+            <ApplicantRowsSkeleton rows={2} compact />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

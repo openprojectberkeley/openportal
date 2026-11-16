@@ -36,7 +36,8 @@ import { ProjectIcon } from "@/components/project-icon";
 import { applicantName, StaticApplicantCard, type AppRow } from "@/components/applicant-meta";
 import { InvalidIndicator } from "@/components/applicant-indicators";
 import { ApplicantPickerPopover } from "@/components/applicant-picker-dialog";
-import { ApplicationListSkeleton } from "@/components/skeletons";
+import { BoardColumnSkeleton } from "@/components/skeletons";
+import { Skeleton } from "@/components/ui/skeleton";
 import { createClient } from "@/lib/supabase/client";
 import { DEFAULT_ACCENT, accentFill, readableTextColor } from "@/lib/portal-color";
 import {
@@ -461,7 +462,13 @@ function UndraftedDialog({
           />
           <div className="flex max-h-72 flex-col gap-1 overflow-y-auto">
             {rows === null ? (
-              <p className="text-sm text-muted-foreground py-4 text-center">Loading applicants…</p>
+              Array.from({ length: 5 }, (_, i) => (
+                <div key={i} aria-hidden className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 bg-background shadow-edge">
+                  <span className="flex h-5 items-center">
+                    <Skeleton className={`h-3.5 rounded-full ${["w-32", "w-24", "w-40", "w-28", "w-36"][i]}`} />
+                  </span>
+                </div>
+              ))
             ) : options.length === 0 ? (
               <p className="text-sm text-muted-foreground py-4 text-center">
                 {rows.length === 0 ? "Everyone eligible has been drafted." : "No matching applicants."}
@@ -745,7 +752,9 @@ export function AllProjectsBoard({
               {counts.applicants} application{counts.applicants === 1 ? "" : "s"} · {counts.projects} project{counts.projects === 1 ? "" : "s"}
             </p>
           ) : (
-            <span className="h-3.5 w-40 animate-pulse rounded-full bg-foreground/[0.09]" aria-hidden />
+            <span aria-hidden className="flex h-5 items-center">
+              <Skeleton className="h-3.5 w-40 rounded-full" />
+            </span>
           )}
         </div>
         <div className="flex items-center gap-2">
@@ -776,12 +785,9 @@ export function AllProjectsBoard({
       {actionError && <p className="text-sm text-destructive">{actionError}</p>}
 
       {columns === null ? (
-        <div className="flex gap-4">
-          {[0, 1, 2].map((i) => (
-            <div key={i} className="flex w-[300px] shrink-0 flex-col gap-4">
-              <div className="h-[62px] rounded-xl bg-foreground/[0.09] animate-pulse" />
-              <ApplicationListSkeleton rows={3} />
-            </div>
+        <div className="flex items-start gap-4 overflow-hidden pb-3">
+          {[0, 1, 2, 3].map((i) => (
+            <BoardColumnSkeleton key={i} rows={[3, 2, 4, 2][i]} />
           ))}
         </div>
       ) : columns.length === 0 ? (

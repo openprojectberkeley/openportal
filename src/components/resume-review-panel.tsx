@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowRight, Check, Clock, FileSearch } from "lucide-react";
+import { ResumeReviewPanelSkeleton } from "@/components/skeletons";
 
 type State =
   | { kind: "none" }
@@ -21,7 +22,10 @@ export function ResumeReviewPanel({ compact = false, className }: { compact?: bo
     const load = async () => {
       const supabase = createClient();
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      if (!user) {
+        setState({ kind: "none" });
+        return;
+      }
 
       const { data: rows } = await supabase
         .from("resume_reviews")
@@ -39,9 +43,9 @@ export function ResumeReviewPanel({ compact = false, className }: { compact?: bo
     load();
   }, []);
 
-  // Nothing until we know — avoids a flash of "request one" for someone who
-  // already has feedback waiting.
-  if (state === null) return null;
+  // A card-shaped placeholder until we know — avoids a flash of "request one"
+  // for someone who already has feedback waiting, without the card popping in.
+  if (state === null) return <ResumeReviewPanelSkeleton compact={compact} className={className} />;
 
   const date = (iso: string) =>
     new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });

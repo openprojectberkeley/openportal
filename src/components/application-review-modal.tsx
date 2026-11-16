@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 
-import { ProjectApplicationModalSkeleton } from "@/components/skeletons";
+import { Skeleton } from "@/components/ui/skeleton";
 import { resumeSignedUrl } from "@/lib/resume-upload";
 import { TechAreaIcon } from "@/components/tech-area-icon";
 import { techAreaLabel, techClassLabel } from "@/lib/application-profile";
@@ -359,7 +359,7 @@ export function ApplicationReviewModal({
         </DialogHeader>
 
         {loading ? (
-          <ProjectApplicationModalSkeleton />
+          <ApplicationReviewSkeleton readOnly={readOnly} />
         ) : (
           <div className="flex flex-col gap-6">
             <ApplicantDetails
@@ -596,6 +596,86 @@ function ApplicantDetails({
             </div>
           )}
         </>
+      )}
+    </div>
+  );
+}
+
+// The review while it loads: the details card with its real headings, a few
+// ranked projects (header, essay lines, an answer block), and the real footer.
+function ApplicationReviewSkeleton({ readOnly }: { readOnly?: boolean }) {
+  const line = (w: string) => (
+    <div className="flex h-5 items-center">
+      <Skeleton className={`h-3.5 rounded-full ${w}`} />
+    </div>
+  );
+  return (
+    <div className="flex flex-col gap-6">
+      <div aria-hidden className="flex flex-col gap-3 rounded-xl surface p-4">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Applicant details</h3>
+        <div className="flex flex-col gap-1">
+          <span className="text-xs font-medium text-muted-foreground">Technical areas of interest</span>
+          <div className="grid grid-cols-1 gap-x-6 gap-y-1 sm:grid-cols-2">
+            {Array.from({ length: 4 }, (_, i) => (
+              <div key={i} className="flex h-5 items-center justify-between gap-3">
+                <span className="flex min-w-0 items-center gap-2">
+                  <Skeleton className="h-3.5 w-3.5 shrink-0 rounded-sm" />
+                  <Skeleton className={`h-3.5 rounded-full ${["w-24", "w-32", "w-20", "w-28"][i]}`} />
+                </span>
+                <span className="flex shrink-0 items-center gap-0.5">
+                  {[1, 2, 3, 4, 5].map((n) => (
+                    <span key={n} className="h-1.5 w-1.5 rounded-full bg-foreground/15" />
+                  ))}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="flex flex-col gap-1">
+          <span className="text-xs font-medium text-muted-foreground">Tech classes</span>
+          {line("w-3/4")}
+        </div>
+        <div className="flex flex-col gap-1">
+          <span className="text-xs font-medium text-muted-foreground">Resume</span>
+          {line("w-36")}
+        </div>
+      </div>
+
+      {Array.from({ length: 3 }, (_, i) => (
+        <div key={i} aria-hidden className="flex flex-col gap-2">
+          <div className="flex h-5 items-center gap-2">
+            <span className="w-4 font-mono text-xs font-semibold text-muted-foreground tabular-nums">{i + 1}.</span>
+            <Skeleton className={`h-3.5 rounded-full ${["w-32", "w-40", "w-28"][i]}`} />
+            <Skeleton className="h-3 w-12 rounded-full" />
+          </div>
+          {line("w-full")}
+          {line("w-11/12")}
+          {line("w-3/5")}
+          <div className="flex flex-col gap-0.5 pl-2 border-l border-foreground/10">
+            <div className="flex h-4 items-center pl-2">
+              <Skeleton className="h-3 w-48 rounded-full" />
+            </div>
+            <div className="pl-2">{line("w-2/5")}</div>
+          </div>
+        </div>
+      ))}
+
+      {!readOnly && (
+        <div className="flex flex-wrap items-center justify-end gap-2 pt-2">
+          <span className="mr-auto text-xs text-muted-foreground">Place on</span>
+          <span className="flex items-center justify-between gap-2 border rounded-md px-3 py-2 text-sm bg-background min-w-[10rem] text-muted-foreground">
+            Select project…
+            <ChevronDown size={14} />
+          </span>
+          <Button variant="outline" disabled>
+            <X size={16} className="mr-1" />
+            Reject
+          </Button>
+          <Button disabled>
+            <Check size={16} className="mr-1" />
+            Accept
+          </Button>
+        </div>
       )}
     </div>
   );

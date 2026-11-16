@@ -17,7 +17,7 @@ import { ProjectsPanel } from "@/components/projects-panel";
 import { PortalsPanel } from "@/components/portals-panel";
 import { FamiliesPanel } from "@/components/families-panel";
 import { AnnouncementsPanel } from "@/components/announcements-panel";
-import { PanelListSkeleton } from "@/components/skeletons";
+import { PanelRowsSkeleton } from "@/components/skeletons";
 import { PersonName } from "@/components/person-profile-provider";
 import { MEMBER_STATUS_LABEL, MEMBER_STATUS_VALUES, type MemberStatus } from "@/lib/member-status";
 import { staggerStyle } from "@/lib/motion";
@@ -410,7 +410,7 @@ export default function AdminPage() {
       {error ? (
         <p className="py-8 text-sm text-destructive">{error}</p>
       ) : loading ? (
-        <PanelListSkeleton rows={8} />
+        <PanelRowsSkeleton rows={8} extra actions={false} nameBox="h-6" />
       ) : (
       <div
         key={listKey}

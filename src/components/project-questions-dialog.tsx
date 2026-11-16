@@ -238,11 +238,20 @@ export function ProjectQuestionsDialog({ projectId, open, onOpenChange }: Props)
         {confirmDialog}
         <div className="flex flex-col gap-5">
           {loading ? (
-            <div className="flex flex-col gap-3 rounded-lg surface p-4" aria-hidden>
-              <Skeleton className="h-3 w-24 rounded-full" />
-              <Skeleton className="h-20 w-full" />
-              <Skeleton className="h-3.5 w-40 rounded-full" />
-              <Skeleton className="h-3.5 w-56 rounded-full" />
+            // The real card with its controls disabled; only the prompt text,
+            // which is per-project, is missing from the box.
+            <div className="flex flex-col gap-3 rounded-lg surface p-4">
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Essay</span>
+                <InfoHint label="About the essay">
+                  Always first in the applicant&apos;s modal. 150–200 words is suggested; any non-empty answer saves.
+                </InfoHint>
+                <label className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
+                  Required
+                  <Switch disabled aria-label="Essay required" />
+                </label>
+              </div>
+              <Textarea aria-hidden tabIndex={-1} rows={3} disabled className="resize-none" />
             </div>
           ) : (
             <div className="flex flex-col gap-3 rounded-lg surface p-4">
@@ -269,18 +278,29 @@ export function ProjectQuestionsDialog({ projectId, open, onOpenChange }: Props)
             </div>
           )}
 
-          {!loading && (
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                Custom questions
-              </span>
-              <InfoHint label="About custom questions">
-                These appear in the applicant&apos;s modal for this project, after the essay.
-              </InfoHint>
-            </div>
-          )}
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              Custom questions
+            </span>
+            <InfoHint label="About custom questions">
+              These appear in the applicant&apos;s modal for this project, after the essay.
+            </InfoHint>
+          </div>
 
-          {loading ? null : questions.length === 0 ? (
+          {loading ? (
+            <div aria-hidden className="-mx-3 flex flex-col gap-0.5">
+              {Array.from({ length: 3 }, (_, i) => (
+                <div key={i} className="flex flex-col gap-0.5 rounded-lg px-3 py-2.5">
+                  <div className="flex h-5 items-center">
+                    <Skeleton className={`h-3.5 rounded-full ${["w-56", "w-44", "w-64"][i]} max-w-full`} />
+                  </div>
+                  <div className="flex h-4 items-center">
+                    <Skeleton className="h-3 w-32 rounded-full" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : questions.length === 0 ? (
             <p className="rounded-lg bg-foreground/[0.03] px-4 py-6 text-center text-sm text-muted-foreground">
               No custom questions yet
             </p>

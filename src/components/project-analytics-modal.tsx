@@ -3,7 +3,7 @@
 import { Disclosure } from "@/components/ui/disclosure";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ColorDot, MetricBar } from "@/components/metric-bar";
-import { Section } from "@/components/application-analytics-modal";
+import { MetricBarSkeleton, Section, SectionSkeleton } from "@/components/application-analytics-modal";
 import { cn } from "@/lib/utils";
 import type { RecruitingAnalytics } from "@/lib/use-recruiting-analytics";
 
@@ -22,18 +22,22 @@ const ordinal = (n: number) => {
 
 export function ProjectsSkeleton() {
   return (
-    <div className="flex flex-col gap-4" aria-busy>
-      <Skeleton className="h-4 w-32 rounded-full" />
-      {Array.from({ length: 6 }, (_, i) => (
-        <div key={i} className="flex flex-col gap-1.5">
-          <div className="flex items-center gap-3">
-            <Skeleton className="h-3.5 w-32 shrink-0 rounded-full sm:w-48" />
-            <Skeleton className="h-1.5 flex-1 rounded-full" />
-            <Skeleton className="h-3 w-10 shrink-0 rounded-full" />
-          </div>
-          <Skeleton className="h-3 w-56 rounded-full" />
-        </div>
-      ))}
+    <div className="flex flex-col gap-8" aria-busy>
+      <SectionSkeleton
+        title="Demand"
+        hint="Bar: 1st-choice applicants. Notch: estimated team size. Sorted by demand per seat; projects without a size set sit last."
+      >
+        <ul aria-hidden className="flex flex-col gap-3">
+          {Array.from({ length: 6 }, (_, i) => (
+            <li key={i} className="flex flex-col gap-1">
+              <MetricBarSkeleton i={i} mark />
+              <div className="flex h-4 items-center pl-4">
+                <Skeleton className="h-3 w-56 max-w-full rounded-full" />
+              </div>
+            </li>
+          ))}
+        </ul>
+      </SectionSkeleton>
     </div>
   );
 }

@@ -4,8 +4,7 @@ import { Suspense, useCallback, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight, ClipboardCheck, Plus, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { CalendarPageSkeleton, EventListSkeleton } from "@/components/skeletons";
-import { Skeleton } from "@/components/ui/skeleton";
+import { AgendaSkeleton, CalendarFiltersSkeleton, CalendarPageSkeleton, EventListSkeleton, MonthGridSkeleton, WeekGridSkeleton } from "@/components/skeletons";
 import { CalendarMonthGrid } from "@/components/calendar-month-grid";
 import { CalendarWeekGrid } from "@/components/calendar-week-grid";
 import { CalendarAgenda } from "@/components/calendar-agenda";
@@ -267,6 +266,7 @@ function CalendarPageBody() {
 
       {/* Both dimensions, side by side. Each trigger carries its own label, so
           the pair needs no headings. They AND together. */}
+      {loading && <CalendarFiltersSkeleton />}
       {(presentCategories.length > 1 || presentPortals.length > 1) && (
         <div className="flex flex-wrap items-center gap-2">
           {presentCategories.length > 1 && (
@@ -305,7 +305,7 @@ function CalendarPageBody() {
       {error && <p className="text-sm text-red-500">{error}</p>}
 
       {loading ? (
-        <CalendarBodySkeleton />
+        <CalendarBodySkeleton view={view} selectedKey={selectedKey} canAdd={canAdd} onAdd={openCreate} />
       ) : view === "agenda" ? (
         <CalendarAgenda
           eventsByDay={eventsByDay}
@@ -441,19 +441,40 @@ function CalendarPageBody() {
   );
 }
 
-// The grid area only — the toolbar above it is already interactive by then.
-function CalendarBodySkeleton() {
+// The body for the active view while events load. The toolbar above is
+// already live, and the day rail's heading and Add button don't depend on
+// events, so they render for real.
+function CalendarBodySkeleton({
+  view,
+  selectedKey,
+  canAdd,
+  onAdd,
+}: {
+  view: (typeof VIEWS)[number];
+  selectedKey: string;
+  canAdd: boolean;
+  onAdd: () => void;
+}) {
+  if (view === "agenda") return <AgendaSkeleton />;
   return (
-    <div className="flex flex-col gap-6">
-      <div className="grid grid-cols-7 gap-px rounded-xl border p-px">
-        {Array.from({ length: 7 }, (_, i) => (
-          <Skeleton key={`w${i}`} className="h-6 rounded-sm" />
-        ))}
-        {Array.from({ length: 42 }, (_, i) => (
-          <Skeleton key={`d${i}`} className="h-[6.5rem] rounded-sm sm:h-[7.5rem]" />
-        ))}
+    <>
+      {view === "month" ? <MonthGridSkeleton /> : <WeekGridSkeleton />}
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {dateFromKey(selectedKey).toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" })}
+          </h2>
+          {canAdd && (
+            <button
+              onClick={onAdd}
+              className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <Plus size={13} /> Add event
+            </button>
+          )}
+        </div>
+        <EventListSkeleton count={2} className="grid gap-2 sm:grid-cols-2" />
       </div>
-      <EventListSkeleton count={2} />
-    </div>
+    </>
   );
 }

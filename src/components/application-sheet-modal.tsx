@@ -46,7 +46,7 @@ import { Combobox, splitList } from "@/components/ui/combobox";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { InfoHint } from "@/components/ui/info-hint";
 import { fetchReturningForPeriod } from "@/lib/returning";
-import { SheetGridSkeleton } from "@/components/skeletons";
+import { Skeleton } from "@/components/ui/skeleton";
 
 type PageProject = { id: string; name: string; type: string; essay_prompt: string | null };
 
@@ -1110,6 +1110,39 @@ export function ApplicationSheetModal({
 
   const title = pageLabel ?? projectName ?? null;
 
+  // Column set for the loading sheet: the same order and widths as the real
+  // header, labels included; `label: null` marks a header that is itself data
+  // (an overview slot before the period's slot count is known), `""` an
+  // unlabelled action column. `cell` is a placeholder width in px.
+  const loadingColumns: { label: string | null; className?: string; menu?: boolean; cell: number }[] = [
+    { label: "Name", className: "left-0 z-40 min-w-[10rem]", menu: true, cell: 120 },
+    ...(!isOverview ? [{ label: "Rank", menu: true, cell: 24 }] : []),
+    ...(isOverview
+      ? (slots.length > 0 ? slots : [1, 2, 3]).map((slot) => ({
+          label: slots.length > 0 ? rankLabel(slot) : null,
+          className: "min-w-[10rem] max-w-[12rem]",
+          menu: true,
+          cell: 110,
+        }))
+      : []),
+    { label: "Year", menu: true, cell: 32 },
+    { label: "Returning", menu: true, cell: 24 },
+    { label: "Coffee", menu: true, cell: 40 },
+    ...(isStudio ? [{ label: "Project coffee", menu: true, cell: 40 }] : []),
+    { label: "Info", menu: true, cell: 24 },
+    { label: "Valid", menu: true, cell: 24 },
+    { label: "Classes", className: "min-w-[10rem]", menu: true, cell: 120 },
+    { label: "Tech areas", className: "min-w-[10rem]", cell: 120 },
+    { label: "Portfolio", cell: 72 },
+    { label: isOverview ? "About" : "Essay", className: longCol, cell: 180 },
+    ...questions.map((q) => ({ label: q.prompt, className: longCol, menu: false, cell: 160 })),
+    { label: "Submitted", menu: true, cell: 56 },
+    { label: "Decision", menu: true, cell: 56 },
+    { label: "", cell: 0 },
+    ...(allProjects ? [{ label: "", cell: 0 }] : []),
+  ];
+
+
   const exportCsv = () => {
     const scope = csvSlug(pageLabel ?? projectName ?? "sheet");
     const period = periodName ? `${csvSlug(periodName)}-` : "";
@@ -1284,7 +1317,48 @@ export function ApplicationSheetModal({
             <p className="text-sm text-muted-foreground">No projects to review.</p>
           </div>
         ) : rows === null ? (
-          <SheetGridSkeleton rows={14} columns={[40, 120, 120, 64, 64, 64, 64, 160, 160, 72]} />
+          // The real column headers (they don't depend on the rows), with
+          // placeholder cells under them at the sheet's own padding and widths.
+          <ScrollArea orientation="both" className="min-h-0 flex-1">
+            <table aria-hidden className="sheet-zebra w-full border-separate border-spacing-0 text-sm">
+              <thead>
+                <tr>
+                  {loadingColumns.map((c, i) => (
+                    <th key={i} className={cn(th, c.className)}>
+                      {c.label ? (
+                        <span className="flex w-full items-center gap-1">
+                          <span className="truncate">{c.label}</span>
+                          {c.menu && <ChevronDown size={11} className="flex-shrink-0 text-muted-foreground/50" />}
+                        </span>
+                      ) : c.label === "" ? (
+                        " "
+                      ) : (
+                        <Skeleton className="h-3 w-16 rounded-full" />
+                      )}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {Array.from({ length: 14 }, (_, r) => (
+                  <tr key={r}>
+                    {loadingColumns.map((c, i) => (
+                      <td key={i} className={cn(td, i === 0 && "sticky left-0 z-20 bg-background", c.className)}>
+                        {c.label !== "" && (
+                          <div className="flex h-4 items-center">
+                            <Skeleton
+                              className="h-3 rounded-full"
+                              style={{ width: `${Math.round(c.cell * (0.55 + ((r * 7 + i * 3) % 5) / 10))}px` }}
+                            />
+                          </div>
+                        )}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </ScrollArea>
         ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center gap-3 py-10">
             <p className="text-sm text-muted-foreground">

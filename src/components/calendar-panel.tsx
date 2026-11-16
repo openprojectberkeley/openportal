@@ -432,9 +432,12 @@ export function CalendarPanel({ portalId, portalName, portalColor }: Props) {
         </div>
 
         {/* Upcoming: below the month when stacked, beside it when split. */}
-        {!loading && upcoming.length > 0 && (
+        {(loading || upcoming.length > 0) && (
           <div className="w-full sm:flex-1 lg:w-full min-w-0 flex flex-col gap-2 pt-3 sm:pt-0 sm:pl-5 lg:pl-0 lg:pt-4">
             <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Upcoming</span>
+            {loading ? (
+              <EventListSkeleton count={2} />
+            ) : (
             <div className="flex flex-col gap-2">
               {upcoming.map((ev) => {
                 const { name, color } = resolve(ev);
@@ -450,6 +453,7 @@ export function CalendarPanel({ portalId, portalName, portalColor }: Props) {
                 );
               })}
             </div>
+            )}
           </div>
         )}
       </div>

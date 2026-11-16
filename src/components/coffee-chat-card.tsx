@@ -75,20 +75,24 @@ export function CoffeeChatCard({ id, name, roles, avatarUrl, interests, onBook, 
   );
 }
 
-// Mirrors CoffeeChatCard: avatar, name and role line, two interest lines, footer.
+// Mirrors CoffeeChatCard: avatar, name over roles, the "Interests:" lines at
+// their leading-relaxed pitch, and the footer button.
 export function CoffeeChatCardSkeleton() {
   return (
-    <div className="h-full rounded-xl p-5 flex flex-col gap-4 surface">
+    <div aria-hidden className="h-full rounded-xl p-5 flex flex-col gap-4 surface rim-card">
       <div className="flex items-center gap-4">
         <Skeleton className="h-14 w-14 rounded-full flex-shrink-0" />
-        <div className="flex flex-col gap-1.5 min-w-0 flex-1">
-          <Skeleton className="h-3.5 w-28 rounded-full" />
-          <Skeleton className="h-3 w-20 rounded-full" />
+        <div className="flex flex-col gap-0.5 min-w-0 flex-1">
+          <span className="flex h-5 items-center"><Skeleton className="h-3.5 w-28 rounded-full" /></span>
+          <span className="flex h-4 items-center"><Skeleton className="h-3 w-20 rounded-full" /></span>
         </div>
       </div>
-      <div className="flex flex-col gap-2">
-        <Skeleton className="h-3.5 w-full rounded-full" />
-        <Skeleton className="h-3.5 w-2/3 rounded-full" />
+      <div className="flex flex-col text-sm leading-relaxed">
+        <span className="flex h-[1.625em] items-center gap-1">
+          <span className="font-medium text-foreground/40">Interests:</span>
+          <Skeleton className="h-3.5 flex-1 rounded-full" />
+        </span>
+        <span className="flex h-[1.625em] items-center"><Skeleton className="h-3.5 w-2/3 rounded-full" /></span>
       </div>
       <Skeleton className="mt-auto h-9 w-full" />
     </div>

@@ -154,11 +154,30 @@ export default function AttendancePage() {
       {error && <p className="text-sm text-destructive">{error}</p>}
 
       {visible === null ? (
-        <div className="flex flex-col gap-3">
-          <Skeleton className="h-20 w-full" />
-          <Skeleton className="h-14 w-full" />
-          <Skeleton className="h-14 w-full" />
-        </div>
+        <>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <Stat label="Attendance rate" hint="Excused absences count as half." value={null} />
+            <Stat label="Present" value={null} />
+            <Stat label="Absent" value={null} />
+            <Stat label="Excused" value={null} />
+          </div>
+          <div aria-hidden className="flex flex-col gap-0.5">
+            {Array.from({ length: 5 }, (_, i) => (
+              <div key={i} className="flex items-center gap-3 rounded-lg px-4 py-3">
+                <span className="h-8 w-[3px] shrink-0 rounded-full bg-foreground/10" />
+                <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <span className="flex h-5 items-center">
+                    <Skeleton className={`h-3.5 rounded-full ${["w-40", "w-32", "w-48", "w-36", "w-28"][i]}`} />
+                  </span>
+                  <span className="flex h-4 items-center">
+                    <Skeleton className="h-3 w-32 rounded-full" />
+                  </span>
+                </div>
+                <Skeleton className="h-5 w-16 shrink-0 rounded-full" />
+              </div>
+            ))}
+          </div>
+        </>
       ) : (
         <>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -216,11 +235,18 @@ export default function AttendancePage() {
   );
 }
 
-function Stat({ label, value, hint }: { label: string; value: string | number; hint?: string }) {
+function Stat({ label, value, hint }: { label: string; value: string | number | null; hint?: string }) {
   return (
-    // Same tile as ApplicationStats: tint, not outline; number first.
+    // Same tile as ApplicationStats: tint, not outline; number first. A null
+    // value is still loading: the label is real, the number a placeholder.
     <div className="rounded-xl surface rim-card px-4 py-3">
-      <div className="text-2xl font-bold">{value}</div>
+      {value === null ? (
+        <div className="flex h-8 items-center">
+          <Skeleton className="h-6 w-10" />
+        </div>
+      ) : (
+        <div className="text-2xl font-bold">{value}</div>
+      )}
       <div className="flex items-center gap-1 text-xs text-muted-foreground">
         {label}
         {hint && <InfoHint label={`About ${label.toLowerCase()}`}>{hint}</InfoHint>}

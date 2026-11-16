@@ -4,7 +4,7 @@ import { accessIsExec } from "@/lib/roles";
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import { Suspense } from "react";
-import { ManagerMenuSkeleton } from "@/components/skeletons";
+import { ResumeQueueSkeleton } from "@/components/manager-skeletons";
 
 // Reviewing is exec-only, and gated server-side rather than hidden in the UI —
 // the same shape as the manager layout. `complete_resume_review()` and the
@@ -12,7 +12,7 @@ import { ManagerMenuSkeleton } from "@/components/skeletons";
 // about not rendering a queue someone can't act on, not about secrecy.
 export default function ResumeReviewQueueLayout({ children }: { children: React.ReactNode }) {
   return (
-    <Suspense fallback={<ManagerMenuSkeleton />}>
+    <Suspense fallback={<ResumeQueueSkeleton />}>
       <ExecGuard>{children}</ExecGuard>
     </Suspense>
   );

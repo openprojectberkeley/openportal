@@ -9,7 +9,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/overlay-scrollbar";
 import { PersonName } from "@/components/person-profile-provider";
-import { MemberRosterSkeleton, SheetGridSkeleton, SheetRowsSkeleton } from "@/components/skeletons";
+import { SheetRowsSkeleton } from "@/components/skeletons";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   EventFormFields,
   deletePortalEventOptimistic,
@@ -592,6 +593,56 @@ export function PortalAttendanceModal({
     );
   };
 
+  // Search, P/A/E legend and import/filter controls: data-independent, so
+  // they render while the sheet loads too and the grid lands under them.
+  // Legend for the single-letter status buttons, plus the club sheet's
+  // project filter and the portal sheet's import button.
+  const managerToolbar = (
+    <div className="flex-shrink-0 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+      <div className="relative">
+        <Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" aria-hidden />
+        <Input
+          value={memberQuery}
+          onChange={(e) => setMemberQuery(e.target.value)}
+          placeholder="Search members…"
+          aria-label="Search members"
+          className="h-8 w-56 pl-8 text-xs"
+        />
+      </div>
+      {STATUSES.map((s) => (
+        <span key={s.value} className="flex items-center gap-1">
+          <span
+            className={`inline-flex h-4 w-4 items-center justify-center rounded-sm text-[10px] font-medium ${STATUS_FILL[s.value]} ${STATUS_ON_FILL[s.value]}`}
+          >
+            {s.short}
+          </span>
+          {s.label}
+        </span>
+      ))}
+      <div className="ml-auto flex items-center gap-2">
+        {!portalId && projects.length > 0 && (
+          <Combobox
+            aria-label="Filter by project"
+            className="h-8 min-h-8 w-auto min-w-44 py-1 text-xs"
+            contentClassName="w-60"
+            value={projectFilter}
+            onChange={setProjectFilter}
+            options={[
+              { value: "", label: fullAccess ? "All members" : "All my projects" },
+              ...projects.map((p) => ({ value: p.id, label: p.name })),
+            ]}
+            searchPlaceholder="Search projects…"
+          />
+        )}
+        {canImport && (
+          <Button size="sm" variant="outline" className="h-8" onClick={openImport}>
+            <Download size={14} /> Import club event
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+
   return (
     // Single dialog. The add/edit event form renders INLINE here (not as a second
     // stacked dialog), so closing it just swaps back to the grid and can never
@@ -656,7 +707,9 @@ export function PortalAttendanceModal({
               </Button>
             </div>
             {clubEvents === null ? (
-              <MemberRosterSkeleton />
+              <ScrollArea className="flex-1 min-h-0">
+                <ImportListSkeleton />
+              </ScrollArea>
             ) : importable.length === 0 ? (
               <p className="text-sm text-muted-foreground py-4 text-center">No club events to import.</p>
             ) : (
@@ -683,7 +736,44 @@ export function PortalAttendanceModal({
             )}
           </div>
         ) : loading ? (
-          canManage ? <SheetGridSkeleton cells="pae" rows={30} columns={[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]} /> : <MemberRosterSkeleton />
+          canManage ? (
+            <div className="flex flex-col min-h-0 flex-1 gap-2">
+              {managerToolbar}
+              <ScrollArea orientation="both" className="flex-1 min-h-0">
+                <table aria-hidden className="sheet-zebra border-separate border-spacing-0 text-sm">
+                  <thead>
+                    <tr>
+                      <th className="sticky left-0 top-0 z-40 bg-background px-3 py-2 text-left font-medium min-w-[10rem]">
+                        Member
+                      </th>
+                      {Array.from({ length: 8 }, (_, i) => (
+                        <th key={i} className="sticky top-0 z-20 bg-background px-2 py-2 text-left align-bottom min-w-[9rem]">
+                          <div className="flex flex-col gap-1.5 py-px">
+                            <Skeleton className="h-2.5 w-12 rounded-full" />
+                            <Skeleton className="h-3.5 rounded-full" style={{ width: `${[72, 56, 88, 64][i % 4]}px` }} />
+                          </div>
+                        </th>
+                      ))}
+                      {canEdit && (
+                        <th className="sticky top-0 z-30 bg-background px-1 py-2 align-bottom w-12">
+                          <span className="mx-auto flex h-7 w-7 items-center justify-center text-muted-foreground/50">
+                            <Plus size={16} />
+                          </span>
+                        </th>
+                      )}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <SheetRowsSkeleton rows={30} columns={8} trailing={canEdit} />
+                  </tbody>
+                </table>
+              </ScrollArea>
+            </div>
+          ) : (
+            <ScrollArea className="flex-1 min-h-0">
+              <AttendanceListSkeleton />
+            </ScrollArea>
+          )
         ) : events.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-3 py-8">
             <p className="text-sm text-muted-foreground">
@@ -704,51 +794,7 @@ export function PortalAttendanceModal({
           </div>
         ) : canManage ? (
           <div className="flex flex-col min-h-0 flex-1 gap-2">
-            {/* Legend for the single-letter status buttons, plus the club
-                sheet's project filter and the portal sheet's import button. */}
-            <div className="flex-shrink-0 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-              <div className="relative">
-                <Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" aria-hidden />
-                <Input
-                  value={memberQuery}
-                  onChange={(e) => setMemberQuery(e.target.value)}
-                  placeholder="Search members…"
-                  aria-label="Search members"
-                  className="h-8 w-56 pl-8 text-xs"
-                />
-              </div>
-              {STATUSES.map((s) => (
-                <span key={s.value} className="flex items-center gap-1">
-                  <span
-                    className={`inline-flex h-4 w-4 items-center justify-center rounded-sm text-[10px] font-medium ${STATUS_FILL[s.value]} ${STATUS_ON_FILL[s.value]}`}
-                  >
-                    {s.short}
-                  </span>
-                  {s.label}
-                </span>
-              ))}
-              <div className="ml-auto flex items-center gap-2">
-                {!portalId && projects.length > 0 && (
-                  <Combobox
-                    aria-label="Filter by project"
-                    className="h-8 min-h-8 w-auto min-w-44 py-1 text-xs"
-                    contentClassName="w-60"
-                    value={projectFilter}
-                    onChange={setProjectFilter}
-                    options={[
-                      { value: "", label: fullAccess ? "All members" : "All my projects" },
-                      ...projects.map((p) => ({ value: p.id, label: p.name })),
-                    ]}
-                    searchPlaceholder="Search projects…"
-                  />
-                )}
-                {canImport && (
-                  <Button size="sm" variant="outline" className="h-8" onClick={openImport}>
-                    <Download size={14} /> Import club event
-                  </Button>
-                )}
-              </div>
-            </div>
+            {managerToolbar}
 
             {visibleRoster.length === 0 ? (
               <p className="text-sm text-muted-foreground py-4 text-center">
@@ -896,5 +942,42 @@ export function PortalAttendanceModal({
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+const LIST_TITLE_WIDTHS = ["w-40", "w-32", "w-48", "w-36", "w-44", "w-28"];
+
+// Member view while loading: the same two-line rows (title over date) with the
+// status on the right.
+function AttendanceListSkeleton({ rows = 7 }: { rows?: number }) {
+  return (
+    <div aria-hidden className="flex flex-col gap-1">
+      {Array.from({ length: rows }, (_, i) => (
+        <div key={i} className="flex items-center gap-2 py-1.5 border-b last:border-0">
+          <div className="flex flex-col gap-1.5 min-w-0 flex-1 py-[3px]">
+            <Skeleton className={`h-3.5 rounded-full ${LIST_TITLE_WIDTHS[i % LIST_TITLE_WIDTHS.length]}`} />
+            <Skeleton className="h-3 w-24 rounded-full" />
+          </div>
+          <Skeleton className="h-3 w-14 rounded-full" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Import picker while club events load: zebra two-line rows plus the Import button slot.
+function ImportListSkeleton({ rows = 6 }: { rows?: number }) {
+  return (
+    <div aria-hidden className="flex flex-col gap-1">
+      {Array.from({ length: rows }, (_, i) => (
+        <div key={i} className="flex items-center gap-2 rounded-md px-2 py-1.5 odd:bg-foreground/[0.03]">
+          <div className="flex flex-col gap-1.5 min-w-0 flex-1 py-[3px]">
+            <Skeleton className={`h-3.5 rounded-full ${LIST_TITLE_WIDTHS[i % LIST_TITLE_WIDTHS.length]}`} />
+            <Skeleton className="h-3 w-24 rounded-full" />
+          </div>
+          <Skeleton className="h-8 w-[4.25rem] rounded-md" />
+        </div>
+      ))}
+    </div>
   );
 }

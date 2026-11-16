@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { FileText, Check } from "lucide-react";
 import { PersonName, initials } from "@/components/person-profile-provider";
 import { resumeSignedUrl } from "@/lib/resume-upload";
-import { Skeleton } from "@/components/ui/skeleton";
+import { ReviewQueueCardsSkeleton } from "@/components/manager-skeletons";
 import { optimistic } from "@/lib/optimistic";
 import { BackLink } from "@/components/back-link";
 
@@ -138,8 +138,8 @@ export default function ManagerResumeReviewsPage() {
 
       {items === null ? (
         <div className="flex flex-col gap-3">
-          <Skeleton className="h-32 w-full rounded-xl" />
-          <Skeleton className="h-32 w-full rounded-xl" />
+          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Waiting</h2>
+          <ReviewQueueCardsSkeleton />
         </div>
       ) : (
         <>

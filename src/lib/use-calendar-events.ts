@@ -132,7 +132,10 @@ export function useCalendarEvents({ portalId }: { portalId?: string } = {}) {
     const supabase = createClient();
     (async () => {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      if (!user) {
+        if (gen === permsGenRef.current) setVisiblePortalIds(new Set());
+        return;
+      }
       const [{ data: portalRows }, { data: memberRows }, { data: roleRows }, { data: portalRoleRows }, { data: myProjectRows }] =
         await Promise.all([
           supabase.from("portals").select("id, name, project_id").order("name"),
@@ -207,7 +210,9 @@ export function useCalendarEvents({ portalId }: { portalId?: string } = {}) {
     // real exec.
     const roleFiltered = isBoardOrExec ? events : events.filter((e) => !isRoleGated(e.category));
     if (portalId || isExec) return roleFiltered;
-    if (visiblePortalIds === null) return [];
+    // Memberships not resolved yet: stay "loading" rather than flashing an
+    // empty calendar ("No events.") before the user's portals arrive.
+    if (visiblePortalIds === null) return null;
     return roleFiltered.filter((e) => e.portal_id === null || visiblePortalIds.has(e.portal_id));
   }, [events, portalId, isExec, isBoardOrExec, visiblePortalIds]);
 

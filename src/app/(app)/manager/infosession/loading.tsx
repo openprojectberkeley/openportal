@@ -1,17 +1,7 @@
-import { ManagerShellSkeleton, CodesTableSkeleton } from "@/components/skeletons";
-import { Skeleton } from "@/components/ui/skeleton";
+import { InfosessionPageSkeleton } from "@/components/manager-skeletons";
 
-// Route-transition placeholder: mirrors the page shell + the "Your codes" table
-// so navigating in (and the client-component mount gap) shows the same skeleton
-// the page renders while it loads, instead of a blank screen.
+// Route-transition placeholder: the page with its data taken out (real title,
+// headings and fixed controls; placeholders only where the page fetches).
 export default function Loading() {
-  return (
-    <ManagerShellSkeleton>
-      <Skeleton className="h-10 w-44" />
-      <div className="flex flex-col gap-3">
-        <h2 className="text-base font-semibold tracking-tight">Your codes</h2>
-        <CodesTableSkeleton />
-      </div>
-    </ManagerShellSkeleton>
-  );
+  return <InfosessionPageSkeleton />;
 }

@@ -8,7 +8,7 @@ import { loadCoffeeChatWindowBounds } from "@/lib/coffee-chat-window";
 import { bucketOpenSlots, groupSlotsByDay, type DayGroup } from "@/lib/coffee-chat-slots";
 import { MapPin } from "lucide-react";
 import { BackLink } from "@/components/back-link";
-import { HostHeader } from "@/components/coffee-host-header";
+import { HostHeader, HostHeaderSkeleton } from "@/components/coffee-host-header";
 import { Skeleton } from "@/components/ui/skeleton";
 
 type PersonInfo = {
@@ -23,7 +23,7 @@ type PersonInfo = {
 // inside a Suspense boundary so the page shell can still prerender.
 export default function ViewAvailabilityPage() {
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={<ViewAvailabilitySkeleton />}>
       <ViewAvailabilityInner />
     </Suspense>
   );
@@ -113,17 +113,7 @@ function ViewAvailabilityInner() {
           <section className="flex flex-col gap-5">
             <h2 className="text-base font-semibold tracking-tight">Availability</h2>
             {loading ? (
-              // Mirrors the flat text chips below (not the booking page's tiles).
-              Array.from({ length: 2 }, (_, d) => (
-                <div key={d} className="flex flex-col gap-2" aria-hidden>
-                  <Skeleton className="h-3.5 w-36 rounded-full" />
-                  <div className="flex flex-wrap gap-x-4 gap-y-2">
-                    {Array.from({ length: 5 }, (_, i) => (
-                      <Skeleton key={i} className="h-3.5 w-20 rounded-full" />
-                    ))}
-                  </div>
-                </div>
-              ))
+              <ChipDaysSkeleton />
             ) : days.length === 0 ? (
               <p className="text-sm text-muted-foreground">No availability in the current window.</p>
             ) : (
@@ -178,8 +168,60 @@ function ViewAvailabilityInner() {
               )}
             </div>
           ) : (
-            <Skeleton className="h-3.5 w-3/4 rounded-full" />
+            <LocationSkeleton />
           )}
+        </aside>
+      </div>
+    </div>
+  );
+}
+
+// ---- loading shapes ---------------------------------------------------------
+
+// Mirrors the flat text chips (not the booking page's tiles), one text-sm line each.
+function ChipDaysSkeleton() {
+  return (
+    <>
+      {Array.from({ length: 2 }, (_, d) => (
+        <div key={d} className="flex flex-col gap-2" aria-hidden>
+          <span className="flex h-5 items-center"><Skeleton className="h-3.5 w-36 rounded-full" /></span>
+          <div className="flex flex-wrap gap-x-4 gap-y-2">
+            {Array.from({ length: 5 }, (_, i) => (
+              <span key={i} className="flex h-5 items-center"><Skeleton className="h-3.5 w-20 rounded-full" /></span>
+            ))}
+          </div>
+        </div>
+      ))}
+    </>
+  );
+}
+
+function LocationSkeleton() {
+  return (
+    <div aria-hidden className="flex items-start gap-1.5 text-sm text-muted-foreground">
+      <MapPin size={14} className="mt-0.5 flex-shrink-0" />
+      <span className="flex h-5 flex-1 items-center">
+        <Skeleton className="h-3.5 w-3/4 rounded-full" />
+      </span>
+    </div>
+  );
+}
+
+// Before the route params resolve: the page with nothing fetched yet.
+function ViewAvailabilitySkeleton() {
+  return (
+    <div className="w-full max-w-6xl mx-auto p-5 flex flex-col gap-6">
+      <BackLink href="/manager/coffee-chats/all" label="Everyone's availability" />
+      <div className="flex flex-col md:flex-row gap-8 md:items-start">
+        <div className="flex flex-col gap-8 md:w-2/3 min-w-0">
+          <HostHeaderSkeleton />
+          <section className="flex flex-col gap-5">
+            <h2 className="text-base font-semibold tracking-tight">Availability</h2>
+            <ChipDaysSkeleton />
+          </section>
+        </div>
+        <aside className="flex flex-col gap-3 md:w-1/3 md:sticky md:top-6 self-start w-full rounded-xl surface p-4">
+          <LocationSkeleton />
         </aside>
       </div>
     </div>

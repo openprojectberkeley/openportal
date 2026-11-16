@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import { IconPicker } from "@/components/icon-picker";
 import { ColorPicker } from "@/components/color-picker";
 import { uploadProjectIcon } from "@/lib/project-icon-upload";
-import { PanelListSkeleton } from "@/components/skeletons";
+import { PanelRowsSkeleton } from "@/components/skeletons";
 
 import { ProjectQuestionsDialog } from "@/components/project-questions-dialog";
 import { type Difficulty, DIFFICULTIES, DIFFICULTY_LABELS } from "@/lib/projects";
@@ -352,7 +352,6 @@ export function ProjectsPanel({ members }: Props) {
     );
   };
 
-  if (loading) return <PanelListSkeleton />;
   if (error) return <div className="py-8 text-sm text-destructive">{error}</div>;
 
   const renderRow = (p: Project, i: number) => {
@@ -495,8 +494,22 @@ export function ProjectsPanel({ members }: Props) {
         </Button>
       </div>
 
-      {(!q || studioProjects.length > 0) && renderSection(TYPE_LABELS.studio, studioProjects)}
-      {(!q || launchProjects.length > 0) && renderSection(TYPE_LABELS.launch, launchProjects)}
+      {loading ? (
+        // Both tracks with their real headings; only the rows wait.
+        [TYPE_LABELS.studio, TYPE_LABELS.launch].map((title) => (
+          <div key={title} className="flex flex-col gap-2">
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">{title}</h2>
+            </div>
+            <PanelRowsSkeleton rows={3} extra />
+          </div>
+        ))
+      ) : (
+        <>
+          {(!q || studioProjects.length > 0) && renderSection(TYPE_LABELS.studio, studioProjects)}
+          {(!q || launchProjects.length > 0) && renderSection(TYPE_LABELS.launch, launchProjects)}
+        </>
+      )}
       {q && matching.length === 0 && (
         <p className="px-4 py-8 text-center text-sm text-muted-foreground">No projects match.</p>
       )}

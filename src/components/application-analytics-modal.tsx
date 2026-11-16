@@ -9,6 +9,7 @@ import { MetricBar } from "@/components/metric-bar";
 import { PersonName } from "@/components/person-profile-provider";
 import { cn } from "@/lib/utils";
 import { staggerStyle } from "@/lib/motion";
+import { TECH_AREAS, TECH_CLASSES } from "@/lib/application-profile";
 import { pct, type InvalidRow, type RecruitingAnalytics } from "@/lib/use-recruiting-analytics";
 
 // The Overview, Applicants and Retention tabs of the exec analytics modal
@@ -46,21 +47,159 @@ export function Section({
   );
 }
 
-export function BarsSkeleton({ rows, sections = 1 }: { rows: number; sections?: number }) {
+// ---- loading shapes ---------------------------------------------------------
+// Each tab's skeleton is the tab itself with the numbers taken out: section
+// titles, hints, fixed row labels and table headers are real; only values,
+// data-ordered labels and bars are placeholders. Same gaps as the loaded tab,
+// so nothing moves when the data lands.
+
+export function SectionSkeleton({ title, hint, children }: { title: string; hint?: React.ReactNode; children: React.ReactNode }) {
   return (
-    <div className="flex flex-col gap-6" aria-busy>
-      {Array.from({ length: sections }, (_, s) => (
-        <div key={s} className="flex flex-col gap-3">
-          <Skeleton className="h-4 w-32 rounded-full" />
-          {Array.from({ length: rows }, (_, i) => (
-            <div key={i} className="flex items-center gap-3">
-              <Skeleton className="h-3.5 w-32 shrink-0 rounded-full sm:w-48" />
-              <Skeleton className="h-1.5 flex-1 rounded-full" />
-              <Skeleton className="h-3 w-10 shrink-0 rounded-full" />
-            </div>
-          ))}
-        </div>
+    <section className="flex flex-col gap-3">
+      <div className="flex items-center gap-2">
+        <h3 className="text-base font-semibold tracking-tight">{title}</h3>
+        {hint && <InfoHint>{hint}</InfoHint>}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+const BAR_LABEL_WIDTHS = ["w-24", "w-20", "w-28", "w-16", "w-24", "w-32"];
+
+/** A MetricBar row with no value: real label when it's fixed, else a bar. */
+export function MetricBarSkeleton({ label, i = 0, mark }: { label?: React.ReactNode; i?: number; mark?: boolean }) {
+  return (
+    <div aria-hidden className="flex items-center gap-3 text-sm">
+      <span className="flex h-5 min-w-0 w-32 shrink-0 items-center gap-2 sm:w-48">
+        {mark && <Skeleton className="h-2 w-2 shrink-0 rounded-full" />}
+        {label != null ? (
+          <span className="min-w-0 truncate text-muted-foreground">{label}</span>
+        ) : (
+          <Skeleton className={`h-3.5 rounded-full ${BAR_LABEL_WIDTHS[i % BAR_LABEL_WIDTHS.length]}`} />
+        )}
+      </span>
+      <span className="block h-1.5 min-w-0 flex-1 rounded-full bg-foreground/[0.07]" />
+      <span className="flex w-24 shrink-0 justify-end">
+        <Skeleton className="h-3 w-8 rounded-full" />
+      </span>
+    </div>
+  );
+}
+
+export function BarsSkeleton({ rows, labels }: { rows?: number; labels?: React.ReactNode[] }) {
+  const items = labels ?? Array.from({ length: rows ?? 4 }, () => undefined);
+  return (
+    <div className="flex flex-col gap-2.5">
+      {items.map((l, i) => (
+        <MetricBarSkeleton key={i} i={i} label={l} />
       ))}
+    </div>
+  );
+}
+
+function StatSkeleton({ label, w = "w-8" }: { label?: string; w?: string }) {
+  return (
+    <span className="inline-flex items-baseline gap-1.5 whitespace-nowrap">
+      <span className="flex h-8 items-center self-center">
+        <Skeleton className={`h-6 ${w}`} />
+      </span>
+      {label ? (
+        <span className="text-sm text-muted-foreground">{label}</span>
+      ) : (
+        <Skeleton className="h-3.5 w-64 max-w-[50vw] rounded-full" />
+      )}
+    </span>
+  );
+}
+
+export function OverviewSkeleton() {
+  return (
+    <div className="flex flex-col gap-8" aria-busy>
+      <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2">
+        <StatSkeleton label="applicants" />
+        <StatSkeleton label="drafted" />
+        <StatSkeleton label="on a team" />
+        <StatSkeleton label="returning" w="w-10" />
+        <StatSkeleton label="meet requirements" w="w-10" />
+      </div>
+      <SectionSkeleton title="Funnel">
+        <BarsSkeleton labels={["Started", "Submitted", "Meets requirements", "Drafted", "On a team"]} />
+      </SectionSkeleton>
+      <SectionSkeleton title="Why undrafted">
+        <BarsSkeleton
+          labels={["Missing coffee chat", "Missing info session", "Missing both", "Met requirements, not picked"]}
+        />
+      </SectionSkeleton>
+    </div>
+  );
+}
+
+export function ApplicantsSkeleton() {
+  return (
+    <div className="flex flex-col gap-8" aria-busy>
+      <SectionSkeleton title="Class year">
+        <BarsSkeleton rows={4} />
+      </SectionSkeleton>
+      <SectionSkeleton title="Majors" hint="Double majors count once for each major.">
+        <BarsSkeleton rows={6} />
+      </SectionSkeleton>
+      <SectionSkeleton title="Technical interests">
+        <BarsSkeleton rows={TECH_AREAS.length} />
+      </SectionSkeleton>
+      <SectionSkeleton title="Classes taken">
+        <BarsSkeleton rows={TECH_CLASSES.length} />
+      </SectionSkeleton>
+      <SectionSkeleton title="Materials">
+        <BarsSkeleton labels={["Resume on file", "Portfolio link"]} />
+      </SectionSkeleton>
+    </div>
+  );
+}
+
+export function RetentionSkeleton() {
+  return (
+    <div className="flex flex-col gap-8" aria-busy>
+      <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2">
+        <StatSkeleton />
+      </div>
+      <SectionSkeleton title="Acceptance rate">
+        <BarsSkeleton labels={["First-time", "Returning"]} />
+      </SectionSkeleton>
+      <SectionSkeleton title="By period" hint="Repeat: applied in an earlier period too. Click a row to switch period.">
+        <div className="-mx-1 overflow-x-auto">
+          <table aria-hidden className="w-full min-w-[30rem] text-sm">
+            <thead>
+              <tr className="text-left text-xs text-muted-foreground">
+                <th className="px-2 py-1.5 font-medium">Period</th>
+                <th className="px-2 py-1.5 text-right font-medium">Applicants</th>
+                <th className="px-2 py-1.5 text-right font-medium">Returning</th>
+                <th className="px-2 py-1.5 text-right font-medium">Repeat</th>
+                <th className="px-2 py-1.5 text-right font-medium">Drafted</th>
+                <th className="px-2 py-1.5 text-right font-medium">Accepted</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Array.from({ length: 4 }, (_, r) => (
+                <tr key={r} className="even:bg-foreground/[0.025]">
+                  <td className="rounded-l-md px-2 py-1.5">
+                    <div className="flex h-5 items-center">
+                      <Skeleton className={`h-3.5 rounded-full ${["w-24", "w-28", "w-20", "w-24"][r]}`} />
+                    </div>
+                  </td>
+                  {Array.from({ length: 5 }, (_, c) => (
+                    <td key={c} className={`px-2 py-1.5 ${c === 4 ? "rounded-r-md" : ""}`}>
+                      <div className="flex h-5 items-center justify-end">
+                        <Skeleton className="h-3 w-6 rounded-full" />
+                      </div>
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </SectionSkeleton>
     </div>
   );
 }
