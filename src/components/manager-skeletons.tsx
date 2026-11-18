@@ -9,7 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { InfoHint } from "@/components/ui/info-hint";
 import { ManagerMenu } from "@/components/manager-menu";
 import { DraftRoundsManagerSkeleton } from "@/components/draft-rounds-manager";
-import { ApplicantRowsSkeleton, BookedChatsSkeleton, CodesTableSkeleton } from "@/components/skeletons";
+import { ApplicantRowsSkeleton, BookedChatsSkeleton, CodesTableSkeleton, TabStripSkeleton } from "@/components/skeletons";
 import { rankLabel } from "@/lib/application-rank";
 
 // Page-level loading shapes for the manager and resume-queue routes. Each one
@@ -257,32 +257,32 @@ export function InfosessionPageSkeleton() {
 
 // ---- /resume-review/queue -------------------------------------------------
 
-/** Pending-review cards: requester, resume chip, feedback box, send button. */
+/** Compact pending-review cards: requester row with resume chip, feedback box, Send. */
 export function ReviewQueueCardsSkeleton({ count = 2 }: { count?: number }) {
   return (
     <>
       {Array.from({ length: count }, (_, i) => (
-        <div key={i} aria-hidden className="flex flex-col gap-3 rounded-xl surface p-4">
-          <div className="flex items-center gap-3 min-w-0">
-            <Skeleton className="h-10 w-10 rounded-full flex-shrink-0" />
-            <div className="flex flex-col gap-0.5 min-w-0">
+        <div key={i} aria-hidden className="flex flex-col gap-2.5 rounded-xl surface p-3">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <Skeleton className="h-8 w-8 rounded-full flex-shrink-0" />
+            <div className="flex flex-col min-w-0">
               <span className="flex h-5 items-center"><Skeleton className="h-3.5 w-32 rounded-full" /></span>
-              <span className="flex h-4 items-center"><Skeleton className="h-3 w-24 rounded-full" /></span>
+              <span className="flex h-4 items-center"><Skeleton className="h-3 w-20 rounded-full" /></span>
             </div>
+            <span className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-foreground/[0.06] px-2.5 py-1.5 text-xs font-medium text-muted-foreground">
+              <FileText size={14} />
+              <Skeleton className="h-3 w-20 rounded-full" />
+            </span>
           </div>
-          <span className="self-start inline-flex items-center gap-1.5 rounded-lg bg-foreground/[0.06] px-2.5 py-1.5 text-xs font-medium text-muted-foreground">
-            <FileText size={14} />
-            <Skeleton className="h-3 w-24 rounded-full" />
-          </span>
           <textarea
             disabled
             tabIndex={-1}
-            rows={5}
+            rows={3}
             placeholder="Your feedback…"
             className="w-full resize-none rounded-lg border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground"
           />
-          <span className="self-start inline-flex items-center gap-2 rounded-lg bg-foreground px-3.5 py-2 text-sm font-medium text-background opacity-40">
-            Send feedback
+          <span className="self-end inline-flex items-center gap-1.5 rounded-lg bg-foreground px-3 py-1.5 text-xs font-medium text-background opacity-40">
+            Send
           </span>
         </div>
       ))}
@@ -292,17 +292,21 @@ export function ReviewQueueCardsSkeleton({ count = 2 }: { count?: number }) {
 
 export function ResumeQueueSkeleton() {
   return (
-    <div className="w-full max-w-3xl mx-auto p-6 flex flex-col gap-8">
-      <div className="flex flex-col gap-1.5">
+    <div className="w-full max-w-3xl mx-auto p-6 flex flex-col gap-6">
+      <div className="flex flex-col gap-1 pt-4">
         <BackLink href="/resume-review" label="Resume review" />
-        <h1 className="text-2xl font-bold tracking-tight">Resume Reviews</h1>
-        <p className="text-sm text-muted-foreground">
-          Read a requested resume and send written feedback. Submitting notifies the requester.
-        </p>
+        <div className="mt-2 flex items-center gap-2">
+          <h1 className="text-2xl font-bold tracking-tight">Resume Reviews</h1>
+          <InfoHint label="About the queue" side="right">
+            Sending feedback notifies the requester.
+          </InfoHint>
+        </div>
       </div>
-      <div className="flex flex-col gap-3">
-        <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Waiting</h2>
-        <ReviewQueueCardsSkeleton />
+      <div className="flex flex-col gap-4">
+        <TabStripSkeleton labels={["Queue", "Reviewed"]} />
+        <div className="flex flex-col gap-3">
+          <ReviewQueueCardsSkeleton />
+        </div>
       </div>
     </div>
   );

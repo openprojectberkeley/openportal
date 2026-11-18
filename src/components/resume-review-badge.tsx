@@ -35,14 +35,17 @@ export function usePendingResumeReviewCount(): number | null {
 }
 
 // Red count bubble, same look as the notification bell's. Position it with
-// `className` (the parent must be `relative`).
+// `className` (the parent must be `relative`), or pass `inline` to sit it in
+// the text flow (a tab label).
 export function CountBadge({
   count,
   size = "sm",
+  inline = false,
   className = "",
 }: {
   count: number | null;
   size?: "sm" | "md";
+  inline?: boolean;
   className?: string;
 }) {
   if (!count) return null;
@@ -51,7 +54,7 @@ export function CountBadge({
     <span
       key={count}
       aria-label={`${count} waiting for review`}
-      className={`absolute z-40 ${sizing} rounded-full tabular-nums animate-pop bg-destructive text-destructive-foreground font-semibold leading-none flex items-center justify-center pointer-events-none ${className}`}
+      className={`${inline ? "ml-1.5 inline-flex align-middle" : "absolute z-40 flex"} ${sizing} rounded-full tabular-nums animate-pop bg-destructive text-destructive-foreground font-semibold leading-none items-center justify-center pointer-events-none ${className}`}
     >
       {count > 99 ? "99+" : count}
     </span>

@@ -2,12 +2,15 @@
 
 import { createClient } from "@/lib/supabase/client";
 import { useCallback, useEffect, useState } from "react";
-import { FileText, Check } from "lucide-react";
+import { FileText, Check, ChevronDown } from "lucide-react";
 import { PersonName, initials } from "@/components/person-profile-provider";
 import { resumeSignedUrl } from "@/lib/resume-upload";
 import { ReviewQueueCardsSkeleton } from "@/components/manager-skeletons";
 import { optimistic } from "@/lib/optimistic";
 import { BackLink } from "@/components/back-link";
+import { InfoHint } from "@/components/ui/info-hint";
+import { TabStrip } from "@/components/ui/tab-strip";
+import { CountBadge } from "@/components/resume-review-badge";
 
 type QueueItem = {
   id: string;
@@ -27,8 +30,8 @@ type QueueItem = {
   reviewerAvatarUrl: string | null;
 };
 
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+function formatShort(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
 // `needed_by` is a bare DATE ("2026-10-03"). new Date() would read that as UTC
@@ -36,13 +39,16 @@ function formatDate(iso: string): string {
 // date in local time instead.
 function formatDateOnly(ymd: string): string {
   const [y, m, d] = ymd.split("-").map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
 export default function ManagerResumeReviewsPage() {
   const [items, setItems] = useState<QueueItem[] | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
+  const [tab, setTab] = useState<"queue" | "reviewed">("queue");
+  // Reviewed rows whose feedback is expanded.
+  const [open, setOpen] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     const supabase = createClient();
@@ -120,14 +126,24 @@ export default function ManagerResumeReviewsPage() {
   const pending = items?.filter((i) => i.status === "pending") ?? [];
   const done = items?.filter((i) => i.status === "completed").slice().reverse() ?? [];
 
+  const toggle = (id: string) =>
+    setOpen((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
   return (
-    <div className="w-full max-w-3xl mx-auto p-6 flex flex-col gap-8">
-      <div className="flex flex-col gap-1.5">
+    <div className="w-full max-w-3xl mx-auto p-6 flex flex-col gap-6">
+      <div className="flex flex-col gap-1 pt-4">
         <BackLink href="/resume-review" label="Resume review" />
-        <h1 className="text-2xl font-bold tracking-tight">Resume Reviews</h1>
-        <p className="text-sm text-muted-foreground">
-          Read a requested resume and send written feedback. Submitting notifies the requester.
-        </p>
+        <div className="mt-2 flex items-center gap-2">
+          <h1 className="text-2xl font-bold tracking-tight">Resume Reviews</h1>
+          <InfoHint label="About the queue" side="right">
+            Sending feedback notifies the requester.
+          </InfoHint>
+        </div>
       </div>
 
       {error && (
@@ -136,84 +152,62 @@ export default function ManagerResumeReviewsPage() {
         </p>
       )}
 
-      {items === null ? (
-        <div className="flex flex-col gap-3">
-          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Waiting</h2>
-          <ReviewQueueCardsSkeleton />
-        </div>
-      ) : (
-        <>
+      <div className="flex flex-col gap-4">
+        <TabStrip
+          aria-label="Resume reviews"
+          value={tab}
+          onChange={setTab}
+          tabs={[
+            { value: "queue", label: <>Queue<CountBadge inline count={items ? pending.length : null} /></> },
+            { value: "reviewed", label: "Reviewed", count: items ? done.length : null },
+          ]}
+        />
+
+        {items === null ? (
           <div className="flex flex-col gap-3">
-            <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-              Waiting ({pending.length})
-            </h2>
-            {pending.length === 0 ? (
-              <p className="px-4 py-10 text-center text-sm text-muted-foreground">
-                Nothing in the queue right now.
-              </p>
-            ) : (
-              pending.map((item) => (
-                <div key={item.id} className="flex flex-col gap-3 rounded-xl surface p-4">
-                  <div className="flex items-center gap-3 min-w-0">
-                    {item.requesterAvatarUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={item.requesterAvatarUrl}
-                        alt={item.requesterName}
-                        className="h-10 w-10 rounded-full object-cover flex-shrink-0"
-                      />
-                    ) : (
-                      <span className="flex h-10 w-10 items-center justify-center rounded-full bg-foreground/10 text-xs font-semibold flex-shrink-0">
-                        {initials(item.requesterName)}
-                      </span>
-                    )}
-                    <div className="flex flex-col gap-0.5 min-w-0">
+            <ReviewQueueCardsSkeleton />
+          </div>
+        ) : tab === "queue" ? (
+          pending.length === 0 ? (
+            <p className="px-4 py-10 text-center text-sm text-muted-foreground">Queue is clear.</p>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {pending.map((item) => (
+                <div key={item.id} className="flex flex-col gap-2.5 rounded-xl surface p-3">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <Avatar url={item.requesterAvatarUrl} name={item.requesterName} size="h-8 w-8 text-[11px]" />
+                    <div className="flex min-w-0 flex-col">
                       <PersonName
                         userId={item.requester_id}
                         name={item.requesterName}
                         preloaded={{ avatar_url: item.requesterAvatarUrl }}
-                        className="text-sm font-medium"
+                        className="truncate text-sm font-medium"
                       />
-                      <span className="text-xs text-muted-foreground">
-                        Requested {formatDate(item.created_at)}
+                      <span className="truncate text-xs text-muted-foreground">
+                        {formatShort(item.created_at)}
+                        {item.needed_by && <> · due {formatDateOnly(item.needed_by)}</>}
                       </span>
                     </div>
+                    <button
+                      type="button"
+                      onClick={() => openResume(item.resume_path)}
+                      className="ml-auto inline-flex min-w-0 max-w-[45%] items-center gap-1.5 rounded-lg bg-foreground/[0.06] px-2.5 py-1.5 text-xs font-medium transition-colors hover:bg-foreground/[0.1]"
+                    >
+                      <FileText size={14} className="shrink-0" />
+                      <span className="truncate">{item.resume_filename ?? "Resume"}</span>
+                    </button>
                   </div>
 
-                  {(item.target_roles || item.needed_by) && (
-                    <div className="flex flex-col gap-2 rounded-lg bg-background px-3 py-2">
-                      {item.target_roles && (
-                        <div className="flex flex-col gap-0.5">
-                          <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                            Targeting
-                          </span>
-                          <p className="whitespace-pre-wrap text-sm">{item.target_roles}</p>
-                        </div>
-                      )}
-                      {item.needed_by && (
-                        <div className="flex flex-col gap-0.5">
-                          <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                            Needed by
-                          </span>
-                          <p className="text-sm">{formatDateOnly(item.needed_by)}</p>
-                        </div>
-                      )}
-                    </div>
+                  {item.target_roles && (
+                    <p className="line-clamp-2 whitespace-pre-wrap text-sm text-muted-foreground" title={item.target_roles}>
+                      {item.target_roles}
+                    </p>
                   )}
-
-                  <button
-                    type="button"
-                    onClick={() => openResume(item.resume_path)}
-                    className="self-start inline-flex items-center gap-1.5 rounded-lg bg-foreground/[0.06] px-2.5 py-1.5 text-xs font-medium transition-colors hover:bg-foreground/[0.1]"
-                  >
-                    <FileText size={14} />
-                    {item.resume_filename ?? "Resume"}
-                  </button>
 
                   <textarea
                     value={drafts[item.id] ?? ""}
                     onChange={(e) => setDrafts((d) => ({ ...d, [item.id]: e.target.value }))}
-                    rows={5}
+                    rows={3}
                     placeholder="Your feedback…"
                     className="w-full resize-y rounded-lg border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:border-foreground/30"
                   />
@@ -222,74 +216,86 @@ export default function ManagerResumeReviewsPage() {
                     type="button"
                     onClick={() => submitFeedback(item.id)}
                     disabled={!(drafts[item.id] ?? "").trim()}
-                    className="self-start inline-flex items-center gap-2 rounded-lg bg-foreground px-3.5 py-2 text-sm font-medium text-background hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="self-end inline-flex items-center gap-1.5 rounded-lg bg-foreground px-3 py-1.5 text-xs font-medium text-background hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
                   >
-                    <Check size={16} />
-                    Send feedback
+                    <Check size={14} />
+                    Send
                   </button>
-                </div>
-              ))
-            )}
-          </div>
-
-          {done.length > 0 && (
-            <div className="flex flex-col gap-3">
-              <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-                Completed
-              </h2>
-              {done.map((item) => (
-                <div key={item.id} className="flex flex-col gap-2 rounded-xl surface p-4 opacity-70">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <PersonName
-                      userId={item.requester_id}
-                      name={item.requesterName}
-                      preloaded={{ avatar_url: item.requesterAvatarUrl }}
-                      className="text-sm font-medium"
-                    />
-                    <span className="text-xs text-muted-foreground">
-                      · reviewed {formatDate(item.completed_at ?? item.created_at)}
-                    </span>
-                    {/* The exec who answered, not the requester. reviewer_id goes
-                        null if that person's account is deleted. */}
-                    {item.reviewer_id && item.reviewerName ? (
-                      <span className="ml-auto inline-flex items-center gap-1.5 rounded-full bg-background py-0.5 pl-0.5 pr-2.5 text-xs">
-                        {item.reviewerAvatarUrl ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={item.reviewerAvatarUrl}
-                            alt=""
-                            className="h-5 w-5 rounded-full object-cover"
-                          />
-                        ) : (
-                          <span className="flex h-5 w-5 items-center justify-center rounded-full bg-foreground/10 text-[9px] font-semibold">
-                            {initials(item.reviewerName)}
-                          </span>
-                        )}
-                        <span className="text-muted-foreground">Reviewed by</span>
-                        <PersonName
-                          userId={item.reviewer_id}
-                          name={item.reviewerName}
-                          preloaded={{ avatar_url: item.reviewerAvatarUrl }}
-                          className="font-medium"
-                        />
-                      </span>
-                    ) : (
-                      <span className="ml-auto inline-flex items-center rounded-full bg-foreground/[0.05] px-2.5 py-0.5 text-xs text-muted-foreground">
-                        Reviewer no longer a member
-                      </span>
-                    )}
-                  </div>
-                  {item.feedback && (
-                    <p className="whitespace-pre-wrap rounded-lg bg-background px-3 py-2 text-sm">
-                      {item.feedback}
-                    </p>
-                  )}
                 </div>
               ))}
             </div>
-          )}
-        </>
-      )}
+          )
+        ) : done.length === 0 ? (
+          <p className="px-4 py-10 text-center text-sm text-muted-foreground">No reviews yet.</p>
+        ) : (
+          <div className="flex flex-col divide-y rounded-xl surface">
+            {done.map((item) => {
+              const isOpen = open.has(item.id);
+              return (
+                <div key={item.id} className="flex flex-col">
+                  <button
+                    type="button"
+                    aria-expanded={isOpen}
+                    onClick={() => toggle(item.id)}
+                    className="flex min-w-0 items-center gap-2.5 px-3 py-2.5 text-left transition-colors hover:bg-foreground/[0.03]"
+                  >
+                    <ChevronDown
+                      size={14}
+                      className={`shrink-0 text-muted-foreground transition-transform duration-instant ease-out-quart ${isOpen ? "" : "-rotate-90"}`}
+                    />
+                    <span className="truncate text-sm font-medium">{item.requesterName}</span>
+                    <span className="shrink-0 text-xs text-muted-foreground">
+                      {formatShort(item.completed_at ?? item.created_at)}
+                    </span>
+                    {/* The exec who answered. reviewer_id goes null if that
+                        person's account is deleted. */}
+                    {item.reviewer_id && item.reviewerName ? (
+                      <span className="ml-auto flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+                        <Avatar url={item.reviewerAvatarUrl} name={item.reviewerName} size="h-5 w-5 text-[9px]" />
+                        <span className="hidden truncate sm:inline">{item.reviewerName}</span>
+                      </span>
+                    ) : (
+                      <span className="ml-auto shrink-0 text-xs text-muted-foreground">Former member</span>
+                    )}
+                  </button>
+                  {isOpen && (
+                    <div className="grid animate-expand">
+                      <div className="min-h-0 overflow-hidden">
+                        <div className="flex flex-col gap-2 px-3 pb-3 pl-9">
+                          {item.feedback && (
+                            <p className="whitespace-pre-wrap rounded-lg bg-background px-3 py-2 text-sm">
+                              {item.feedback}
+                            </p>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => openResume(item.resume_path)}
+                            className="self-start inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+                          >
+                            <FileText size={14} />
+                            {item.resume_filename ?? "Resume"}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
+  );
+}
+
+function Avatar({ url, name, size }: { url: string | null; name: string; size: string }) {
+  return url ? (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={url} alt="" className={`${size} shrink-0 rounded-full object-cover`} />
+  ) : (
+    <span className={`${size} flex shrink-0 items-center justify-center rounded-full bg-foreground/10 font-semibold`}>
+      {initials(name)}
+    </span>
   );
 }
