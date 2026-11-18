@@ -321,7 +321,7 @@ export default function HomePage() {
       <div className="w-full max-w-6xl mx-auto p-5 flex flex-col gap-6">
         {/* Greeting and the resume pointer share one row; the card wraps under
             the greeting on narrow screens. */}
-        <div className="flex flex-wrap items-end justify-between gap-4">
+        <div className="flex flex-wrap items-center justify-between gap-4">
           {firstName ? (
             <h1 className="text-4xl font-bold tracking-tight animate-fade-in-up">{`Hi, ${firstName}`}</h1>
           ) : (

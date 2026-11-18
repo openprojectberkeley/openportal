@@ -11,6 +11,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { uploadResume, resumeSignedUrl, MAX_RESUME_BYTES } from "@/lib/resume-upload";
 import { optimistic } from "@/lib/optimistic";
 import { BackLink } from "@/components/back-link";
+import { InfoHint } from "@/components/ui/info-hint";
+import { CountBadge, usePendingResumeReviewCount } from "@/components/resume-review-badge";
 
 type Review = {
   id: string;
@@ -42,6 +44,7 @@ function formatDateOnly(ymd: string): string {
 
 export default function ResumeReviewPage() {
   const { isExec } = useRoleSim();
+  const pendingReviews = usePendingResumeReviewCount();
   const [userId, setUserId] = useState<string | null>(null);
   const [resume, setResume] = useState<Resume | null>(null);
   const [reviews, setReviews] = useState<Review[] | null>(null);
@@ -198,23 +201,28 @@ export default function ResumeReviewPage() {
 
   return (
     <div className="w-full max-w-3xl mx-auto p-6 flex flex-col gap-8">
-      <div className="flex flex-col gap-1">
-        <BackLink href="/" label="Dashboard" />
-        <h1 className="text-2xl font-bold tracking-tight">Resume Review</h1>
-        <p className="text-sm text-muted-foreground">
-          Ask a member of our team to look over your resume. You can request one any time —
-          it&apos;s not part of the application.
-        </p>
-        {/* Exec staff the queue; the route itself is guarded server-side. */}
-        {isExec && (
-          <Link
-            href="/resume-review/queue"
-            className="mt-1 inline-flex w-fit items-center gap-1.5 rounded-lg bg-foreground/[0.04] px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:bg-foreground/[0.08] hover:text-foreground transition-colors"
-          >
-            <Inbox size={14} />
-            Review queue
-          </Link>
-        )}
+      <div className="flex flex-col gap-1 pt-4">
+        {/* Back link and the exec queue shortcut share the top row. */}
+        <div className="flex items-center justify-between gap-3">
+          <BackLink href="/" label="Dashboard" />
+          {/* Exec staff the queue; the route itself is guarded server-side. */}
+          {isExec && (
+            <Link
+              href="/resume-review/queue"
+              className="relative inline-flex items-center gap-2 rounded-lg surface rim-card px-3.5 py-2 text-sm font-medium transition-colors hover:bg-foreground/[0.07]"
+            >
+              <CountBadge count={pendingReviews} size="md" className="-top-2 -left-2" />
+              <Inbox size={16} />
+              Review queue
+            </Link>
+          )}
+        </div>
+        <div className="mt-2 flex items-center gap-2">
+          <h1 className="text-2xl font-bold tracking-tight">Resume Review</h1>
+          <InfoHint label="About resume review" side="right">
+            Our team reviews your resume any time. Separate from the application.
+          </InfoHint>
+        </div>
       </div>
 
       {error && (
@@ -233,7 +241,7 @@ export default function ResumeReviewPage() {
             <div className="flex flex-col gap-0.5">
               <h2 className="text-sm font-semibold">Waiting for a reviewer</h2>
               <p className="text-xs text-muted-foreground">
-                Requested {formatDate(pending.created_at)} · we&apos;ll notify you when feedback is ready.
+                Requested {formatDate(pending.created_at)}
               </p>
             </div>
           </div>
@@ -278,13 +286,6 @@ export default function ResumeReviewPage() {
         </div>
       ) : (
         <fieldset disabled={reviews === null} className="min-w-0 flex flex-col gap-4 rounded-xl surface p-4">
-          <div className="flex flex-col gap-0.5">
-            <h2 className="text-sm font-semibold">Request a review</h2>
-            <p className="text-xs text-muted-foreground">
-              We&apos;ll review the resume you have on file.
-            </p>
-          </div>
-
           <div className="flex flex-wrap items-center gap-2">
             {reviews === null ? (
               <Skeleton aria-hidden className="h-7 w-36 rounded-lg" />
@@ -297,9 +298,7 @@ export default function ResumeReviewPage() {
                 <FileText size={14} />
                 {resume.filename}
               </button>
-            ) : (
-              <span className="text-xs text-muted-foreground">No resume on file yet.</span>
-            )}
+            ) : null}
             <button
               type="button"
               onClick={() => fileInput.current?.click()}
@@ -320,36 +319,36 @@ export default function ResumeReviewPage() {
                 if (file) onFileSelected(file);
               }}
             />
-            <span className="text-[11px] text-muted-foreground">
+            <InfoHint label="File requirements">
               PDF or Word, max {Math.round(MAX_RESUME_BYTES / 1024)} KB.
-            </span>
+            </InfoHint>
           </div>
 
           {/* Both optional — a request with neither answered is still valid. */}
           <div className="flex flex-col gap-1.5">
-            <label htmlFor="target-roles" className="text-sm font-medium">
-              Any specific companies/roles you are targeting with this resume?{" "}
-              <span className="font-normal text-muted-foreground">(optional)</span>
-            </label>
-            <p className="text-xs text-muted-foreground">
-              You can put the link to the job description, role title, company name, or anything
-              else that is relevant. If not, put N/A.
-            </p>
+            <div className="flex items-center gap-2">
+              <label htmlFor="target-roles" className="text-sm font-medium">Targeting</label>
+              <span className="text-xs text-muted-foreground">Optional</span>
+              <InfoHint label="What to put here">
+                Companies, roles, or job description links you&apos;re aiming this resume at.
+              </InfoHint>
+            </div>
             <textarea
               id="target-roles"
               value={targetRoles}
               onChange={(e) => setTargetRoles(e.target.value)}
               rows={3}
               maxLength={1000}
+              placeholder="e.g. SWE intern at Stripe, or a job posting link"
               className="w-full resize-none rounded-lg border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:border-foreground/30"
             />
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <label htmlFor="needed-by" className="text-sm font-medium">
-              When do you need feedback by?{" "}
-              <span className="font-normal text-muted-foreground">(optional)</span>
-            </label>
+            <div className="flex items-center gap-2">
+              <label htmlFor="needed-by" className="text-sm font-medium">Needed by</label>
+              <span className="text-xs text-muted-foreground">Optional</span>
+            </div>
             <input
               id="needed-by"
               type="date"

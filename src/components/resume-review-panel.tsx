@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowRight, Check, Clock, FileSearch } from "lucide-react";
 import { ResumeReviewPanelSkeleton } from "@/components/skeletons";
+import { CountBadge, usePendingResumeReviewCount } from "@/components/resume-review-badge";
 
 type State =
   | { kind: "none" }
@@ -17,6 +18,7 @@ type State =
 // recent request is doing and links into /resume-review.
 export function ResumeReviewPanel({ compact = false, className }: { compact?: boolean; className?: string }) {
   const [state, setState] = useState<State | null>(null);
+  const pendingReviews = usePendingResumeReviewCount();
 
   useEffect(() => {
     const load = async () => {
@@ -67,6 +69,7 @@ export function ResumeReviewPanel({ compact = false, className }: { compact?: bo
         compact ? "gap-3 px-3 py-2.5" : "gap-3.5 p-4"
       } ${className ?? ""}`}
     >
+      <CountBadge count={pendingReviews} size="md" className="-top-2 -left-2" />
       <span
         className={`rounded-full flex items-center justify-center flex-shrink-0 ${compact ? "h-8 w-8" : "h-10 w-10"} ${
           state.kind === "ready" ? "bg-success/10 text-success" : "bg-foreground/5 text-foreground/70"
