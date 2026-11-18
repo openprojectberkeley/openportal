@@ -189,6 +189,14 @@ export function PortalsPanel({ members, allRoles }: Props) {
   };
 
   const removeMember = (portal: Portal, member: PortalMember) => {
+    ask({
+      title: `Remove ${member.name} from ${portal.name}?`,
+      confirmLabel: "Remove",
+      destructive: true,
+      run: () => applyRemoveMember(portal, member),
+    });
+  };
+  const applyRemoveMember = (portal: Portal, member: PortalMember) => {
     const supabase = createClient();
     mutate(
       "member",

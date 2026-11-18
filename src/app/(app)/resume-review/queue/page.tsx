@@ -2,11 +2,14 @@
 
 import { createClient } from "@/lib/supabase/client";
 import { useCallback, useEffect, useState } from "react";
-import { FileText, Check, ChevronDown } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { PersonName, initials } from "@/components/person-profile-provider";
-import { resumeSignedUrl } from "@/lib/resume-upload";
+import { resumeReviewFile, type ResumeFile } from "@/lib/resume-upload";
+import { ResumeDownloadButton, ResumeFileActions } from "@/components/resume-review/resume-file-actions";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { ResumeReviewModal } from "@/components/resume-review/resume-review-modal";
+import type { ResumeReviewContext } from "@/components/resume-review/resume-review-workspace";
 import { ReviewQueueCardsSkeleton } from "@/components/manager-skeletons";
-import { optimistic } from "@/lib/optimistic";
 import { BackLink } from "@/components/back-link";
 import { InfoHint } from "@/components/ui/info-hint";
 import { TabStrip } from "@/components/ui/tab-strip";
@@ -19,6 +22,8 @@ type QueueItem = {
   requesterAvatarUrl: string | null;
   resume_path: string;
   resume_filename: string | null;
+  file_path: string | null;
+  noteCount: number;
   target_roles: string | null;
   needed_by: string | null;
   created_at: string;
@@ -44,17 +49,16 @@ function formatDateOnly(ymd: string): string {
 
 export default function ManagerResumeReviewsPage() {
   const [items, setItems] = useState<QueueItem[] | null>(null);
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
-  const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<"queue" | "reviewed">("queue");
   // Reviewed rows whose feedback is expanded.
   const [open, setOpen] = useState<Set<string>>(new Set());
+  const [viewing, setViewing] = useState<{ file: ResumeFile; review?: ResumeReviewContext } | null>(null);
 
   const load = useCallback(async () => {
     const supabase = createClient();
     const { data: rows } = await supabase
       .from("resume_reviews")
-      .select("id, requester_id, resume_path, resume_filename, target_roles, needed_by, created_at, status, feedback, completed_at, reviewer_id")
+      .select("id, requester_id, resume_path, resume_filename, file_path, target_roles, needed_by, created_at, status, feedback, completed_at, reviewer_id, resume_review_notes(count)")
       .order("created_at", { ascending: true });
 
     // One lookup covers both sides: the requester on every card, and the exec
@@ -79,6 +83,7 @@ export default function ManagerResumeReviewsPage() {
     setItems(
       (rows ?? []).map((r) => ({
         ...r,
+        noteCount: (r.resume_review_notes as unknown as { count: number }[])[0]?.count ?? 0,
         requesterName: people.get(r.requester_id)?.name ?? "Unknown",
         requesterAvatarUrl: people.get(r.requester_id)?.avatarUrl ?? null,
         reviewerName: r.reviewer_id ? people.get(r.reviewer_id)?.name ?? "Unknown" : null,
@@ -88,40 +93,6 @@ export default function ManagerResumeReviewsPage() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
-
-  const openResume = async (path: string) => {
-    const url = await resumeSignedUrl(createClient(), path);
-    if (url) window.open(url, "_blank", "noopener,noreferrer");
-    else setError("Couldn't open that resume.");
-  };
-
-  // Feedback goes through the RPC, never a direct UPDATE: it's what notifies
-  // the requester, and RLS grants reviewers no write path of their own.
-  // The item moves to "done" immediately; if the RPC refuses, it moves back
-  // with the draft text restored so nothing typed is lost.
-  const submitFeedback = (id: string) => {
-    const draft = drafts[id] ?? "";
-    const feedback = draft.trim();
-    if (!feedback) return;
-    setError(null);
-    const before = items?.find((i) => i.id === id);
-    const patch = (p: Partial<QueueItem>) =>
-      setItems((prev) => (prev ? prev.map((i) => (i.id === id ? { ...i, ...p } : i)) : prev));
-    void optimistic({
-      label: "feedback",
-      key: `resume-feedback:${id}`,
-      apply: () => {
-        patch({ status: "completed", feedback, completed_at: new Date().toISOString() });
-        setDrafts((d) => { const next = { ...d }; delete next[id]; return next; });
-      },
-      rollback: () => {
-        if (before) patch({ status: before.status, feedback: before.feedback, completed_at: before.completed_at });
-        setDrafts((d) => ({ ...d, [id]: draft }));
-      },
-      commit: () => createClient().rpc("complete_resume_review", { p_review_id: id, p_feedback: feedback }),
-      onCommitted: () => void load(),
-    });
-  };
 
   const pending = items?.filter((i) => i.status === "pending") ?? [];
   const done = items?.filter((i) => i.status === "completed").slice().reverse() ?? [];
@@ -146,12 +117,6 @@ export default function ManagerResumeReviewsPage() {
         </div>
       </div>
 
-      {error && (
-        <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          {error}
-        </p>
-      )}
-
       <div className="flex flex-col gap-4">
         <TabStrip
           aria-label="Resume reviews"
@@ -172,11 +137,12 @@ export default function ManagerResumeReviewsPage() {
             <p className="px-4 py-10 text-center text-sm text-muted-foreground">Queue is clear.</p>
           ) : (
             <div className="flex flex-col gap-3">
-              {pending.map((item) => (
-                <div key={item.id} className="flex flex-col gap-2.5 rounded-xl surface p-3">
-                  <div className="flex items-center gap-2.5 min-w-0">
+              {pending.map((item) => {
+                const file = resumeReviewFile(item);
+                return (
+                  <div key={item.id} className="flex items-center gap-2.5 rounded-xl surface p-3 min-w-0">
                     <Avatar url={item.requesterAvatarUrl} name={item.requesterName} size="h-8 w-8 text-[11px]" />
-                    <div className="flex min-w-0 flex-col">
+                    <div className="flex min-w-0 flex-1 flex-col">
                       <PersonName
                         userId={item.requester_id}
                         name={item.requesterName}
@@ -186,43 +152,30 @@ export default function ManagerResumeReviewsPage() {
                       <span className="truncate text-xs text-muted-foreground">
                         {formatShort(item.created_at)}
                         {item.needed_by && <> · due {formatDateOnly(item.needed_by)}</>}
+                        {item.noteCount > 0 && <> · {item.noteCount} {item.noteCount === 1 ? "note" : "notes"}</>}
                       </span>
+                      {item.target_roles && (
+                        <p className="mt-1 line-clamp-2 whitespace-pre-wrap text-xs text-muted-foreground" title={item.target_roles}>
+                          {item.target_roles}
+                        </p>
+                      )}
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => openResume(item.resume_path)}
-                      className="ml-auto inline-flex min-w-0 max-w-[45%] items-center gap-1.5 rounded-lg bg-foreground/[0.06] px-2.5 py-1.5 text-xs font-medium transition-colors hover:bg-foreground/[0.1]"
-                    >
-                      <FileText size={14} className="shrink-0" />
-                      <span className="truncate">{item.resume_filename ?? "Resume"}</span>
-                    </button>
+                    <ResumeDownloadButton file={file} />
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          onClick={() => setViewing({ file, review: reviewContext(item) })}
+                          className="h-8 shrink-0 rounded-lg bg-foreground px-3 text-xs font-medium text-background transition-opacity hover:opacity-90"
+                        >
+                          Review
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent>{file.filename}</TooltipContent>
+                    </Tooltip>
                   </div>
-
-                  {item.target_roles && (
-                    <p className="line-clamp-2 whitespace-pre-wrap text-sm text-muted-foreground" title={item.target_roles}>
-                      {item.target_roles}
-                    </p>
-                  )}
-
-                  <textarea
-                    value={drafts[item.id] ?? ""}
-                    onChange={(e) => setDrafts((d) => ({ ...d, [item.id]: e.target.value }))}
-                    rows={3}
-                    placeholder="Your feedback…"
-                    className="w-full resize-y rounded-lg border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:border-foreground/30"
-                  />
-
-                  <button
-                    type="button"
-                    onClick={() => submitFeedback(item.id)}
-                    disabled={!(drafts[item.id] ?? "").trim()}
-                    className="self-end inline-flex items-center gap-1.5 rounded-lg bg-foreground px-3 py-1.5 text-xs font-medium text-background hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    <Check size={14} />
-                    Send
-                  </button>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )
         ) : done.length === 0 ? (
@@ -267,14 +220,10 @@ export default function ManagerResumeReviewsPage() {
                               {item.feedback}
                             </p>
                           )}
-                          <button
-                            type="button"
-                            onClick={() => openResume(item.resume_path)}
-                            className="self-start inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
-                          >
-                            <FileText size={14} />
-                            {item.resume_filename ?? "Resume"}
-                          </button>
+                          <ResumeFileActions
+                            file={resumeReviewFile(item)}
+                            onOpen={() => setViewing({ file: resumeReviewFile(item), review: reviewContext(item) })}
+                          />
                         </div>
                       </div>
                     </div>
@@ -285,8 +234,27 @@ export default function ManagerResumeReviewsPage() {
           </div>
         )}
       </div>
+
+      <ResumeReviewModal
+        file={viewing?.file ?? null}
+        review={viewing?.review}
+        onOpenChange={(o) => { if (!o) setViewing(null); }}
+        onChanged={() => void load()}
+      />
     </div>
   );
+}
+
+function reviewContext(item: QueueItem): ResumeReviewContext {
+  return {
+    id: item.id,
+    status: item.status,
+    requesterName: item.requesterName,
+    targetRoles: item.target_roles,
+    neededBy: item.needed_by ? formatDateOnly(item.needed_by) : null,
+    feedback: item.feedback,
+    reviewerName: item.reviewerName,
+  };
 }
 
 function Avatar({ url, name, size }: { url: string | null; name: string; size: string }) {

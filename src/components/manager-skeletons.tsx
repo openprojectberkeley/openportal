@@ -1,7 +1,8 @@
 "use client";
 
+import { Suspense } from "react";
 import { usePathname } from "next/navigation";
-import { ChevronDown, ChevronLeft, ChevronRight, FileText, MoreHorizontal, Search, Settings, Table2 } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, MoreHorizontal, Search, Settings, Table2 } from "lucide-react";
 import { BackLink } from "@/components/back-link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -257,32 +258,20 @@ export function InfosessionPageSkeleton() {
 
 // ---- /resume-review/queue -------------------------------------------------
 
-/** Compact pending-review cards: requester row with resume chip, feedback box, Send. */
-export function ReviewQueueCardsSkeleton({ count = 2 }: { count?: number }) {
+/** Compact pending-review rows: requester, download icon, Review button. */
+export function ReviewQueueCardsSkeleton({ count = 3 }: { count?: number }) {
   return (
     <>
       {Array.from({ length: count }, (_, i) => (
-        <div key={i} aria-hidden className="flex flex-col gap-2.5 rounded-xl surface p-3">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <Skeleton className="h-8 w-8 rounded-full flex-shrink-0" />
-            <div className="flex flex-col min-w-0">
-              <span className="flex h-5 items-center"><Skeleton className="h-3.5 w-32 rounded-full" /></span>
-              <span className="flex h-4 items-center"><Skeleton className="h-3 w-20 rounded-full" /></span>
-            </div>
-            <span className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-foreground/[0.06] px-2.5 py-1.5 text-xs font-medium text-muted-foreground">
-              <FileText size={14} />
-              <Skeleton className="h-3 w-20 rounded-full" />
-            </span>
+        <div key={i} aria-hidden className="flex items-center gap-2.5 rounded-xl surface p-3 min-w-0">
+          <Skeleton className="h-8 w-8 rounded-full flex-shrink-0" />
+          <div className="flex min-w-0 flex-1 flex-col">
+            <span className="flex h-5 items-center"><Skeleton className="h-3.5 w-32 rounded-full" /></span>
+            <span className="flex h-4 items-center"><Skeleton className="h-3 w-20 rounded-full" /></span>
           </div>
-          <textarea
-            disabled
-            tabIndex={-1}
-            rows={3}
-            placeholder="Your feedback…"
-            className="w-full resize-none rounded-lg border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground"
-          />
-          <span className="self-end inline-flex items-center gap-1.5 rounded-lg bg-foreground px-3 py-1.5 text-xs font-medium text-background opacity-40">
-            Send
+          <Skeleton className="h-8 w-8 rounded-lg" />
+          <span className="flex h-8 items-center rounded-lg bg-foreground px-3 text-xs font-medium text-background opacity-40">
+            Review
           </span>
         </div>
       ))}
@@ -314,8 +303,22 @@ export function ResumeQueueSkeleton() {
 
 // ---- route-guard fallbacks ------------------------------------------------
 
-/** The manager layout's guard fallback: the skeleton of whichever page is loading. */
+/**
+ * The manager layout's guard fallback: the skeleton of whichever page is loading.
+ *
+ * usePathname() suspends on routes with a fallback param. That read has to sit
+ * inside its own Suspense — this component is already a fallback, and a
+ * fallback that suspends fails the prerender of /manager/coffee-chats/all/[id].
+ */
 export function ManagerRouteSkeleton() {
+  return (
+    <Suspense fallback={<ManagerMenu />}>
+      <ManagerRouteSkeletonForPath />
+    </Suspense>
+  );
+}
+
+function ManagerRouteSkeletonForPath() {
   const path = usePathname() ?? "/manager";
   if (path.startsWith("/manager/applications")) return <ApplicationManagerSkeleton />;
   if (path === "/manager/coffee-chats") return <CoffeeChatsManagerSkeleton />;

@@ -7,7 +7,6 @@ import { Suspense, useEffect, useState } from "react";
 import {
   CalendarDays,
   ClipboardCheck,
-  FileText,
   Inbox,
   LayoutDashboard,
   LogOut,
@@ -27,7 +26,7 @@ import { NotificationBell } from "@/components/notification-bell";
 import { OpenPortalBrandIcon } from "@/components/open-portal-brand-icon";
 import { NavTabs, NavTabsFallback, type NavTabSpec } from "@/components/nav-tab";
 import { DockedHeaderBanners } from "@/components/header-banners";
-import { CountBadge, usePendingResumeReviewCount } from "@/components/resume-review-badge";
+import { ResumeReviewMenuItem } from "@/components/resume-review-badge";
 
 // The header's primary navigation. Adding a destination is one line here; the
 // hover underline and the active-route block come with NavTabs.
@@ -54,7 +53,6 @@ export function AppNavbar({ tabs = true }: { tabs?: boolean } = {}) {
   const { isExec, isBoardOrExec } = useRoleSim();
   const [member, setMember] = useState<MemberInfo | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
-  const pendingReviews = usePendingResumeReviewCount();
 
   useEffect(() => {
     const supabase = createClient();
@@ -144,13 +142,7 @@ export function AppNavbar({ tabs = true }: { tabs?: boolean } = {}) {
                   <ClipboardCheck />
                   Attendance
                 </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => router.push("/resume-review")}>
-                  <span className="relative flex shrink-0">
-                    <FileText className="size-4" />
-                    <CountBadge count={pendingReviews} className="-top-2 -left-2" />
-                  </span>
-                  Resume Review
-                </DropdownMenuItem>
+                <ResumeReviewMenuItem onSelect={() => router.push("/resume-review")} />
                 {isBoardOrExec && (
                   <DropdownMenuItem onSelect={() => router.push("/manager")}>
                     <Inbox />

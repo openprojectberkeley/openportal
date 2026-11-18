@@ -310,6 +310,14 @@ export function ProjectsPanel({ members }: Props) {
   };
 
   const removeMember = (project: Project, member: ProjectMember) => {
+    ask({
+      title: `Remove ${member.name} from ${project.name}?`,
+      confirmLabel: "Remove",
+      destructive: true,
+      run: () => applyRemoveMember(project, member),
+    });
+  };
+  const applyRemoveMember = (project: Project, member: ProjectMember) => {
     const supabase = createClient();
     mutate(
       "member",

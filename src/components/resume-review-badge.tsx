@@ -3,11 +3,18 @@
 import { createClient } from "@/lib/supabase/client";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import { FileText } from "lucide-react";
+import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { useRoleSim } from "@/components/role-simulation-provider";
 
 // Pending resume reviews for people who can review them (exec). Null for
 // everyone else, so callers render nothing. Refetches on navigation so the
 // navbar's count drops after working the queue.
+//
+// usePathname() is uncached route data. Under cacheComponents it suspends the
+// prerender of any route with a fallback param (e.g. /coffee-chat/book/[id])
+// unless this hook sits inside Suspense — or, for the navbar, only mounts
+// after the client has a member, which the shell never does.
 export function usePendingResumeReviewCount(): number | null {
   const { isExec } = useRoleSim();
   const pathname = usePathname();
@@ -32,6 +39,21 @@ export function usePendingResumeReviewCount(): number | null {
   }, [isExec, pathname]);
 
   return count;
+}
+
+// Navbar entry. Owns the pathname read so AppNavbar's shell can prerender
+// without it: the menu only mounts once a member is loaded on the client.
+export function ResumeReviewMenuItem({ onSelect }: { onSelect: () => void }) {
+  const pendingReviews = usePendingResumeReviewCount();
+  return (
+    <DropdownMenuItem onSelect={onSelect}>
+      <span className="relative flex shrink-0">
+        <FileText className="size-4" />
+        <CountBadge count={pendingReviews} className="-top-2 -left-2" />
+      </span>
+      Resume Review
+    </DropdownMenuItem>
+  );
 }
 
 // Red count bubble, same look as the notification bell's. Position it with

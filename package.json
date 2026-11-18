@@ -1,6 +1,8 @@
 {
   "private": true,
   "scripts": {
+    "predev": "node scripts/copy-pdfjs-assets.mjs",
+    "prebuild": "node scripts/copy-pdfjs-assets.mjs",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
@@ -35,6 +37,7 @@
     "react-dom": "^19.0.0",
     "react-easy-crop": "^6.2.3",
     "react-markdown": "^10.1.0",
+    "react-pdf": "11.1.0",
     "remark-gfm": "^4.0.1",
     "sonner": "^2.0.8",
     "tailwind-merge": "^3.3.0"

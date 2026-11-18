@@ -104,7 +104,7 @@ export function PortalMembersModal({ portalId, open, onOpenChange, canEdit }: Pr
     });
   };
 
-  const removeMember = (row: MemberRow) => {
+  const applyRemoveMember = (row: MemberRow) => {
     const supabase = createClient();
     void optimistic({
       label: "member",
@@ -123,6 +123,14 @@ export function PortalMembersModal({ portalId, open, onOpenChange, canEdit }: Pr
   // Access changes ask first (DESIGN.md), then apply optimistically.
   const { ask, dialog: confirmDialog } = useConfirm();
   const [query, setQuery] = useState("");
+  const removeMember = (row: MemberRow) => {
+    ask({
+      title: `Remove ${row.name} from this ${row.managed && projectId ? "project" : "portal"}?`,
+      confirmLabel: "Remove",
+      destructive: true,
+      run: () => applyRemoveMember(row),
+    });
+  };
   const toggleAdmin = (row: MemberRow) => {
     const next = !row.is_admin;
     ask({
@@ -192,8 +200,9 @@ export function PortalMembersModal({ portalId, open, onOpenChange, canEdit }: Pr
             className="h-8 flex-shrink-0 text-sm"
           />
         )}
-        {/* Scrollable roster fills the remaining height; overflow scrolls here. */}
-        <ScrollArea className="flex-1 min-h-0">
+        {/* Scrollable roster fills the remaining height; overflow scrolls here.
+            The right padding keeps the overlay scrollbar off the remove buttons. */}
+        <ScrollArea className="flex-1 min-h-0" viewportClassName="pr-3">
           {loading ? (
             <RosterRowsSkeleton rows={9} crownSize={16} className="flex flex-col gap-1 pt-1.5" />
           ) : shownRows.length === 0 ? (

@@ -3,12 +3,23 @@
 import { createClient } from "@/lib/supabase/client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { FileText, Upload, Clock, Check, X, Inbox } from "lucide-react";
+import { Upload, Clock, Check, X, Inbox } from "lucide-react";
 import { PersonName } from "@/components/person-profile-provider";
 import { useRoleSim } from "@/components/role-simulation-provider";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { uploadResume, resumeSignedUrl, MAX_RESUME_BYTES } from "@/lib/resume-upload";
+import {
+  isPdfPath,
+  MAX_RESUME_BYTES,
+  RESUME_BUCKET,
+  resumeReviewFile,
+  uploadResume,
+  type ResumeFile,
+} from "@/lib/resume-upload";
+import { UPLOAD_A_PDF } from "@/lib/resume-review-request";
+import { ResumeFileActions } from "@/components/resume-review/resume-file-actions";
+import { ResumeReviewModal } from "@/components/resume-review/resume-review-modal";
+import type { ResumeReviewContext } from "@/components/resume-review/resume-review-workspace";
 import { optimistic } from "@/lib/optimistic";
 import { BackLink } from "@/components/back-link";
 import { InfoHint } from "@/components/ui/info-hint";
@@ -22,6 +33,8 @@ type Review = {
   feedback: string | null;
   resume_path: string;
   resume_filename: string | null;
+  file_path: string | null;
+  noteCount: number;
   reviewer_id: string | null;
   reviewerName: string | null;
   created_at: string;
@@ -42,6 +55,12 @@ function formatDateOnly(ymd: string): string {
   return new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
+async function requestApi(url: string, init: RequestInit) {
+  const response = await fetch(url, init);
+  const body = (await response.json().catch(() => null)) as { error?: string } | null;
+  return response.ok ? { data: body } : { error: { message: body?.error ?? "Something went wrong." } };
+}
+
 export default function ResumeReviewPage() {
   const { isExec } = useRoleSim();
   const pendingReviews = usePendingResumeReviewCount();
@@ -53,6 +72,7 @@ export default function ResumeReviewPage() {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cancelTarget, setCancelTarget] = useState<Review | null>(null);
+  const [viewing, setViewing] = useState<{ file: ResumeFile; review?: ResumeReviewContext } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -65,7 +85,7 @@ export default function ResumeReviewPage() {
       supabase.from("members").select("resume_path, resume_filename").eq("user_id", user.id).maybeSingle(),
       supabase
         .from("resume_reviews")
-        .select("id, status, target_roles, needed_by, feedback, resume_path, resume_filename, reviewer_id, created_at, completed_at")
+        .select("id, status, target_roles, needed_by, feedback, resume_path, resume_filename, file_path, reviewer_id, created_at, completed_at, resume_review_notes(count)")
         .eq("requester_id", user.id)
         .order("created_at", { ascending: false }),
     ]);
@@ -92,6 +112,7 @@ export default function ResumeReviewPage() {
     setReviews(
       (rows ?? []).map((r) => ({
         ...r,
+        noteCount: (r.resume_review_notes as unknown as { count: number }[])[0]?.count ?? 0,
         reviewerName: r.reviewer_id ? names.get(r.reviewer_id) ?? null : null,
       })) as Review[],
     );
@@ -105,6 +126,10 @@ export default function ResumeReviewPage() {
   const onFileSelected = async (file: File) => {
     const supabase = createClient();
     if (!userId) return;
+    if (!isPdfPath(file.name)) {
+      setError(UPLOAD_A_PDF);
+      return;
+    }
     setUploading(true);
     setError(null);
     try {
@@ -121,17 +146,19 @@ export default function ResumeReviewPage() {
     }
   };
 
-  const openResume = async (path: string) => {
-    const url = await resumeSignedUrl(createClient(), path);
-    if (url) window.open(url, "_blank", "noopener,noreferrer");
-    else setError("Couldn't open that resume.");
-  };
+  const openable = (file: ResumeFile, review?: ResumeReviewContext) =>
+    isPdfPath(file.path) ? () => setViewing({ file, review }) : undefined;
 
   // The request appears in the list straight away under a temporary id; the
   // insert confirms in the background and the reload swaps in the real row.
   // A duplicate (23505) or any failure removes it and restores the form.
   const submit = () => {
     if (!userId || !resume) return;
+    // A Word resume can still be on file from the membership application.
+    if (!isPdfPath(resume.path)) {
+      setError(UPLOAD_A_PDF);
+      return;
+    }
     setError(null);
     const roles = targetRoles.trim() || null;
     const by = neededBy || null;
@@ -144,6 +171,8 @@ export default function ResumeReviewPage() {
       feedback: null,
       resume_path: resume.path,
       resume_filename: resume.filename,
+      file_path: null,
+      noteCount: 0,
       reviewer_id: null,
       reviewerName: null,
       created_at: new Date().toISOString(),
@@ -162,23 +191,15 @@ export default function ResumeReviewPage() {
         setTargetRoles(roles ?? "");
         setNeededBy(by ?? "");
       },
-      // The resume path is snapshotted here on purpose: re-uploading later must
-      // not silently re-point feedback that was written about this version.
+      // The server freezes a PDF copy, so later uploads can't change this review.
       commit: () =>
-        createClient().from("resume_reviews").insert({
-          requester_id: userId,
-          resume_path: resume.path,
-          resume_filename: resume.filename,
-          target_roles: roles,
-          needed_by: by,
+        requestApi("/api/resume-reviews", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ targetRoles: roles, neededBy: by }),
         }),
       onCommitted: () => void load(),
-      onFailed: (message) =>
-        setError(
-          /duplicate|23505|unique/i.test(message)
-            ? "You already have a review request waiting."
-            : "Couldn't submit that request.",
-        ),
+      onFailed: (message) => setError(message),
     });
   };
 
@@ -193,9 +214,7 @@ export default function ResumeReviewPage() {
       key: `resume-review:${target.id}`,
       apply: () => setStatus("cancelled"),
       rollback: () => setStatus(target.status),
-      commit: () =>
-        createClient().from("resume_reviews").update({ status: "cancelled" }).eq("id", target.id).select("id"),
-      requireRows: true,
+      commit: () => requestApi(`/api/resume-reviews/${target.id}`, { method: "DELETE" }),
     });
   };
 
@@ -266,14 +285,10 @@ export default function ResumeReviewPage() {
             </div>
           )}
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => openResume(pending.resume_path)}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-foreground/[0.06] px-2.5 py-1.5 text-xs font-medium transition-colors hover:bg-foreground/[0.1]"
-            >
-              <FileText size={14} />
-              {pending.resume_filename ?? "Resume"}
-            </button>
+            <ResumeFileActions
+              file={resumeReviewFile(pending)}
+              onOpen={openable(resumeReviewFile(pending))}
+            />
             <button
               type="button"
               onClick={() => setCancelTarget(pending)}
@@ -290,14 +305,10 @@ export default function ResumeReviewPage() {
             {reviews === null ? (
               <Skeleton aria-hidden className="h-7 w-36 rounded-lg" />
             ) : resume ? (
-              <button
-                type="button"
-                onClick={() => openResume(resume.path)}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-foreground/[0.06] px-2.5 py-1.5 text-xs font-medium transition-colors hover:bg-foreground/[0.1]"
-              >
-                <FileText size={14} />
-                {resume.filename}
-              </button>
+              <ResumeFileActions
+                file={{ bucket: RESUME_BUCKET, ...resume }}
+                onOpen={openable({ bucket: RESUME_BUCKET, ...resume })}
+              />
             ) : null}
             <button
               type="button"
@@ -311,7 +322,7 @@ export default function ResumeReviewPage() {
             <input
               ref={fileInput}
               type="file"
-              accept=".pdf,.doc,.docx"
+              accept=".pdf,application/pdf"
               className="hidden"
               onChange={(e) => {
                 const file = e.target.files?.[0];
@@ -320,7 +331,7 @@ export default function ResumeReviewPage() {
               }}
             />
             <InfoHint label="File requirements">
-              PDF or Word, max {Math.round(MAX_RESUME_BYTES / 1024)} KB.
+              PDF, max {Math.round(MAX_RESUME_BYTES / 1024)} KB.
             </InfoHint>
           </div>
 
@@ -402,18 +413,35 @@ export default function ResumeReviewPage() {
                   {r.feedback}
                 </p>
               )}
-              <button
-                type="button"
-                onClick={() => openResume(r.resume_path)}
-                className="self-start inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
-              >
-                <FileText size={14} />
-                {r.resume_filename ?? "Resume"} (as reviewed)
-              </button>
+              {r.status === "completed" && r.noteCount > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  {r.noteCount} {r.noteCount === 1 ? "note" : "notes"} on your resume
+                </p>
+              )}
+              {r.status === "completed" && (
+                <ResumeFileActions
+                  file={resumeReviewFile(r)}
+                  onOpen={openable(resumeReviewFile(r), {
+                    id: r.id,
+                    status: r.status,
+                    requesterName: null,
+                    targetRoles: r.target_roles,
+                    neededBy: r.needed_by ? formatDateOnly(r.needed_by) : null,
+                    feedback: r.feedback,
+                    reviewerName: r.reviewerName,
+                  })}
+                />
+              )}
             </div>
           ))}
         </div>
       )}
+
+      <ResumeReviewModal
+        file={viewing?.file ?? null}
+        review={viewing?.review}
+        onOpenChange={(o) => { if (!o) setViewing(null); }}
+      />
 
       <ConfirmDialog
         open={!!cancelTarget}
