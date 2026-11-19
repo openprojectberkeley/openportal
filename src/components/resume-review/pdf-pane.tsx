@@ -6,6 +6,8 @@ import "react-pdf/dist/Page/TextLayer.css";
 import { Minus, Plus } from "lucide-react";
 import { ScrollArea } from "@/components/overlay-scrollbar";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ResumePagePlaceholder } from "@/components/resume-review/page-placeholder";
+import { cn } from "@/lib/utils";
 
 // react-pdf requires the worker to be set in the module that renders it.
 pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
@@ -40,6 +42,11 @@ export function PdfPane({
   const [fitWidth, setFitWidth] = useState(0);
   const [pageCount, setPageCount] = useState(0);
   const [zoomIndex, setZoomIndex] = useState(1);
+  // The pages stay invisible until page 1 is painted, then fade in over the
+  // placeholder, so loading shows one steady shape instead of a skeleton, a
+  // blank white sheet and then the resume.
+  const [painted, setPainted] = useState(false);
+  const [settled, setSettled] = useState(false);
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -56,12 +63,27 @@ export function PdfPane({
 
   return (
     <div className="relative h-full min-h-0 bg-foreground/[0.04]">
+      {/* Behind the scroll area, and gone once the pages have faded in, so it
+          never shows through while scrolling or zooming. */}
+      {!settled && (
+        <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
+          <ResumePagePlaceholder />
+        </div>
+      )}
       <ScrollArea ref={viewportRef} orientation="both" className="h-full">
         {fitWidth > 0 && (
+          <div
+            className={cn("transition-opacity duration-2 ease-out-quart", painted ? "opacity-100" : "opacity-0")}
+            onTransitionEnd={(e) => { if (e.target === e.currentTarget) setSettled(true); }}
+          >
+          {/* suspense={false}: react-pdf 11 suspends by default, and with no
+              boundary of ours React hid the whole route, modal included, on
+              every load step. That was the flicker on open. */}
           <Document
             file={blob}
             options={PDF_OPTIONS}
-            loading={<div className="flex w-max min-w-full justify-center p-4"><PagePlaceholder width={width} /></div>}
+            suspense={false}
+            loading={null}
             error={null}
             noData={null}
             onLoadSuccess={({ numPages }) => setPageCount(numPages)}
@@ -75,16 +97,20 @@ export function PdfPane({
                 key={i + 1}
                 pageNumber={i + 1}
                 width={width}
+                suspense={false}
                 renderAnnotationLayer={false}
                 renderTextLayer
                 loading={<PagePlaceholder width={width} />}
                 error={null}
+                onRenderSuccess={i === 0 ? () => setPainted(true) : undefined}
+                onRenderError={i === 0 ? onFailed : undefined}
                 className="relative bg-white shadow-overlay"
               >
                 {renderPageOverlay?.(i + 1)}
               </Page>
             ))}
           </Document>
+          </div>
         )}
       </ScrollArea>
 

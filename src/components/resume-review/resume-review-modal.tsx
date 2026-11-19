@@ -1,25 +1,48 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { useEffect, useMemo } from "react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import { Skeleton } from "@/components/ui/skeleton";
+import { ResumePagePlaceholder } from "@/components/resume-review/page-placeholder";
 import type { ResumeFile } from "@/lib/resume-upload";
 import { ResumeDownloadButton } from "@/components/resume-review/resume-file-actions";
 import type { ResumeReviewContext } from "@/components/resume-review/resume-review-workspace";
 
 function WorkspaceSkeleton() {
   return (
-    <div className="flex min-h-0 flex-1 items-start justify-center bg-foreground/[0.04] p-4">
-      <Skeleton className="aspect-[8.5/11] h-full max-w-full rounded-none" />
+    <div className="min-h-0 flex-1 overflow-hidden bg-foreground/[0.04]">
+      <ResumePagePlaceholder />
     </div>
   );
 }
 
-// Loaded on open so the PDF library never weighs down the pages behind it.
-const ResumeReviewWorkspace = dynamic(
-  () => import("@/components/resume-review/resume-review-workspace").then((m) => m.ResumeReviewWorkspace),
-  { ssr: false, loading: WorkspaceSkeleton },
-);
+// Split out so the PDF library never weighs down the pages behind the modal.
+type Workspace = typeof import("@/components/resume-review/resume-review-workspace").ResumeReviewWorkspace;
+let preloaded: Workspace | null = null;
+const loadWorkspace = () =>
+  import("@/components/resume-review/resume-review-workspace").then((m) => {
+    preloaded = m.ResumeReviewWorkspace;
+    return m;
+  });
+// Used only if the modal opens before the preload below has finished.
+const DynamicWorkspace = dynamic(() => loadWorkspace().then((m) => m.ResumeReviewWorkspace), {
+  ssr: false,
+  loading: WorkspaceSkeleton,
+});
+
+// Fetched once the page is idle rather than on click. Loading it on click froze
+// the main thread mid open-animation, so the modal skipped frames and popped in.
+function usePreloadWorkspace() {
+  useEffect(() => {
+    const preload = () => void loadWorkspace();
+    if ("requestIdleCallback" in window) {
+      const id = window.requestIdleCallback(preload, { timeout: 3000 });
+      return () => window.cancelIdleCallback(id);
+    }
+    const id = setTimeout(preload, 1500);
+    return () => clearTimeout(id);
+  }, []);
+}
 
 // An unfinished note shouldn't vanish because of Escape or a stray click.
 const keepOpenWhileWriting = (event: Event) => {
@@ -46,6 +69,14 @@ export function ResumeReviewModal({
   /** Runs when feedback is sent, so the page behind can refresh. */
   onChanged?: () => void;
 }) {
+  usePreloadWorkspace();
+  const fileKey = file ? `${file.bucket}/${file.path}` : null;
+  // Chosen once per file. next/dynamic shows its fallback for a frame even when
+  // the module is already loaded, and that fallback has no notes column, so the
+  // layout jumped. Switching mid-view would remount and lose an unsaved note.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const ResumeReviewWorkspace = useMemo(() => preloaded ?? DynamicWorkspace, [fileKey]);
+
   return (
     <Dialog open={file !== null} onOpenChange={onOpenChange}>
       <DialogContent
@@ -53,7 +84,7 @@ export function ResumeReviewModal({
         onOpenAutoFocus={focusDialog}
         onEscapeKeyDown={keepOpenWhileWriting}
         onInteractOutside={keepOpenWhileWriting}
-        className="flex h-[calc(100svh-1rem)] max-h-none w-[calc(100vw-1rem)] max-w-none flex-col gap-0 overflow-hidden p-0 outline-none"
+        className="flex h-[calc(100svh-1rem)] max-h-none w-[calc(100vw-1rem)] max-w-none flex-col gap-0 overflow-hidden p-0 outline-none data-[state=open]:!zoom-in-[.98] data-[state=closed]:!zoom-out-[.98]"
       >
         {file && (
           <>
@@ -64,7 +95,7 @@ export function ResumeReviewModal({
               <ResumeDownloadButton file={file} />
             </div>
             <ResumeReviewWorkspace
-              key={`${file.bucket}/${file.path}`}
+              key={fileKey}
               file={file}
               review={review}
               onSent={() => {

@@ -9,6 +9,7 @@ import { useRoleSim } from "@/components/role-simulation-provider";
 import { NoteLayer } from "@/components/resume-review/note-layer";
 import { NotesPanel } from "@/components/resume-review/notes-panel";
 import { PdfPane } from "@/components/resume-review/pdf-pane";
+import { ResumePagePlaceholder } from "@/components/resume-review/page-placeholder";
 
 export type ResumeReviewContext = {
   id: string;
@@ -100,7 +101,9 @@ export function ResumeReviewWorkspace({
             }
           />
         ) : (
-          <div className="h-full bg-foreground/[0.04]" />
+          <div className="h-full overflow-hidden bg-foreground/[0.04]">
+            <ResumePagePlaceholder />
+          </div>
         )}
       </div>
 
