@@ -226,6 +226,10 @@ export function PortalAttendanceModal({
   const [roster, setRoster] = useState<RosterRow[]>([]);
   const [attendance, setAttendance] = useState<AttendanceMap>({});
   const [loading, setLoading] = useState(true);
+  // A failed load shows an error with Retry instead of a sheet of blank cells
+  // (a timed-out attendance read used to look exactly like "nothing marked").
+  const [loadError, setLoadError] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
 
   // Club events pinned into this portal's sheet (0102). Portal sheet only.
   const [importedIds, setImportedIds] = useState<Set<string>>(new Set());
@@ -249,17 +253,22 @@ export function PortalAttendanceModal({
     if (!open) return;
     const supabase = createClient();
     setLoading(true);
+    setLoadError(false);
     setProjectFilter("");
     setMemberQuery("");
     setImportOpen(false);
 
     (async () => {
+      const fail = () => {
+        setLoadError(true);
+        setLoading(false);
+      };
       const { data: { user } } = await supabase.auth.getUser();
 
       // Admins get a chronological grid (oldest → newest across columns);
       // members get a most-recent-first list.
       const eventQuery = supabase.from("portal_events").select(EVENT_FORM_SELECT);
-      const [{ data: eventRows }, { data: importRows }] = await Promise.all([
+      const [{ data: eventRows, error: eventError }, { data: importRows, error: importError }] = await Promise.all([
         (portalId ? eventQuery.eq("portal_id", portalId) : eventQuery.is("portal_id", null))
           // Only events that opted in — socials and info sessions would otherwise
           // pad the grid with columns nobody ever marks.
@@ -267,19 +276,21 @@ export function PortalAttendanceModal({
           .is("cancelled_at", null),
         portalId
           ? supabase.from("portal_imported_events").select("event_id").eq("portal_id", portalId)
-          : Promise.resolve({ data: [] as { event_id: string }[] }),
+          : Promise.resolve({ data: [] as { event_id: string }[], error: null }),
       ]);
+      if (eventError || importError) return fail();
 
       // Imported club events join the portal's own. They were picked by hand,
       // so they show regardless of attendance_enabled.
       const imported = new Set(((importRows ?? []) as { event_id: string }[]).map((r) => r.event_id));
-      const { data: importedEventRows } = imported.size
+      const { data: importedEventRows, error: importedEventError } = imported.size
         ? await supabase
             .from("portal_events")
             .select(EVENT_FORM_SELECT)
             .in("id", [...imported])
             .is("cancelled_at", null)
-        : { data: [] as unknown[] };
+        : { data: [] as unknown[], error: null };
+      if (importedEventError) return fail();
 
       const evs = [...(eventRows ?? []), ...(importedEventRows ?? [])] as unknown as EventFormValue[];
       evs.sort(canManage ? byStart : (a, b) => byStart(b, a));
@@ -296,7 +307,7 @@ export function PortalAttendanceModal({
       };
       let projectOptions: ProjectOption[] = [];
       let projectMembers: ProjectMemberRow[] = [];
-      let rosterPromise: PromiseLike<{ data: unknown[] | null }> = Promise.resolve({ data: [] });
+      let rosterPromise: PromiseLike<{ data: unknown[] | null; error: unknown }> = Promise.resolve({ data: [], error: null });
 
       if (canManage && portalId) {
         rosterPromise = supabase
@@ -335,6 +346,7 @@ export function PortalAttendanceModal({
         const seen = new Set<string>();
         rosterPromise = Promise.resolve({
           data: projectMembers.filter((r) => !seen.has(r.user_id) && seen.add(r.user_id)),
+          error: null,
         });
       }
 
@@ -357,12 +369,11 @@ export function PortalAttendanceModal({
             if (!canManage && user) q = q.eq("user_id", user.id);
             return q;
           })()
-        : Promise.resolve({ data: [] as unknown[] });
+        : Promise.resolve({ data: [] as unknown[], error: null });
 
-      const [{ data: rosterRows }, { data: attendanceRows }] = await Promise.all([
-        rosterPromise,
-        attendancePromise,
-      ]);
+      const [{ data: rosterRows, error: rosterError }, { data: attendanceRows, error: attendanceError }] =
+        await Promise.all([rosterPromise, attendancePromise]);
+      if (rosterError || attendanceError) return fail();
 
       setEvents(evs);
 
@@ -394,7 +405,7 @@ export function PortalAttendanceModal({
       setAttendance(map);
       setLoading(false);
     })();
-  }, [open, portalId, canManage, fullAccess]);
+  }, [open, portalId, canManage, fullAccess, reloadKey]);
 
   const [memberQuery, setMemberQuery] = useState("");
   const visibleRoster = useMemo(() => {
@@ -774,6 +785,13 @@ export function PortalAttendanceModal({
               <AttendanceListSkeleton />
             </ScrollArea>
           )
+        ) : loadError ? (
+          <div className="flex flex-col items-center justify-center gap-3 py-8">
+            <p className="text-sm text-muted-foreground">Couldn&apos;t load attendance.</p>
+            <Button size="sm" variant="outline" onClick={() => setReloadKey((k) => k + 1)}>
+              Retry
+            </Button>
+          </div>
         ) : events.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-3 py-8">
             <p className="text-sm text-muted-foreground">
