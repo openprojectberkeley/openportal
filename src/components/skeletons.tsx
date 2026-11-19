@@ -449,7 +449,7 @@ export function AdminPageSkeleton() {
   return (
     <div className="p-8 w-full max-w-5xl mx-auto">
       <h1 className="text-2xl font-bold tracking-tight mb-6">Admin</h1>
-      <TabStripSkeleton className="mb-6" labels={["Members", "Projects", "Families", "Portals", "Announcements"]} />
+      <TabStripSkeleton className="mb-6" labels={["Members", "Projects", "Families", "Portals", "Announcements", "Attendance"]} />
       <MembersToolbarSkeleton />
       <PanelRowsSkeleton rows={8} extra actions={false} nameBox="h-6" />
     </div>

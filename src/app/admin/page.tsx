@@ -28,8 +28,9 @@ import { TabStrip } from "@/components/ui/tab-strip";
 import { useConfirm } from "@/components/ui/use-confirm";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SocialLink } from "@/components/social-link";
+import { AttendanceAnalyticsPanel } from "@/components/attendance-analytics-panel";
 
-type Tab = "members" | "projects" | "families" | "portals" | "announcements";
+type Tab = "members" | "projects" | "families" | "portals" | "announcements" | "attendance";
 
 type Role = { id: string; role_name: string };
 
@@ -336,9 +337,11 @@ export default function AdminPage() {
       <h1 className="text-2xl font-bold tracking-tight mb-6">Admin</h1>
 
       {confirmDialog}
+      {/* Scrolls sideways on phones instead of widening the page. */}
+      <div className="mb-6 overflow-x-auto pb-px">
       <TabStrip
         aria-label="Admin sections"
-        className="mb-6"
+        className="min-w-max"
         value={tab}
         onChange={setTab}
         tabs={[
@@ -347,10 +350,14 @@ export default function AdminPage() {
           { value: "families", label: "Families", count: familyCount },
           { value: "portals", label: "Portals", count: portalCount },
           { value: "announcements", label: "Announcements", count: announcementCount },
+          { value: "attendance", label: "Attendance" },
         ]}
       />
+      </div>
 
-      {tab === "projects" ? (
+      {tab === "attendance" ? (
+        <AttendanceAnalyticsPanel />
+      ) : tab === "projects" ? (
         <ProjectsPanel members={memberOptions} />
       ) : tab === "families" ? (
         <FamiliesPanel />
